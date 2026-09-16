@@ -1,3 +1,13 @@
+node_modules
+
+# PureScript
+.spago
+output
+output-*
+.purs-repl
+.psc-ide-port
+.spec-results
+# Misc
 _draft
 .vscode
 

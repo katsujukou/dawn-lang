@@ -1,0 +1,14 @@
+package:
+  name: cli
+  description: The Dawn Compiler Toolchain CLI
+  dependencies:
+    - effect
+    - console
+    - prelude
+  run:
+    main: Dawn.CLI
+  test:
+    main: Test.Dawn.CLI
+    dependencies:
+      - spec
+      - spec-node

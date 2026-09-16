@@ -1,0 +1,12 @@
+package:
+  name: compiler
+  description: The Dawn compiler lib
+  dependencies:
+    - effect
+    - console
+    - prelude
+  test:
+    main: Test.Dawn.Compiler
+    dependencies:
+      - spec
+      - spec-node
