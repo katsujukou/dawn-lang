@@ -48,7 +48,7 @@ nonrec Main.result : Int
 Points to observe.
 
 - **No type class appears.** `+` is `Prim.intAdd : Int -> Int -> Int`. When `Semiring` arrives, this position holds `select add` applied to a dictionary instead, and the shape of Core is unchanged.
-- Every effect row is `()`. Since `switchCtor` exhausts the constructors there is no `fail`, and no `partial` effect.
+- Every effect row is `()`. Since `switchCtor` exhausts the constructors there is no `fail`, and no `Partial` effect.
 - The right-hand side of the `rec` group is a `λ`, satisfying guardedness.
 - Type abstraction and application appear in `Main.Cons [Int]`. CoreFn has no counterpart.
 - The decision tree makes the order explicit: dispatch on the tag, bind the fields, then the body. CoreFn's `Case` does not carry that order.
@@ -148,7 +148,7 @@ nonrec Example.tick
     Unit -{ ( State Int | e ) }-> Int
   = Λ (e : Row Effect). Λ (_ : State ∉ e).
       λ (_ : Unit).
-        let n : Int  = perform State.get [] unit in
+        let n : Int  = perform State.get [] Prim.Unit in
         let _ : Unit = perform State.put [] ( Prim.intAdd n 1 ) in
         n
 ```
@@ -156,15 +156,19 @@ nonrec Example.tick
 A handler for `Partial`, interpreting abortion into `Maybe`:
 
 ```text
+data Maybe (a : Type) = Nothing | Just a
+  -- Example.Nothing : forall (a : Type). Maybe a            tag 0, arity 0
+  -- Example.Just    : forall (a : Type). a -> Maybe a       tag 1, arity 1
+
 nonrec Example.toMaybe
   : forall (e : Row Effect). Partial ∉ e => forall (a : Type).
     ( Unit -{ ( Partial | e ) }-> a ) -{e}-> Maybe a
   = Λ (e : Row Effect). Λ (_ : Partial ∉ e). Λ (a : Type).
       λ (thunk : Unit -{ ( Partial | e ) }-> a).
-        handle ( thunk unit ) with
-          { return (x : a) -> Prim.Just [a] x
+        handle ( thunk Prim.Unit ) with
+          { return (x : a) -> Example.Just [a] x
           ; Partial.abort [b] (_ : Unit, k : b -{e}-> Maybe a) ->
-              Prim.Nothing [a]
+              Example.Nothing [a]
           }
 ```
 

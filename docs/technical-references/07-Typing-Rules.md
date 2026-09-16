@@ -63,6 +63,9 @@ The distinction is also the unit of **separate compilation**. `Σ` is what a mod
 ## Basic rules
 
 ```text
+  ──────────────────────────
+  Γ;Δ ⊢ c : litType(c) ! ρ
+
   (x : τ) ∈ Γ       (M.x : forall k̄. σ) ∈ Σ   Γ ⊢ κ̄' qkind   |κ̄'| = |k̄|
   ─────────────────  ─────────────────────────────────────────────────────
   Γ;Δ ⊢ x : τ ! ρ    Γ;Δ ⊢ M.x [[κ̄']] : σ[k̄ := κ̄'] ! ρ
@@ -105,6 +108,10 @@ The distinction is also the unit of **separate compilation**. `Σ` is what a mod
   ────────────────────────────────   ← conversion is by equality; there is no subtyping
   Γ;Δ ⊢ e : τ2 ! ρ
 ```
+
+`litType` assigns each literal its primitive type: an integer literal has type `Int`, a floating-point literal `Number`, a string literal `String`, a character literal `Char`, and `true` and `false` have type `Boolean`. A literal produces no effect, so it is typeable under any ambient row.
+
+**`Unit` is not a literal.** `Prim` declares `data Unit = Unit`, so `Prim.Unit` is an ordinary data constructor of arity 0 and one `switchCtor` branch exhausts it. As a literal it would fall under `switchLit`, where a default is mandatory because literals cannot be exhausted. Surface syntax writes the value `()`; Core writes `Prim.Unit`.
 
 The rules for global names instantiate a kind scheme with `κ̄'`, which is **pure substitution**: `κ̄'` is written in the term, so the checker neither guesses nor searches for it. It verifies only that the arity matches and that each `κ'` is a quantifiable kind. Where a global name has an empty scheme, `[[]]` is omitted and the rule reads as `(M.x : σ) ∈ Σ`, which is the case for most of Core.
 
@@ -160,7 +167,7 @@ Prim.merge
 ## Effects
 
 ```text
-  ( E τ̄ ) ∈ nf(ρ)
+  nf(ρ) = ⟨ F ; T ⟩      F(E) = τ̄
   ( op : forall (b̄ : κ̄'). σ ->* τ ) ∈ Σ(E)      E's type parameters are ā
   Γ ⊢ σ̄ : κ̄'      Γ;Δ ⊢ e : σ[ā := τ̄][b̄ := σ̄] ! ρ
   ────────────────────────────────────────────────────

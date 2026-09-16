@@ -72,6 +72,12 @@ Making it uniform requires either indexing `IO` by an effect row, or giving `IO.
 
 **Masking and scoped labels for effect rows.** Effect rows are sharp (D4), so Koka's `mask<exn>` is not expressible. Named instances, below, would cover many of the uses, but temporarily hiding one occurrence of an effect may still require something separate.
 
+Forwarding belongs to the same gap. A clause cannot pass its operation on to an outer handler of the same effect, since `handle` removes `E` from the row and the clause body is typed without it ([Effects](05-Effects.md)). What is needed is a semantics that distinguishes the current handler for `E` from an outer one, and a second occurrence of the key is only one way to obtain it. Three candidates are available.
+
+- **Masking, or scoped duplicates.** The distinction is carried by the row, as in Koka
+- **An explicit `forward`.** The distinction is carried by a term that skips the current handler
+- **A partial handler that keeps `E`.** Its rule takes `( E τ̄ | ρ )` to `( E τ̄ | ρ )`, so one `E` remains in the row and the operations the clauses do not name travel outwards. A single key suffices
+
 **Multiple instances of one effect constructor.** By D16 an effect row's key is the constructor name, so `( Exn String, Exn Int )` and two independent `State`s are not expressible. The workaround is to declare separate effects.
 
 Making the key the whole element type would remove the limitation but is not available: whether `( State ?a, State Int )` has one element or two would depend on solving `?a`, so the point at which sharpness can be decided would depend on the progress of inference — the very property D4 exists to eliminate.

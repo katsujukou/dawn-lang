@@ -47,7 +47,7 @@ Conversely, some things CoreFn has do not appear in Dawn's Core.
 | `Bind = NonRec \| Rec` | `nonrec` / `rec` | The same |
 | (absent) | `letjoin` / `jump` | New. Body sharing in decision trees, and the bridge to Mid IR |
 | (absent) | `perform` / `handle` / `openEff` | New |
-| (absent) | `fail`, derived | New. Non-exhaustiveness surfaced as a `partial` effect |
+| (absent) | `fail`, derived | New. Non-exhaustiveness surfaced as a `Partial` effect |
 
 ## Types and kinds
 

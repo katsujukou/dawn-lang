@@ -48,10 +48,44 @@ q ::= k                              quantifiable kinds, a subset of κ
 
 Kind equality is syntactic, up to α-equivalence. There is no computation at the kind level.
 
+### Well-formedness
+
+Two judgements decide the grammar above. `Γ ⊢ κ kind` holds of a kind the checker may work with; `Γ ⊢ κ qkind` holds of the subset that may be quantified over.
+
+```text
+  k ∈ Γ
+  ─────────────       ─────────────────       ───────────────────
+  Γ ⊢ k kind          Γ ⊢ Type kind           Γ ⊢ Effect kind
+
+  ───────────────────       ─────────────────────
+  Γ ⊢ Row Type kind         Γ ⊢ Row Effect kind
+
+  Γ ⊢ κ1 kind    Γ ⊢ κ2 kind
+  ──────────────────────────
+  Γ ⊢ κ1 -> κ2 kind
+```
+
+`Row` has no rule of its own. `Row Type` and `Row Effect` are the only two, which is what confines `Row` to row element kinds.
+
+```text
+  k ∈ Γ
+  ──────────────       ──────────────────       ────────────────────
+  Γ ⊢ k qkind          Γ ⊢ Type qkind           Γ ⊢ Row Type qkind
+
+  ────────────────────       Γ ⊢ q1 qkind    Γ ⊢ q2 qkind
+  Γ ⊢ Row Effect qkind       ────────────────────────────
+                             Γ ⊢ q1 -> q2 qkind
+```
+
+`Effect` has no `qkind` rule, and that absence is D24. Every quantifiable kind is a kind, so `Γ ⊢ κ qkind` implies `Γ ⊢ κ kind`.
+
+A kind variable is quantifiable, and every `[[κ̄]]` requires `qkind` of what it supplies, so a kind variable stands only for a quantifiable kind.
+
 Representative kinds:
 
 ```text
 Int        : Type
+Unit       : Type
 List       : Type -> Type
 Record     : Row Type -> Type
 Variant    : Row Type -> Type
@@ -153,7 +187,7 @@ A function type is an application of the type constructor `Function`; Core has n
 τ1 -> τ2       ≡   Function τ1 () τ2        (a pure function)
 ```
 
-**The arrow is notation used in these documents and in surface syntax, not a Core name.** Core names are fully qualified, so the constructor is `Prim.Function`. All infix operators are surface aliases resolved to qualified names during name resolution; Core has no counterpart to PureScript's `TypeOp`. These documents write `Int`, `List`, `Record`, and `Function` without the `Prim.` prefix for readability.
+**The arrow is notation used in these documents and in surface syntax, not a Core name.** Core names are fully qualified, so the constructor is `Prim.Function`. All infix operators are surface aliases resolved to qualified names during name resolution; Core has no counterpart to PureScript's `TypeOp`. These documents write `Int`, `Unit`, `Record`, and `Function` without the `Prim.` prefix for readability.
 
 `Record ρ` and `Variant ρ` are likewise ordinary type constructor applications.
 

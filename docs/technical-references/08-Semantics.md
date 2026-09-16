@@ -436,7 +436,7 @@ Tl ::= []  |  letjoin j' (x̄ : τ̄) = e' in Tl
 **Application through `openEff`.** Discarding the coercion outright would not preserve typing. Consider a pure `f : Int -> Int` inside
 
 ```text
-let x : Int = (openEff [( E )] f) 0 in perform E.op unit
+let x : Int = (openEff [( E )] f) 0 in perform E.op Prim.Unit
 ```
 
 The whole term is typed at ambient row `( E )`, and the rule for `let` requires both its parts to share that row. Rewriting the bound expression to `f 0` would give it row `()`, which no longer matches the body, and no common ambient row exists. Widening the type of the function value is therefore replaced by widening the **ambient row of the resulting computation**, which `openEffC` records. Once that computation reaches a value, the coercion is discharged: a value is pure, so `openEffC [ρ] v → v` keeps both the type and the row.
@@ -524,7 +524,7 @@ Two things are visible in the second rule.
 
 `k_i` is an ordinary function value. Nothing in the rule restricts how often it may be applied, which is the sense in which the reference semantics is multi-shot (D18).
 
-`fail τ` reduces through this rule too, being derived notation for `perform Partial.abort [τ] unit`.
+`fail τ` reduces through this rule too, being derived notation for `perform Partial.abort [τ] Prim.Unit`.
 
 ## The runtime boundary
 

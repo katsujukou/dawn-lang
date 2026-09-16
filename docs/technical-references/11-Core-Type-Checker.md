@@ -23,7 +23,7 @@ The Core type checker is independent of the surface language, macros, elaborator
 
 ## What it does not verify
 
-- **Coverage of source patterns.** A tree that does not cover the original program merely carries a `partial` effect and is well typed
+- **Coverage of source patterns.** A tree that does not cover the original program merely carries a `Partial` effect and is well typed
 - **Termination.** A `letrec` may diverge
 - **The meaning of attributes**
 - **Hygiene**, which is complete by the time a term reaches Core

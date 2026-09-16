@@ -143,7 +143,7 @@ dt ::= leaf e
 - `switchCtor` is a single dispatch on a data type's tag. The branches are mutually exclusive and their written order carries no meaning.
 - `switchLabel` dispatches on a variant's tag. In the `default` branch the occurrence has the residual variant type `Variant ρ'`, with the enumerated labels removed. This is the structural decomposition of an open variant.
 - `guard` is the only sequential test, corresponding to CoreFn's `Guard`. Fall-through is expressed by placing `jump j` in `dt_else`.
-- `fail` is derived notation for `leaf (perform Partial.abort [τ] unit)` and produces a `partial` effect (D10).
+- `fail` is derived notation for `leaf (perform Partial.abort [τ] Prim.Unit)` and produces a `Partial` effect (D10).
 
 Sharing an alternative's body between several leaves is done by lifting it into a `letjoin` and placing `leaf (jump j ē)`, so that building a decision tree never duplicates code.
 
@@ -189,12 +189,12 @@ Two requirements must be distinguished.
 
 **What the Core type checker requires: that each switch be locally total.** Every `switch*` must either have a default or exhaust its cases. A tree that does not is rejected, because no value may be left without a destination.
 
-**What it does not require: coverage analysis of source patterns.** Whether nested patterns cover the original program is not checked. Partiality appears in the tree as `fail`, and the term's effect row then contains `partial`.
+**What it does not require: coverage analysis of source patterns.** Whether nested patterns cover the original program is not checked. Partiality appears in the tree as `fail`, and the term's effect row then contains `Partial`.
 
 ```text
 switchCtor s0 {
   Main.Nil -> leaf 0
-} default -> fail            ← total; carries a partial effect
+} default -> fail            ← total; carries a Partial effect
 
 switchCtor s0 {
   Main.Nil -> leaf 0

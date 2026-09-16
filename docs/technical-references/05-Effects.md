@@ -124,7 +124,9 @@ h ::= { return (x : τ) -> e_r
 - `handle e with h` removes the element keyed `E` from `e`'s effect row and processes it with the clauses of `h`. Handlers are **deep** (D15): after a resumption, control is under the same handler.
 - `openEff [ρ'] e` turns `e : τ1 -{ρ}-> τ2` into `τ1 -{ρ ⊎ ρ'}-> τ2`. Effect containment is an explicit term rather than subtyping (D8). At run time it is the identity and disappears during lowering.
 
-**A handler must cover every operation of `E`.** Since `handle` removes `E` from the row, an operation without a clause would leave its `perform` with nowhere to go. This is the same requirement as local totality of a decision tree ([Terms and Matching](06-Terms-and-Matching.md)). Handling only part of an effect is done by writing pass-through clauses for the rest; a partial handler that leaves `E` in the row is not available in v0.1.
+**A handler must cover every operation of `E`.** Since `handle` removes `E` from the row, an operation without a clause would leave its `perform` with nowhere to go. This is the same requirement as local totality of a decision tree ([Terms and Matching](06-Terms-and-Matching.md)).
+
+Every clause therefore gives its operation a meaning of its own: it resumes the continuation, abandons it, or translates the operation into another effect. **Passing an operation on to an outer handler of the same `E` is not expressible.** The row `( E τ̄ | ρ )` is sharp, so `E ∉ ρ`, while a clause body is typed at the ambient row `ρ`; a `perform E.op` there would require `E` to be in `ρ`. Forwarding of that kind, and a partial handler that leaves `E` in the row, each require a construct that v0.1 does not have; the candidates are recorded in [Open Questions](14-Open-Questions.md).
 
 ### `perform` does not require a handler to exist
 
@@ -154,7 +156,7 @@ D8 contributes here: because rows do not widen automatically, an obligation cann
 
 ## Partiality
 
-A non-exhaustive pattern match produces a `partial` effect (D10).
+A non-exhaustive pattern match produces a `Partial` effect (D10).
 
 `Partial` is an ordinary effect declaration in the standard library, not a builtin.
 
@@ -166,7 +168,7 @@ effect Partial where
 `fail τ` is not a separate constructor but **derived notation**.
 
 ```text
-fail τ   ≡   perform Partial.abort [τ] unit
+fail τ   ≡   perform Partial.abort [τ] Prim.Unit
 ```
 
 A partial function therefore carries `( Partial | e )` in its type. The effect of PureScript's `Partial` class is obtained without a class mechanism and without a dedicated language feature. A handler converting abortion into an exception or a `Maybe` is an ordinary handler.
@@ -219,7 +221,7 @@ tick _ =
   n
 ```
 
-`get ()` and `put (n + 1)` are ordinary applications; the elaborator turns them into `perform State.get [] unit` and `perform State.put [] (…)`. From the author's side, calling an effectful function looks no different from calling a pure one.
+`get ()` and `put (n + 1)` are ordinary applications; the elaborator turns them into `perform State.get [] Prim.Unit` and `perform State.put [] (…)`. From the author's side, calling an effectful function looks no different from calling a pure one.
 
 Requiring `do` and `bind` for effects would restore at the level of syntax exactly the division that D7 removed from types: whether one passes a pure function or a `do` block to `map` would become a visible distinction, and D7's benefit would be lost.
 

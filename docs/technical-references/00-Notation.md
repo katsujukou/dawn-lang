@@ -29,7 +29,7 @@ Notation confined to a single document is introduced where it is used.
 | `Σ`, `Γ`, `Δ`, `Ω` | contexts |
 | `Ψ` | the metavariable context, which exists only in Core⁺ |
 | `?α`, `?m`, `?r` | metavariables, which exist only in Core⁺ |
-| `Int`, `List`, `Function`, … | type constructors from `Prim`. These documents write them unqualified for readability; their Core names are fully qualified, as in `Prim.Function` |
+| `Int`, `Unit`, `Function`, … | type constructors from `Prim`. These documents write them unqualified for readability; their Core names are fully qualified, as in `Prim.Function` |
 
 ## Sequences
 

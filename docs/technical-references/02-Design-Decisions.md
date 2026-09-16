@@ -38,7 +38,7 @@ Reversibility is graded **low** (the decision is load-bearing; changing it propa
 | # | Decision | Rationale | Reversibility |
 | --- | --- | --- | --- |
 | D9 | Pattern matching is represented in Core as a **decision tree with join points** | Makes the decision structure explicit and turns lowering to Mid IR join points into a structure-preserving translation | Low |
-| D10 | A non-exhaustive match produces a **`partial` effect**, surfacing partiality in the type. `fail` is derived notation for this, not a Core primitive | Gives the effect of PureScript's `Partial` class without a class mechanism or a dedicated language feature | Medium |
+| D10 | A non-exhaustive match produces the **`Partial` effect**, surfacing partiality in the type. `fail` is derived notation for this, not a Core primitive | Gives the effect of PureScript's `Partial` class without a class mechanism or a dedicated language feature | Medium |
 | D11 | **Core has no implicit arguments.** Elaboration turns them into ordinary arguments | After elaboration, a type class is nothing but dictionary passing | Low |
 | D12 | **Core has no metavariables.** They exist only in Core⁺ | Keeps the trusted core small | Low |
 | D14 | Recursive bindings must be **guarded**: each right-hand side is syntactically a function value | Under strict evaluation this rejects `letrec x = f x` at type-checking time rather than deferring it to an uninitialized reference at run time | High |
