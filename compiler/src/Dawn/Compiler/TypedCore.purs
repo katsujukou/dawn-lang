@@ -1,4 +1,4 @@
--- | The Typed Core AST.
+-- | Typed Core.
 -- |
 -- | Core defines the semantics of the language: it makes type abstraction and
 -- | application, evidence arguments, record and variant operations, the
@@ -6,15 +6,22 @@
 -- | explicit. Surface features elaborate into it, and an independent type
 -- | checker validates every term elaboration produces.
 -- |
--- | This module re-exports the syntax. The forms that arise only during
--- | reduction — `match θ dt`, `openEffC`, and `rec_i` — belong to the
--- | evaluator and are not produced by elaboration, so they are absent here.
+-- | This module re-exports the syntax together with the decisions the trusted
+-- | core makes over it — row normalization, type equality, and entailment —
+-- | which the specification lists as one trusted set.
+-- |
+-- | The forms that arise only during reduction — `match θ dt`, `openEffC`, and
+-- | `rec_i` — belong to the evaluator and are not produced by elaboration, so
+-- | they are absent here.
 module Dawn.Compiler.TypedCore
   ( module Dawn.Compiler.TypedCore.Name
   , module Dawn.Compiler.TypedCore.Kind
   , module Dawn.Compiler.TypedCore.Type
   , module Dawn.Compiler.TypedCore.Term
   , module Dawn.Compiler.TypedCore.Decl
+  , module Dawn.Compiler.TypedCore.Row
+  , module Dawn.Compiler.TypedCore.Equality
+  , module Dawn.Compiler.TypedCore.Entailment
   ) where
 
 -- Re-exporting `Type` and `Constraint` shadows the `Prim` names of those
@@ -22,7 +29,10 @@ module Dawn.Compiler.TypedCore
 import Prim as P
 
 import Dawn.Compiler.TypedCore.Decl (AttrField, AttrValue(..), Attribute, CtorDecl, DataDecl, Decl(..), declAnnotation, EffectDecl, Export(..), ForeignDecl, Module, OpDecl, ValueBinding)
+import Dawn.Compiler.TypedCore.Entailment (AtomicFacts, DecomposeError(..), decompose, entails, noFacts)
+import Dawn.Compiler.TypedCore.Equality (constraintEquiv, rowEquiv, typeEquiv)
 import Dawn.Compiler.TypedCore.Kind (Kind(..), KindScheme, RowElemKind(..), Scheme, monoScheme)
 import Dawn.Compiler.TypedCore.Name (EffName(..), Ident(..), JoinName(..), KindVar(..), Label(..), ModuleName(..), OpName(..), Qualified(..), TyName(..), TyVar(..), qualifier, unqualified)
+import Dawn.Compiler.TypedCore.Row (RowError(..), RowNormalForm, RowPayload(..), emptyNormalForm, entryPayload, nf)
 import Dawn.Compiler.TypedCore.Term (Binding, CtorBranch, DecisionTree(..), Expr(..), Handler, LabelBranch, LitBranch, Literal(..), OpClause, Occurrence(..), Param, ReturnClause, exprAnnotation)
 import Dawn.Compiler.TypedCore.Type (Constraint(..), RowEntry(..), RowKey(..), TyBinder, Type(..), TypeScheme, rowEntryKey)

@@ -152,8 +152,10 @@ The symbol `≡` serves two roles that should not be conflated.
                        dom(F1) ∩ dom(F2) = ∅,
                        ∀t ∈ T1. ∀l ∈ dom(F2). (l ∉ t) ∈ Γ*,
                        ∀t ∈ T2. ∀l ∈ dom(F1). (l ∉ t) ∈ Γ*,
-                       ∀t1 ∈ T1. ∀t2 ∈ T2. t1 ≠ t2 ∧ (t1 # t2) ∈ Γ*
+                       ∀t1 ∈ T1. ∀t2 ∈ T2. (t1 # t2) ∈ Γ*
 ```
+
+`t1 = t2` is not excluded. `r # r` is satisfiable — it constrains `r` to the empty row — and an assumption entails itself, so a context assuming it must be able to discharge it. What makes `r ⊎ r` ill-kinded in an ordinary context is that nothing there derives `r # r`.
 
 ### `Γ*`: decomposing assumptions into atomic facts
 
@@ -173,6 +175,16 @@ assumption (ρ1 # ρ2)    with nf(ρi) = ⟨Fi;Ti⟩
 ```
 
 The only closure added is symmetry of `#`. Since `Γ` is finite and each `nf` is finite, `Γ*` is finite and is constructed once.
+
+### What entailment does not derive
+
+`Γ ⊨ C` is the finite, syntax-directed relation above, and the only closure `Γ*` computes is symmetry of `#`. It is **sound with respect to the set-theoretic reading of rows, and intentionally incomplete**: a constraint may hold of every row satisfying the assumptions without being derivable.
+
+`r # r` is the clearest instance. It is admissible, and it restricts the instantiations of `r` to the empty row, yet it entails neither `l ∉ r` nor `r # s`; nor does type equality identify `r` with `()`.
+
+Leaving that consequence out is not a matter of cost. `Γ*` could record which variables are known to be empty and consult that table, and deciding would remain a scan. The reason is that each such addition carries a further piece of the row semantics into the entailment relation, and this one widens the set of accepted programs very little. The question is worth reopening if a need for it is observed.
+
+**Symmetry is a property of entailment, not of type equality.** `ρ1 # ρ2` and `ρ2 # ρ1` entail each other, yet `C => τ` is compared structurally, so the two are distinct types. Where a term of one is wanted at the other, `Λ (_ : ρ2 # ρ1). e [•]` adapts it. Admitting symmetry into type equality would raise the general question of whether mutually derivable constraints are the same type, which is a larger question than row theory settles.
 
 There is no backtracking and no search order. This is the answer to the objection that instance chain search order becomes an accidental compile-time language.
 

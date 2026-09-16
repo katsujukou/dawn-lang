@@ -2,12 +2,18 @@ package:
   name: compiler
   description: The Dawn compiler lib
   dependencies:
+    - either
     - maybe
+    - arrays
+    - foldable-traversable
+    - ordered-collections
     - prelude
+    - tuples
   test:
     main: Test.Dawn.Compiler
     dependencies:
       - arrays
       - effect
+      - quickcheck
       - spec
       - spec-node
