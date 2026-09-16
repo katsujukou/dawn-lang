@@ -26,23 +26,15 @@ After `e1` and `e2` are evaluated to values, the value form of `e1` determines w
 | --- | --- |
 | `λ (x : τ) . e` | β-reduction: evaluate `e[x := v2]` |
 | `M.Ctor [τ̄] v̄` with `\|v̄\| < arity` | append the argument, giving `M.Ctor [τ̄] (v̄, v2)`. **The result is again a value; no computation occurs** |
-| an application of `foreign f` | call the implementation, a primitive step. Since every arrow of a `foreign` type is pure (D23), the call produces no external effect; effects occur when the runtime executes the returned `IO` |
+| an application of `foreign f` | call the implementation, a primitive step, which yields a value or a fault. That the call produces no external effect is a conformance obligation on the implementation, not a consequence of D23 alone; effects occur when the runtime executes the returned `IO` |
 
 A saturated constructor application does not have a function type and so never appears in the position of `e1`.
 
 **Consequence for backends.** A partially applied constructor may be passed around as a value, so a backend must be able to represent one. Whether it generates curried functions or a partial-application object carrying the arity and the collected arguments is the backend's choice; Mid IR retains constructor application in a form that lowers to either.
 
-## Erasure
+## Erasure: overview
 
-The following disappear during lowering to Mid IR and have no run-time step.
-
-- `Λ (a : κ) . v` and `e [τ]`
-- `T [[κ̄]]` and `M.x [[κ̄]]`, the instantiation of kind schemes
-- `Λ (_ : C) . v` and `e [•]`
-- `openEff [ρ] e`
-- type annotations
-
-The value restriction ensures that erasing these does not change the evaluation order.
+A number of forms carry no run-time content and are removed before evaluation on a backend. The erasure function and its properties appear below, once every form it removes has been introduced.
 
 ## Recursive bindings
 
@@ -105,3 +97,498 @@ The routes to closing it appear in the table above: full CPS conversion on JavaS
 ### Consequence for Mid IR
 
 Mid IR is designed in Phase A; effect lowering belongs to Phase E. Because of that order, **the representation of continuations in Mid IR must not assume one-shot**. This is a constraint to observe already in Phase A, and it is why Mid IR is specified to carry handler and continuation operations.
+
+## Reduction
+
+The table above fixes the order in which subterms are evaluated. This section gives the reduction relation itself.
+
+Two relations are distinguished.
+
+| Relation | On | Preserves types |
+| --- | --- | --- |
+| `G ⊢ e → c` | Core terms, to a configuration | yes, whenever c is a term |
+| `⌊e⌋ →ᵤ …` | erased terms | not applicable; types are gone |
+
+A configuration is either a term or a fault.
+
+```text
+c ::= e  |  fault φ
+```
+
+Preservation constrains only the case in which `c` is a term; a fault has no type to preserve.
+
+Keeping them apart matters because the coercion forms that erasure removes — `openEff`, `weaken`, `[[κ̄]]` — **change a term's type**. Removing them is not a step of typed reduction.
+
+### The global environment
+
+Reduction is parameterized by a global environment, obtained by linking a module with those it depends on.
+
+```text
+G ::= ·
+    | G, M.x : σκ = v          a top-level value definition
+    | G, M.f : σκ = δ_f        a foreign, with its implementation
+    | G, M.Ctor                a data constructor
+```
+
+A global name reduces by looking itself up, which is also where a kind scheme is instantiated.
+
+```text
+  (M.x : forall k̄. σ = v) ∈ G
+  ──────────────────────────────
+  G ⊢ M.x [[κ̄]] → v[k̄ := κ̄]
+```
+
+This preserves the type: `M.x [[κ̄]] : σ[k̄ := κ̄]`, and `v` has type `σ` under `k̄`.
+
+A constructor spine is already a value, saturated or not, so it needs no unfolding rule of its own; the spine formation rule below turns the atomic reference into one.
+
+### Module initialization
+
+`G` holds values, whereas a `nonrec` declaration admits any pure expression. The two are connected by **evaluating right-hand sides at link time**.
+
+The order mirrors the three stages of declaration checking ([Modules](09-Modules.md)). Type checking collects every constructor, operation, and `foreign` into `Σ_decl` before checking any value declaration, so a `nonrec` may legitimately refer to a `foreign` or a constructor that appears later in the text. Initialization must therefore populate those first, or such a module would stall.
+
+```text
+  G_decl = the definitions of the imported modules
+         ∪ every constructor declared by M
+         ∪ every foreign implementation δ_f declared by M
+
+  then, folding only the value binding groups in declaration order:
+
+    nonrec x : σκ = e     G_i ⊢ e →* c           (at ambient row ())
+                          if c = v:        G_{i+1} = G_i, M.x : σκ = v
+                          if c = fault φ:  initialization fails with φ
+
+    rec { x̄ : σ̄ = v̄ }     G_{i+1} = G_i, M.x_1 : σκ_1 = v_1, …, M.x_n : σκ_n = v_n
+```
+
+A `rec` group installs **every entry at once, with the right-hand sides themselves**. Guardedness makes each `v_i` a value already, so nothing is evaluated, and a recursive reference inside `v_i` is `M.x_j [[κ̄]]`, an ordinary global name resolved by the lookup rule. No local recursive closure is involved, and each `v_i` keeps the kind binder `k̄_i` under which it was checked.
+
+The fold over value declarations is well defined because they are in dependency order and cycles are confined to `rec` groups.
+
+Evaluating eagerly rather than on first reference is the choice consistent with strict evaluation, and it is observable: **a top-level declaration whose right-hand side diverges hangs initialization even if nothing refers to it.** Lazy global lookup would leave such a declaration harmless. Dawn takes the strict reading.
+
+### Faults
+
+A pure primitive may fail. Indexing an array out of bounds is the standard example, and no type in Dawn describes it.
+
+A failure of this kind is **not an effect**. It is not intercepted by `handle`, it does not appear in an effect row, and it is not the `Partial` effect, which is an ordinary handleable effect for non-exhaustive matches (D10). It is a fault, in the same category as exhausting the stack.
+
+Reduction therefore relates a term to a configuration, `G ⊢ e → c`, where `c` is a term or a fault. The rule propagating a fault out of an evaluation context appears with the contexts below.
+
+**Which primitives may fault, and on which inputs, belongs to the primitive surface specification** ([Open Questions](14-Open-Questions.md)) rather than to Core. Core only records that a fault is a possible outcome of applying a `foreign`.
+
+### Conformance of the global environment
+
+A `foreign` declaration's type is trusted ([Modules](09-Modules.md)), and D23 constrains only the **arrows appearing in that type**. It says nothing about whether the implementation returns what it claims, performs effects behind Core's back, or terminates. Those are obligations on the implementation, and the properties below depend on them, so they are stated rather than assumed.
+
+```text
+Σ ⊨ G   holds when
+
+  (1) G covers every global name mentioned by the module under evaluation,
+      and by the definitions in G itself
+
+  (2) for each (M.x : forall k̄. σ = v) ∈ G,  under Σ:
+        ·, k̄ ; · ; · ⊢ v : σ ! ()
+      that is, a global definition is a well-typed value with no effects
+
+  (3) for each (M.f : σκ = δ_f) ∈ G, and for every spine ς that is saturated
+      for M.f with cursorΣ(M.f, ς) = ⟨ σ ; θ ⟩  (see The spine cursor below),
+      writing v̄ = values(ς):
+        δ_f(v̄) is defined
+        δ_f(v̄) is either a value of type θ(σ) or a fault
+        δ_f(v̄) performs no effect observable to Core
+        δ_f(v̄) terminates
+```
+
+Condition (2) applies to the entries a `rec` group installs as well. Each `v_i` is checked under its own `k̄_i` and refers to its neighbours through `Σ`, which the declaration rules populated before any value declaration was checked.
+
+Condition (3) is stated through the cursor because the result type of a polymorphic foreign depends on the instantiation the spine carries. Applying `forall a. a -> a` at `[Int]` obliges `δ_f` to return an `Int`, and the raw declared type does not say so.
+
+Condition (3) is what makes a `foreign` returning `IO` inert until the runtime executes it. **That property does not follow from D23.** D23 makes the declared type honest about where effects may appear; conformance of `δ_f` is what makes the implementation match the declaration. A backend is responsible for both.
+
+Admitting a fault in (3) is what keeps the condition consistent with progress: a saturated `foreign` always either produces a value or produces a fault, and never leaves a term stuck.
+
+### Values
+
+```text
+v ::= c
+    | λ (x : τ) . e
+    | Λ (a : κ) . v
+    | Λ (_ : C) . v
+    | M.Ctor ς                 a constructor spine
+    | M.f ς                    a foreign spine that is not saturated
+    | rec_i(x̄ : σ̄. v̄)         a component of a local recursive group
+    | {} | extend l v1 v2
+    | inject l v
+    | weaken l [τ] v          a value of a wider variant
+    | openEff [ρ] v           a function value at a wider effect row
+
+ς ::= ·  |  ς, [[κ̄]]  |  ς, [τ]  |  ς, [•]  |  ς, v      an argument spine
+```
+
+A global constructor or foreign accumulates its arguments on a **single ordered spine**. Each entry is a kind, type, or constraint instantiation, or a value, and the order is whatever the declared type calls for; nothing requires the erased entries to precede the values. `values(ς)` is the subsequence of value arguments, which is what erasure keeps and what `δ_f` receives.
+
+Without a spine, a polymorphic `foreign` could not be used at all: `IO.pure : forall a. a -> IO a` requires `IO.pure [Int]`, and the rule for type application applies only to a `Λ`.
+
+A **constructor spine is always a value**, saturated or not: a saturated one is a completed structure, an unsaturated one behaves as a function. A **foreign spine is a value only while it is unsaturated**; once saturated it is a redex that invokes `δ_f`.
+
+`weaken` and `openEff` are **value forms, not redexes**. Reducing them away would change the type — `weaken l [τ] v : Variant ( l : τ | r )` while `v : Variant r` — and D8 provides no subtyping to identify the two. They are consumed by the constructs that examine them: pattern matching looks through `weaken`, and application looks through `openEff`.
+
+### Run-time forms
+
+Three forms arise during reduction and are never produced by elaboration.
+
+```text
+match θ dt            descending a decision tree
+openEffC [ρ] e        a computation whose effects are bounded by a wider row
+rec_i(x̄ : σ̄. v̄)       the i-th component of a local recursive binding group
+```
+
+```text
+  Γ;Δ ⊢ e : τ ! r    Γ ⊨ r # ρ
+  ────────────────────────────────
+  Γ;Δ ⊢ openEffC [ρ] e : τ ! (r ⊎ ρ)
+
+  Γ' = Γ, x̄ : σ̄     each i: v_i is a FunVal (D14) and Γ'; Δ ⊢ v_i : σ_i ! ()
+  ──────────────────────────────────────────────────────────────────────────
+  Γ;Δ ⊢ rec_i(x̄ : σ̄. v̄) : σ_i ! ρ
+```
+
+`openEffC [ρ] e` widens the **ambient row of a computation**, where `openEff` widens the **effect row inside a function's type**. Both are needed and neither subsumes the other: `openEff` is what allows a pure function to be passed where a wider arrow type is expected, and `openEffC` is what allows the result of applying such a function to sit in a context whose ambient row is the wider one.
+
+`rec_i` carries the type annotations of the group it came from, which is what makes its typing rule derivable and hence what makes preservation hold for `letrec`. It is a **local** form only. A top-level `rec` group installs its right-hand sides into `G` directly, and its recursive references are global names.
+
+### The spine cursor
+
+Reduction carries no `Γ`, so saturation must be decidable from the declaration and the spine alone. `cursorΣ` is a partial function that walks the **declared** type, consuming one spine entry at a time. It performs no well-formedness checking.
+
+```text
+cursorΣ(M.g, ς)  =  ⟨ σ ; θ ⟩       σ is the unconsumed remainder of the declared type
+                                     θ is the accumulated kind and type substitution
+```
+
+```text
+cursorΣ(M.g, ·)            = ⟨ σκ ; id ⟩              where ( M.g : σκ ) ∈ Σ
+cursorΣ(M.g, (ς, [[κ̄]]))   = ⟨ σ ; θ[k̄ := κ̄] ⟩        where cursorΣ(M.g, ς) = ⟨ forall k̄. σ ; θ ⟩
+cursorΣ(M.g, (ς, [τ]))     = ⟨ σ ; θ[a := τ] ⟩        where cursorΣ(M.g, ς) = ⟨ forall (a : κ). σ ; θ ⟩
+cursorΣ(M.g, (ς, [•]))     = ⟨ σ ; θ ⟩                where cursorΣ(M.g, ς) = ⟨ C => σ ; θ ⟩
+cursorΣ(M.g, (ς, w))       = ⟨ τ2 ; θ ⟩               where cursorΣ(M.g, ς) = ⟨ τ1 -{()}-> τ2 ; θ ⟩
+```
+
+It is undefined in every other case. At most one clause applies at each step, since the shape of the unconsumed declared type distinguishes them.
+
+Nothing constrains the order of entries: a declared type may interleave quantifiers, constraints, and arrows freely, and the cursor follows it. A type such as `Int -> forall a. a -> a` is therefore usable, with `[String]` supplied after the first value argument.
+
+The arrow consumed by the last clause is pure. A constructor's arrows are pure by declaration, and a `foreign`'s are pure by D23.
+
+A kind instantiation `[[κ̄]]` consumes the whole vector at once and can occur at most once, since kind schemes are prenex (D3).
+
+#### Saturation is a position in the declared type
+
+**A spine is saturated** when `cursorΣ(M.g, ς) = ⟨ σ ; θ ⟩` and the **unconsumed declared type `σ`** is not a `forall`, a constraint arrow, or a function type.
+
+The test is on `σ`, not on `θ(σ)`. Substitution can introduce arrows that the declaration never called for, and treating those as argument positions would absorb arguments that do not belong to the foreign.
+
+```text
+foreign id : forall a. a -> a
+
+M.id ·                       ⟨ forall a. a -> a ; id ⟩         expects a type
+M.id ([Int -> Int])          ⟨ a -> a ; [a := Int -> Int] ⟩     expects one value
+M.id ([Int -> Int], f)       ⟨ a ; [a := Int -> Int] ⟩          saturated
+```
+
+The last line is saturated because the declared remainder is the variable `a`, even though `θ(a) = Int -> Int` is a function type. So `δ_id(f)` runs and returns `f`, and the application `(M.id ([Int -> Int], f)) 0` proceeds as an ordinary application of the returned function. Testing `θ(σ)` instead would have absorbed `0` into the spine and called `δ_id(f, 0)`.
+
+`foreign make : forall a. a` instantiated at a function type behaves the same way: `M.make ([Int -> Int])` is saturated at once, and whatever function `δ_make()` returns is applied normally.
+
+**Arity is a static property of the declaration.** The number of value-argument positions is the number of arrows on the declared type's spine, which is what the cursor walks and what substitution never changes. Erasure therefore preserves it: after type arguments are gone, a backend still calls `δ_f` with exactly that many run-time arguments.
+
+### Typing a spine
+
+Typing a spine is the cursor together with the well-formedness of each entry.
+
+```text
+  cursorΣ(M.g, ς) = ⟨ σ ; θ ⟩       every entry of ς is well formed, as below
+  ────────────────────────────────────────────────────────────────────────
+  Γ;Δ ⊢ M.g ς : θ(σ) ! ρ
+```
+
+An entry is well formed when, writing `⟨ σ' ; θ' ⟩` for the cursor **before** it is consumed:
+
+| Entry | Condition |
+| --- | --- |
+| `[[κ̄]]` | `Γ ⊢ κ̄ qkind` and `\|κ̄\| = \|k̄\|` |
+| `[τ]` | `Γ ⊢ τ : θ'(κ)`, where `σ' = forall (a : κ). …` |
+| `[•]` | `Γ ⊨ θ'(C)`, where `σ' = C => …` |
+| `w` | `Γ;Δ ⊢ w : θ'(τ1) ! ρ`, where `σ' = τ1 -{()}-> τ2` |
+
+Separating the two is what lets reduction proceed without a `Γ`. **Saturation and the reduction rules consult `cursorΣ` alone**; the conditions in the table are discharged once, when the term is type checked. In particular the entailment `Γ ⊨ θ'(C)` for a `[•]` entry is a type-checking obligation and is never re-examined at run time, consistently with constraints carrying no run-time content.
+
+### Forming and reducing a spine
+
+The atomic global reference forms the initial spine. A defined global unfolds to a value instead; a constructor and a foreign have nothing to unfold to.
+
+```text
+  ( M.Ctor : σκ ) ∈ Σ  or  ( M.f : σκ = δ_f ) ∈ G
+  ───────────────────────────────────────────────
+  G ⊢ M.g [[κ̄]] → M.g ([[κ̄]])
+```
+
+Where the kind scheme is empty, `[[κ̄]]` is elided on both sides and the rule reads `M.g → M.g ·`.
+
+An unsaturated spine absorbs the argument its cursor calls for; a saturated foreign invokes its implementation.
+
+```text
+α ::= [τ]  |  [•]  |  v            a spine argument after formation
+```
+
+```text
+  (M.g ς) α                →  M.g (ς, α)           when ς is not saturated for M.g
+                                                    and cursorΣ(M.g, (ς, α)) is defined
+
+  M.f ς                    →  δ_f( values(ς) )     when ς is saturated for M.f
+```
+
+`[[κ̄]]` is absent from `α` because the whole kind vector is consumed at formation and a kind scheme is prenex, so no second kind instantiation can arise.
+
+The two rules do not overlap. A saturated foreign spine reduces to `δ_f` **before** it can be applied to anything further, so a result that happens to be a function is applied by the ordinary rule for application rather than being absorbed.
+
+The second rule is also what makes an arity-zero `foreign` work. A declaration such as `foreign clock : IO Time` forms a spine that is saturated immediately, so it steps to `δ_clock()` rather than sitting as a value that is neither reducible nor complete.
+
+A saturated **constructor** spine is a value and does not reduce; a saturated **foreign** spine is a redex. The difference is that a constructor has an implementation nowhere but in its own structure. A constructor's declared result is `T ā`, never an arrow, so the question of absorbing further arguments does not arise for it.
+
+Erasure discards the erased entries and keeps the values.
+
+```text
+⌊M.g ς⌋ = M.g ⌊values(ς)⌋
+```
+
+### Evaluation contexts
+
+An evaluation context marks the single position at which reduction may occur. Its shape encodes the order tabulated above.
+
+```text
+Ev ::= []
+     | Ev e  |  v Ev                        function before argument
+     | Ev [τ]  |  Ev [•]
+     | openEff [ρ] Ev  |  openEffC [ρ] Ev
+     | extend l Ev e  |  extend l v Ev
+     | update l Ev e  |  update l v Ev
+     | merge Ev e  |  merge v Ev
+     | select l Ev  |  restrict l Ev
+     | inject l Ev  |  weaken l [τ] Ev  |  absurd [τ] Ev
+     | let x : τ = Ev in e
+     | case (v̄, Ev, ē) of dt
+     | match θ (guard Ev dt1 dt2)
+     | letjoin j (x̄ : τ̄) = e1 in Ev
+     | jump j (v̄, Ev, ē)
+     | perform E.op [τ̄] Ev
+     | handle Ev with h
+```
+
+```text
+  G ⊢ e → e'                        G ⊢ e → fault φ     Ev ≠ []
+  ──────────────────                ─────────────────────────────
+  G ⊢ Ev[e] → Ev[e']                G ⊢ Ev[e] → fault φ
+```
+
+That `handle Ev with h` is a context expresses evaluation proceeding **under** an installed handler. That `letjoin … in Ev` is one lets the body of a join point binding be evaluated normally. A fault propagates out of every context, including `handle`, since no handler can intercept it.
+
+Capturing a continuation requires a second notion: a context installing no handler for the key in question.
+
+```text
+Ev_E ::= an evaluation context in which every `handle _ with h'` on the path
+         to the hole handles a key other than E
+```
+
+A `jump` appears only in tail position, so the position it may occupy is narrower than a general context.
+
+```text
+Tl ::= []  |  letjoin j' (x̄ : τ̄) = e' in Tl
+```
+
+### Ordinary reduction
+
+```text
+  (λ(x : τ). e) v                    →  e[x := v]
+  (Λ(a : κ). v) [σ]                  →  v[a := σ]
+  (Λ(_ : C). v) [•]                  →  v
+
+  (openEff [ρ] v) w                  →  openEffC [ρ] (v w)
+  openEffC [ρ] v                     →  v
+
+
+  let x : τ = v in e                 →  e[x := v]
+
+  select l (extend l v1 v2)          →  v1
+  select l (extend l' v1 v2)         →  select l v2               when l ≠ l'
+  restrict l (extend l v1 v2)        →  v2
+  restrict l (extend l' v1 v2)       →  extend l' v1 (restrict l v2)   when l ≠ l'
+  update l (extend l v1 v2) v3       →  extend l v3 v2
+  update l (extend l' v1 v2) v3      →  extend l' v1 (update l v2 v3)  when l ≠ l'
+  merge {} v                         →  v
+  merge (extend l v1 v2) v3          →  extend l v1 (merge v2 v3)
+```
+
+`absurd [τ] v` has no rule: its argument has type `Variant ()`, which is uninhabited, so the redex does not arise.
+
+**Application through `openEff`.** Discarding the coercion outright would not preserve typing. Consider a pure `f : Int -> Int` inside
+
+```text
+let x : Int = (openEff [( E )] f) 0 in perform E.op unit
+```
+
+The whole term is typed at ambient row `( E )`, and the rule for `let` requires both its parts to share that row. Rewriting the bound expression to `f 0` would give it row `()`, which no longer matches the body, and no common ambient row exists. Widening the type of the function value is therefore replaced by widening the **ambient row of the resulting computation**, which `openEffC` records. Once that computation reaches a value, the coercion is discharged: a value is pure, so `openEffC [ρ] v → v` keeps both the type and the row.
+
+**Foreign and constructor application** is given by the spine rules above. A foreign reduces once its spine is saturated, and `δ_f` yields a value or a fault.
+
+**Recursive bindings** install recursive closures, and a closure unfolds only where it is eliminated.
+
+```text
+  letrec { x̄ : σ̄ = v̄ } in e          →  e[ x̄ := rec̄ ]    where rec_i = rec_i(x̄ : σ̄. v̄)
+
+  rec_i(x̄ : σ̄. v̄) w                  →  (v_i[ x̄ := rec̄ ]) w
+  rec_i(x̄ : σ̄. v̄) [σ]                →  (v_i[ x̄ := rec̄ ]) [σ]
+  rec_i(x̄ : σ̄. v̄) [•]                →  (v_i[ x̄ := rec̄ ]) [•]
+```
+
+Unfolding is confined to elimination position, so the rules do not overlap and no term steps to itself. Guardedness (D14) makes each `v_i` a function value, which is what allows initialization to install `rec_i` without evaluating anything; it does **not** claim that a recursive computation terminates, and Core makes no such claim anywhere.
+
+An implementation allocates locations and back-patches rather than duplicating the binding group. The two agree because no `v_i` reads an `x_j` while it is itself being installed.
+
+### Pattern matching
+
+Descending a decision tree takes reduction steps of its own, so that a `guard`'s condition can be evaluated in place and each of its steps remains observable from the surrounding handler.
+
+`match θ dt` is a run-time form, not source syntax. `θ` maps occurrences to values.
+
+```text
+  case (v̄) of dt                     →  match {s_i ↦ v_i} dt
+
+  match θ (leaf e)                   →  e
+  match θ (bind x = o in dt)         →  match θ (dt[x := θ(o)])      substitute first
+  match θ (guard true dt1 dt2)       →  match θ dt1
+  match θ (guard false dt1 dt2)      →  match θ dt2
+
+  match θ (switchCtor o { Ctor_i -> dt_i } [default -> dt_0])
+     →  match θ dt_i        when θ(o) is an application of Ctor_i
+     →  match θ dt_0        otherwise, if a default is present
+
+  match θ (switchLit o { c_i -> dt_i } default -> dt_0)
+     →  match θ dt_i        when θ(o) = c_i
+     →  match θ dt_0        otherwise
+
+  match θ (switchLabel o { l_i -> dt_i } [default -> dt_0])
+     →  match θ dt_i        when θ(o) injects l_i, looking through weaken
+     →  match θ dt_0        otherwise, if a default is present
+```
+
+Substituting in `bind` **before** the recursive step is what allows a later `guard` to mention the bound variable; deferring the substitution would leave the condition with a free variable and no way to evaluate.
+
+`θ(o)` follows the projection path of the occurrence, which involves no computation. `switchLabel` looks through any `weaken` wrapping the value to find the label actually injected.
+
+Local totality ([Terms and Matching](06-Terms-and-Matching.md)) guarantees that one case always applies, so `match` never gets stuck.
+
+`guard` is the only sequential test; every `switch*` is a single dispatch, so the written order of its branches has no influence.
+
+### Join points
+
+```text
+  letjoin j (x̄ : τ̄) = e1 in Tl[jump j (v̄)]
+      →  letjoin j (x̄ : τ̄) = e1 in Tl[ e1[x̄ := v̄] ]
+
+  letjoin j (x̄ : τ̄) = e1 in v        →  v
+```
+
+`Tl` is a tail context, and a join point is out of scope under `λ`, `Λ`, and `handle`, so the position of the `jump` lies within the same function activation as the `letjoin`. That is what allows a backend to compile a jump as a transfer of control rather than as a continuation.
+
+The second rule discards a binding whose join point is no longer reachable.
+
+### Operations and handlers
+
+```text
+  handle v with h                             →  e_r[x := v]
+
+  handle Ev_E[ perform E.op [σ̄] v ] with h    →  e_i[ b̄_i := σ̄,  x_i := v,
+                                                     k_i := λ(y : τ_i'). handle Ev_E[y] with h ]
+                                                 where the clause for op in h is
+                                                   E.op [b̄_i] (x_i, k_i) -> e_i
+```
+
+Two things are visible in the second rule.
+
+**The handler is reinstalled.** The continuation `k_i` rebuilds `handle Ev_E[y] with h`, so resuming returns under the same handler. This is what makes handlers deep (D15).
+
+**The target is determined by the key alone.** `Ev_E` installs no handler for `E`, so the `handle` in the rule is the innermost one for that key. Since rows are sharp, no second handler for `E` can be nested, and no offset or index is needed to identify it.
+
+`k_i` is an ordinary function value. Nothing in the rule restricts how often it may be applied, which is the sense in which the reference semantics is multi-shot (D18).
+
+`fail τ` reduces through this rule too, being derived notation for `perform Partial.abort [τ] unit`.
+
+## The runtime boundary
+
+Core reduction halts once it has constructed a value of type `IO`. **This is by design, not an omission** (D25).
+
+Executing an `IO` belongs to the runtime ABI, which is a separate normative specification. Core's semantics ends at the boundary, and the ABI is obliged to define:
+
+- execution of `IO.pure` and `IO.bind`
+- execution of native leaf actions, that is, the `IO` values that `foreign` declarations construct
+- the world state or external events these act upon
+- the invocation of `main : IO Unit`, the point at which a program begins
+
+The two sides of the boundary carry different kinds of obligation, and conflating them overstates what the type system delivers.
+
+| | Established by |
+| --- | --- |
+| A `foreign` type is honest about where effects may appear in its arrows | D23, checked syntactically ([Modules](09-Modules.md)) |
+| A `foreign` implementation constructs a value and performs nothing | `Σ ⊨ G` condition (3) above, a conformance obligation on the backend |
+| An `IO` value is executed, and executed once per execution of the value containing it | the runtime ABI |
+
+That `primLog s` defers its effect therefore rests on the second row, not the first. D23 makes the declaration incapable of *claiming* to be effect-free while sitting on an effectful arrow; it cannot make an implementation behave.
+
+Placing execution outside Core keeps the trusted core free of world state and keeps the reduction relation a closed, deterministic system. The cost is that the ABI must be specified separately before a program can be run end to end ([Open Questions](14-Open-Questions.md)).
+
+## Erasure
+
+Erasure `⌊·⌋` removes the forms that carry no run-time content.
+
+```text
+⌊Λ (a : κ) . v⌋   = ⌊v⌋        ⌊e [τ]⌋           = ⌊e⌋
+⌊Λ (_ : C) . v⌋   = ⌊v⌋        ⌊e [•]⌋           = ⌊e⌋
+⌊T [[κ̄]]⌋         = ⌊T⌋        ⌊M.x [[κ̄]]⌋       = ⌊M.x⌋
+⌊openEff [ρ] e⌋   = ⌊e⌋        ⌊openEffC [ρ] e⌋  = ⌊e⌋
+⌊weaken l [τ] e⌋  = ⌊e⌋
+```
+
+This is **not** a reduction relation. `openEff`, `openEffC`, `weaken`, and `[[κ̄]]` change a term's type or its ambient row, and `[[κ̄]]` additionally discards an instantiation that the typed rules require. A backend erases first and then evaluates; the typed relation above evaluates without erasing.
+
+A variant value loses its `weaken` wrappers, so an erased `switchLabel` dispatches on the label the value carries directly. Recursive closures survive erasure, since `rec_i(x̄. v̄)` carries computational content.
+
+## Properties
+
+The following are stated as the properties the implementation is expected to have. They are not proved here. [Implementation Plan](15-Implementation-Plan.md) describes how each becomes a property test.
+
+Every property assumes `Σ ⊨ G`. Without it the global environment may supply an ill-typed definition or a `δ_f` that returns the wrong thing, and no property of the reduction relation can hold.
+
+**Preservation.** If `Σ ⊨ G` and `Γ; Δ ⊢ e : τ ! ρ` and `G ⊢ e → e2` for a **term** `e2`, then `Γ; Δ ⊢ e2 : τ ! ρ`.
+
+A step to `fault φ` is outside the statement: a fault carries no type.
+
+Both the type and the ambient row are preserved exactly. Widening is never discarded by a step: applying through an `openEff` moves it to `openEffC`, and `openEffC` is discharged only against a value, whose type does not mention the ambient row. Handling an operation likewise leaves the row unchanged, since the clause body is typed at the residual row that the `handle` already had.
+
+**Progress.** If `Σ ⊨ G` and `·; · ⊢ e : τ ! ()`, then `e` is a value, or there exists `e2` with `G ⊢ e → e2`, or `G ⊢ e → fault φ` for some fault φ.
+
+The third case is what admitting faults in condition (3) of `Σ ⊨ G` buys. A saturated `foreign` whose implementation fails would otherwise be neither a value nor a redex.
+
+Condition (1) of `Σ ⊨ G` is what linking establishes. Without it a global name has nothing to unfold to, and the property fails for a reason unrelated to the type system.
+
+**Effect safety.** If `Σ ⊨ G` and `·; · ⊢ e : τ ! ()`, then no reduction sequence from `e` reaches a term of the form `Ev_E[ perform E.op [σ̄] v ]` in which no handler for `E` encloses the hole.
+
+The claim is **not** that operations are never performed. A term may be well typed at ambient row `()` and still perform operations internally: `handle (perform E.op v) with h` is such a term, and its reduction does reach the clause for `op`. What the empty row guarantees is that no operation **escapes**: every `perform` that runs is enclosed by a handler for its key, so evaluation never gets stuck on an unhandled operation.
+
+This is the property the whole design rests on, and it is the one that testing is least likely to reveal. A violation does not crash: it produces a program that silently performs effects it declared it would not. D7 places effect rows on arrows, D20 keeps `IO` out of the effect world, and D23 forbids effectful `foreign` arrows, all in service of this single statement. Note that D23 alone is not sufficient: a conforming `δ_f`, condition (3) of `Σ ⊨ G`, is equally required, since `handle` intercepts only `perform` while a `foreign` application calls its implementation directly.
+
+**Erasure.** If `G ⊢ e → e2` then `⌊e⌋` reduces to `⌊e2⌋` in zero or one steps under the erased relation, the zero-step case being a step that only introduced or discharged a coercion. If `G ⊢ e → fault φ` then `⌊e⌋` reduces to the same fault `φ`; an erased evaluator and a typed one fail identically. The value restriction is what makes this hold: the body of a type or constraint abstraction is already a value, so erasing the abstraction cannot move evaluation to a different point.
+
+**Non-conformance of the v0.1 backends.** The reduction rule for handlers places no bound on applications of `k_i`, so a term applying it twice is well typed and has a defined reduction sequence. The v0.1 JavaScript and Wasm backends do not reproduce that sequence; they raise a run-time error at the second application. This is the precise content of the soundness gap recorded above.

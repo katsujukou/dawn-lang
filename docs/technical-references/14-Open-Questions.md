@@ -83,6 +83,7 @@ The available extension is an **explicit instance name**, comparable to Koka's n
 **Defining the primitive surface and its ABI.** Of D19, the Core type checker enforces only that every arrow of a `foreign` is pure (D23). The rest must be settled as conventions of the standard library and the build system.
 
 - How to define the set of FFI a backend must implement, and how to version it, so that a new backend can state mechanically how much it must implement to work
+- **Which primitives may fault, and on which inputs.** A pure primitive such as an unchecked array index can fail, and no Dawn type describes it. A fault is not an effect and no handler intercepts it ([Semantics](08-Semantics.md)); Core records only that applying a `foreign` may produce one. Enumerating the faulting primitives and their preconditions belongs here
 - How to restrict the types that may appear in a `foreign` declaration. `Int`, `String`, and opaque handles are safe, but passing a `Record r` or a user-defined ADT raw fixes its representation for every backend. Whether to introduce a mechanism restricting this to types with a declared ABI, or to leave it as convention
 - How to associate a `foreign` declaration with its per-backend implementations. PureScript uses the implicit convention of a `.js` file beside the module, and alternative backends place parallel files. Adding a backend should not require editing modules
 
@@ -141,3 +142,19 @@ Should a design without the header entry be adopted later, it must be stated in 
 **A serialization format for Core**, corresponding to CoreFn's JSON. What a module's interface carries — types, attributes, effect declarations, constructor tags, bodies eligible for inlining — is directly tied to the unit of separate compilation.
 
 **Kind inference for mutually recursive data and effect declarations.** Core assumes every kind is explicit; the procedure by which elaboration supplies them must be settled.
+
+## The runtime ABI
+
+D25 places execution of `IO` outside Core, which leaves a specification to be written. Until it exists, no program can be run end to end, so it is required before the vertical slice can do more than type check and compute pure values.
+
+It must define:
+
+- execution of `IO.pure` and `IO.bind`
+- execution of native leaf actions, the `IO` values that `foreign` declarations construct
+- the world state or external events these act upon, and whether execution is deterministic with respect to them
+- the invocation of `main : IO Unit`, and what a program's exit value is
+- what happens when a native action raises, since D23 keeps such behaviour out of the type
+
+Two properties should be stated there rather than in Core. That an `IO` value is inert until executed is what Core guarantees to the ABI, given a conforming `G` — D23 keeps effects out of the arrows of a `foreign` type, and condition (3) of `Σ ⊨ G` keeps them out of the implementation. That the ABI executes each action exactly once per execution of the value containing it is what the ABI guarantees in return.
+
+Whether the ABI is shared between the JavaScript and Wasm backends, or specified per backend with a common core, is open. It interacts directly with the definition of the primitive surface above, since native leaf actions are exactly the FFI a backend must implement.

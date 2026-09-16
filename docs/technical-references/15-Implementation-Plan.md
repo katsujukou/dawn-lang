@@ -31,3 +31,130 @@ Two constraints must be respected even though the constructs they concern belong
 ## Notes on step 6
 
 The set of FFI the backend must implement is the first version of the primitive surface ([Open Questions](14-Open-Questions.md)). The longer it is deferred, the more the standard library settles into a shape that depends on FFI, so the minimum version should be fixed while writing this backend.
+
+## Testing the properties instead of proving them
+
+[Semantics](08-Semantics.md) states progress, preservation, effect safety, and erasure without proof. Proving them for a calculus with rows, effect rows, and handlers is a substantial undertaking, and most of the confidence it would buy is available more cheaply: **each property can be turned into a property test.**
+
+This requires a Core evaluator, which step 4 needs regardless. Type checking a hand-written module confirms that it is well typed; running it is what confirms that it computes.
+
+**Preservation** is the most directly testable. Generate a well-typed Core term, reduce one step, and re-run the type checker.
+
+```text
+assume Σ ⊨ G
+for each generated e with ·;· ⊢ e : τ ! ρ:
+    while e is not a value and fuel remains:
+        c = step(G, e)
+        if c is a fault:  stop; the run ends, and nothing is asserted
+        assert ·;· ⊢ c : τ ! ρ
+        e = c
+```
+
+A step to a fault ends the run rather than failing the test: a fault carries no type, so there is nothing to re-check.
+
+Both the type and the ambient row are checked for equality. A generator that produces `G` must satisfy `Σ ⊨ G`; supplying an ill-typed global definition or a non-conforming `δ_f` invalidates the property rather than testing it.
+
+The type checker is already required for step 3, so the assertion costs nothing to write. What takes work is the generator: producing well-typed terms rather than arbitrary ones. Generating type-directed — choosing a type first, then building a term of it — is the practical approach, and it doubles as a source of test cases for the checker itself.
+
+**Progress** falls out of the same loop: if `e` is not a value and `step` returns nothing, the property has failed.
+
+**Erasure** is a differential test. Run a term under the typed relation and its erasure under the erased relation, and compare the sequences of observable steps; a typed step that only consumes a coercion corresponds to no erased step.
+
+**Effect safety** deserves separate treatment, because it is the property that ordinary tests are least likely to reveal: a violation does not crash, it silently performs an effect.
+
+The test is **not** to reject every `perform`. A term well typed at ambient row `()` may perform operations internally, so long as each is enclosed by a handler for its key; rejecting them outright would fail correct programs. What the evaluator maintains instead is a stack of installed handler keys, and it asserts that **every `perform` it executes finds a handler on that stack**. Reaching a `perform` with no matching handler is the failure.
+
+Generating terms that call effectful functions and wrap them in handlers is what exercises the property; what is being checked is that the wrapping is genuinely exhaustive.
+
+Extending the generator to `foreign` declarations is worthwhile once the FFI surface exists, since D23 together with condition (3) of `Σ ⊨ G` is what keeps effect safety from being violated at that boundary. D23 alone constrains only the declared type.
+
+**Machine-checked or paper proofs are deferred.** They become worth revisiting if the work is to be published, or if one subsystem keeps producing subtle bugs that property testing does not catch.
+
+**Conformance of the global environment** is a premise of every property above, not something they establish. A test harness supplies `G` and must therefore guarantee `Σ ⊨ G` itself: global definitions are well-typed values, and each `δ_f` returns either a value of the instantiated result type — the one the spine judgement gives — or a permitted fault, performs nothing observable to Core, and terminates.
+
+For generated `foreign` declarations this is easy, since the harness writes `δ_f` and can make it a pure total function that never faults. For real backends it is a conformance obligation, and a backend test suite should check it directly rather than relying on the property tests above to expose a violation.
+
+## A catalogue of regression tests
+
+Each entry below is a case in which a plausible implementation gives the wrong answer. They are worth writing as tests before the corresponding code rather than after, since property testing reaches most of them only by chance: several require a specific combination of features to arise at all.
+
+The heading of each group names the step of the plan that the group belongs to.
+
+### Row normalization and unification (step 2)
+
+| Input | Required outcome |
+| --- | --- |
+| `{ a : A \| ?r } ≡ { b : B \| ?s }` | Solved with a fresh `?t`: `?r := ( b : B \| ?t )` and `?s := ( a : A \| ?t )`. Substituting into one side alone either yields an unequal pair or fails an occurs check on the symmetric attempt |
+| `forall (r : Row Type). Record r ≡ Record ( name : String )` | Fails. A rigid tail cannot absorb a known field |
+| `?s ≡ ( a : A \| r )` with `r` rigid | Succeeds. A rigid tail **can** be absorbed by a flexible one on the other side |
+| `( name : String \| r ) ≡ ( name : String \| s )`, `r` and `s` distinct rigid variables | Fails. Distinct row variables are not identified |
+| `⟨∅;{r,s}⟩ ≡ ⟨∅;{s,r}⟩` | Succeeds. The tail is a set |
+| `⟨∅;{?r,?s}⟩ ≡ ⟨{a↦A};∅⟩` | Stuck, not failure. Two solutions exist, so the constraint waits |
+| A solved `?r := D ⊎ ?t` where `l ∉ ?r` was assumed | The Lacks constraint propagates to `?t`, and `l ∉ dom(D)` is checked. Omitting this produces Core that is not well-kinded |
+| `r ⊎ r` | Ill-kinded. The disjointness side condition rejects it before normalization |
+
+### Kinds and constraints (step 3)
+
+| Input | Required outcome |
+| --- | --- |
+| `forall (e : Effect). …` | Rejected. `Effect` is not a quantifiable kind |
+| `forall (f : Type -> Effect). …` | Rejected, for the same reason |
+| `Proxy [[Effect]]` | Rejected. Instantiation also requires a quantifiable kind |
+| `forall (f : Type -> Type). …` | **Accepted.** Higher-kinded types must survive the restriction |
+| `forall (r : Row Effect). …` | Accepted |
+| `Row (Type -> Type)` | Ill-formed. `Row` takes only a row element kind |
+| `name ∉ ( Console )` | Rejected. A field label is not a key of a `Row Effect` |
+| `ρ1 # ρ2` with `ρ1 : Row Type` and `ρ2 : Row Effect` | Rejected. Both sides share one row element kind |
+| `Proxy [[Type]] [Int]` and `Proxy [[Row Type]] [( x : Int )]` | Both accepted. Type and data constructors carry independent kind schemes |
+
+### Decision trees and handlers (step 3)
+
+| Input | Required outcome |
+| --- | --- |
+| `switchCtor` with no default, not exhausting the constructors | Rejected |
+| `switchLit` with no default | Rejected. A default is mandatory |
+| `switchLabel` over a closed variant enumerating only some labels, no default | Rejected. A value would be left with no destination |
+| `switchLabel` over a row with an unknown tail, no default | Rejected |
+| `switchCtor` with a default whose body is ill-typed | Rejected. The default branch is typed like any other |
+| `switchLabel` default | The occurrence is refined to the residual `Variant r'`, not left at the original type |
+| A handler omitting an operation of `E` | Rejected. `handle` removes `E` from the row, so an operation without a clause has nowhere to go |
+| A handler clause that does not respect an operation's own `forall b̄` | Rejected |
+| `handle (perform E.op v) with h` at ambient row `()` | **Accepted.** Effect safety is not "no operation is performed" |
+| A `λ` whose body jumps to a join point bound outside it | Rejected. The join point context is discarded at a lambda |
+
+### FFI and declarations (step 3)
+
+| Input | Required outcome |
+| --- | --- |
+| `foreign log : String -{( Console )}-> Unit` | Rejected. An effectful result arrow would let the effect bypass a handler |
+| `foreign mapImpl : ( a -{e}-> b ) -> …` | Rejected. An effectful argument arrow would leak the calling convention across the boundary |
+| `foreign primLog : String -> IO Unit` | Accepted. This is the shape every real-world leaf takes |
+| An effect with an operation `liftIO : forall a. IO a ->* a` | Rejected by policy. The signature says nothing, and admitting it restores an effect with no operation signature |
+| `newtype` on a type with two constructors, or with one constructor of two fields | Rejected. The backend erases the representation on the strength of this flag |
+| A `nonrec` whose right-hand side refers to a `foreign` declared later in the text | Initializes. Constructors and foreign implementations enter the environment before any value declaration is evaluated |
+| A `nonrec` referring to a later `nonrec` | Rejected. Value declarations are in dependency order |
+| A top-level `rec` group whose members have different kind schemes | Accepted. Every scheme is registered before any right-hand side is checked |
+
+### Reduction (step 4, once an evaluator exists)
+
+| Input | Required outcome |
+| --- | --- |
+| `let x = (openEff [( E )] f) 0 in perform E.op unit` with `f : Int -> Int` | Steps to `let x = openEffC [( E )] (f 0) in …`. Discarding the coercion leaves the two parts of the `let` with no common ambient row |
+| `id [Int -> Int] f 0` with `foreign id : forall a. a -> a` | `δ_id(f)` runs and returns `f`, and `0` is applied to the result. Testing the substituted type instead absorbs `0` and calls `δ_id(f, 0)` |
+| `foreign clock : IO Time`, an arity-zero foreign | Steps to `δ_clock()`. The spine is saturated as soon as it is formed |
+| `M.f v` for a unary foreign | Steps. The final value argument must fire the implementation |
+| `IO.pure [Int]` | Steps. A polymorphic foreign accumulates the type argument on its spine |
+| `letjoin j (x) = e1 in let y = (λz.z) 1 in jump j y` | The body reduces before the jump fires |
+| `letrec { f = λx. … } in e` | Unfolds only in elimination position. No term steps to itself |
+| `switchLabel` on a value wrapped in `weaken` | Dispatches on the label actually injected. `weaken` is a value form and is looked through |
+| `bind x = o in guard (p x) …` | The substitution happens before descending, so the guard's condition has no free `x` |
+| A saturated foreign whose `δ_f` faults | Steps to `fault φ`, which propagates out of every context including `handle`. It is not caught by a handler and is not the `Partial` effect |
+| A term at ambient row `()` reaching a `perform` with no enclosing handler | Does not arise. This is what effect safety asserts |
+
+### Erasure (step 5)
+
+| Input | Required outcome |
+| --- | --- |
+| A term and its erasure | The same sequence of observable steps, modulo steps that only introduce or discharge a coercion |
+| A term whose reduction faults | The erased term faults identically |
+| The number of run-time arguments a backend passes to `δ_f` | Determined by the arrow count of the **declared** type, not by the instantiated result type |

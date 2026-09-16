@@ -109,7 +109,7 @@ These serve as architecture tests as well as demonstrations.
 | Document | Content |
 | --- | --- |
 | [00-Notation](00-Notation.md) | Metavariables, sequences, symbols |
-| [02-Design-Decisions](02-Design-Decisions.md) | The numbered decisions D1–D24 |
+| [02-Design-Decisions](02-Design-Decisions.md) | The numbered decisions D1–D25 |
 | [03-Kinds-and-Types](03-Kinds-and-Types.md) | Names, kinds, types, kinding rules |
 | [04-Rows](04-Rows.md) | Row theory, normal form, entailment, surface syntax |
 | [05-Effects](05-Effects.md) | Effect rows, operations, handlers, `IO` |

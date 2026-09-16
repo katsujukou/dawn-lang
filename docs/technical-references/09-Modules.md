@@ -125,7 +125,7 @@ handle (log "x") with { … Console.log (s,k) -> … }
 -- the type removes Console, yet the output never reaches the clause
 ```
 
-Returning `IO` closes this. `primLog s` merely **constructs a value** of type `IO Unit` and does nothing; the effect occurs when the runtime executes the `IO` (D20). Handleable effects travel only through `perform`, and native effects only through `IO`.
+Returning `IO` closes this. `primLog s` merely **constructs a value** of type `IO Unit`; the effect occurs when the runtime executes the `IO` (D20). Note that D23 constrains the declared type, not the implementation: that `δ_primLog` actually does nothing when applied is a conformance obligation on the backend ([Semantics](08-Semantics.md)). Handleable effects travel only through `perform`, and native effects only through `IO`.
 
 The same rule forbids effectful arrows on the argument side, for a different reason.
 
@@ -140,7 +140,7 @@ D23 therefore closes two holes with one rule: the result side prevents handler b
 
 The rule is syntactically checkable.
 
-**Currying is still required.** `foreign writeAt : Int -> String -> IO Unit` demands a two-argument curried function, so a JavaScript `function writeAt(n, s)` must be bound as `(n) => (s) => …`. Under D23 this is a question of arity rather than of when effects occur: neither `writeAt 0` nor `writeAt 0 "x"` does anything.
+**Currying is still required.** `foreign writeAt : Int -> String -> IO Unit` demands a two-argument curried function, so a JavaScript `function writeAt(n, s)` must be bound as `(n) => (s) => …`. Under D23 this is a question of arity rather than of when effects occur. That neither `writeAt 0` nor `writeAt 0 "x"` does anything follows from the implementation conforming to condition (3) of `Σ ⊨ G` ([Semantics](08-Semantics.md)); D23 constrains the declared type, not the implementation.
 
 ### Uncurried FFI
 

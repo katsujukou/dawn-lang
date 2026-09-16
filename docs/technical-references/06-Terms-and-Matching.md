@@ -45,10 +45,12 @@ v ::= c
     | λ (x : τ) . e
     | Λ (a : κ) . v
     | Λ (_ : C) . v
-    | M.Ctor [τ̄] v̄            constructor application, |v̄| ≤ arity(Ctor)
+    | M.Ctor ς                 a constructor spine
     | {} | extend l v1 v2
     | inject l v
 ```
+
+`ς` is the spine of arguments the constructor has accumulated: kind, type, and constraint instantiations together with values, in whatever order the declared type calls for. [Semantics](08-Semantics.md) gives the full value grammar, which adds the forms that arise only during reduction.
 
 **A constructor application need not be saturated.** Data constructors have curried function types, so `Main.Cons [Int] 1 : List Int -> List Int` is a legitimate term. Were it not a value form, it would be neither a value nor reducible, since a constructor, unlike a lambda, has no body to reduce.
 

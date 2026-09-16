@@ -14,6 +14,10 @@ Notation confined to a single document is introduced where it is used.
 | `a`, `b` | type variables |
 | `τ`, `σ` | types |
 | `ρ`, `r`, `s`, `e` | rows (`e` usually an effect row) |
+| `ς` | an argument spine of a constructor or foreign |
+| `α` | a spine argument: `[τ]`, `[•]`, or a value |
+| `θ` | a kind and type substitution |
+| `δ_f` | the implementation of a foreign `f` |
 | `l` | labels, that is, row keys |
 | `T` | type constructors |
 | `Ctor` | data constructors |
@@ -66,6 +70,8 @@ x̄, ē, v̄                   sequences of value variables, terms, and values
 | `τ1 -> τ2` | notation for `Function τ1 () τ2`, a pure function | [Types](03-Kinds-and-Types.md) |
 | `Γ; Δ ⊢ e : τ ! ρ` | term typing. The row to the right of `!` is the ambient effect row | [Typing Rules](07-Typing-Rules.md) |
 | `Σ ⊢ decl ⊣ Σ'` | declaration checking, extending the signature | [Modules](09-Modules.md) |
+| `G ⊢ e → c` | reduction to a configuration: a term or a fault | [Semantics](08-Semantics.md) |
+| `cursorΣ(M.g, ς)` | the unconsumed declared type and accumulated substitution of a spine | [Semantics](08-Semantics.md) |
 | `·` | the empty context | [Typing Rules](07-Typing-Rules.md) |
 | `⟹` | desugaring of surface syntax | [Rows](04-Rows.md) |
 | `∈ ∪ ∩ ∖ ∅` | ordinary set operations | — |
