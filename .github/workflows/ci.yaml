@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      example: ${{ steps.filter.outputs.example }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'compiler/**'
+              - 'cli/**'
+              - 'spago.yaml'
+              - 'spago.lock'
+              - 'flake.nix'
+              - 'flake.lock'
+              - '.github/workflows/ci.yaml'
+
+  ci:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: experimental-features = nix-command flakes
+      - uses: cachix/cachix-action@v17
+        with:
+          name: katsujukou-github
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+      - uses: nicknovitski/nix-develop@v1
+
+      - name: Build
+        run: |
+          for package in compiler cli; do
+            spago build -p "$package" --strict --pure --pedantic-packages
+          done
+
+      - name: Test
+        run: |
+          spago test -p compiler --pure
+          spago test -p cli --pure
+
+      - name: Format check
+        run: git ls-files '*.purs' ':(exclude)docs/**' | xargs purs-tidy check
+
+  ci-gate:
+    needs: [changes, ci]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on the results
+        run: |
+          changes='${{ needs.changes.result }}'
+          if [ "$changes" != "success" ]; then
+            echo "::error::changes did not pass (result: $changes)"
+            exit 1
+          fi
+
+          code='${{ needs.changes.outputs.code }}'
+          ci='${{ needs.ci.result }}'
+
+          if [ "$code" = "true" ] && [ "$ci" != "success" ]; then
+            echo "::error::ci did not pass (result: $ci)"
+            exit 1
+          fi
+
+          echo "CI gate green (code=$code ci=$ci)"
