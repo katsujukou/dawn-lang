@@ -1,0 +1,235 @@
+-- | Terms, handlers, and decision trees of Typed Core.
+-- |
+-- | Every node carries an annotation `a`, which the specification fixes as a
+-- | source span. Spans have no influence on type checking or semantics, so the
+-- | parameter is free: `Unit` erases them, a span type keeps them.
+module Dawn.Compiler.TypedCore.Term
+  ( Literal(..)
+  , Expr(..)
+  , Param
+  , Binding
+  , Handler
+  , ReturnClause
+  , OpClause
+  , Occurrence(..)
+  , DecisionTree(..)
+  , CtorBranch
+  , LitBranch
+  , LabelBranch
+  , exprAnnotation
+  ) where
+
+import Prelude
+
+import Prim as P
+
+import Dawn.Compiler.TypedCore.Kind (Kind)
+import Dawn.Compiler.TypedCore.Name (EffName, Ident, JoinName, Label, OpName, Qualified, TyVar)
+import Dawn.Compiler.TypedCore.Type (Constraint, TyBinder, Type)
+import Data.Generic.Rep (class Generic)
+import Data.Maybe (Maybe)
+import Data.Show.Generic (genericShow)
+
+-- | A literal. There is no array literal and no record literal: arrays are a
+-- | type constructor with primitives, and records are built by iterating
+-- | `RecordExtend`.
+data Literal
+  = LitInt P.Int
+  | LitNumber P.Number
+  | LitString P.String
+  | LitChar P.Char
+  | LitBoolean P.Boolean
+
+-- | A Core term, written `e`.
+-- |
+-- | `fail τ` is absent: it is derived notation for
+-- | `perform Partial.abort [τ] Prim.Unit` (D10). So is surface `do`, and so are
+-- | implicit arguments, which elaboration turns into ordinary ones (D11).
+data Expr a
+  -- | A local variable, introduced by a binder.
+  = Var a Ident
+  -- | A global name with its kind scheme instantiated, `M.x [[κ̄]]`. Data
+  -- | constructors and foreigns are reached through this form.
+  | Global a (Qualified Ident) (P.Array Kind)
+  | Lit a Literal
+  | Lam a Ident Type (Expr a)
+  | App a (Expr a) (Expr a)
+  -- | Type abstraction, `Λ (a : κ). v`. The body is a value form, which is what
+  -- | makes the abstraction erasable.
+  | TyLam a TyVar Kind (Expr a)
+  | TyApp a (Expr a) Type
+  -- | Constraint abstraction, `Λ (_ : C). v`, erased at run time.
+  | ConstraintLam a Constraint (Expr a)
+  -- | Constraint application, `e [•]`, carrying no proof term.
+  | ConstraintApp a (Expr a)
+  | Let a Ident Type (Expr a) (Expr a)
+  -- | A recursive binding group. Each right-hand side is guarded, that is,
+  -- | syntactically a function value (D14).
+  | LetRec a (P.Array (Binding a)) (Expr a)
+  -- | A match over a scrutinee vector, dispatching through a decision tree (D9).
+  | Case a (P.Array (Expr a)) (DecisionTree a)
+  | LetJoin a JoinName (P.Array Param) (Expr a) (Expr a)
+  -- | A jump to a join point, which occurs in tail position only.
+  | Jump a JoinName (P.Array (Expr a))
+  | RecordEmpty a
+  | RecordExtend a Label (Expr a) (Expr a)
+  | RecordSelect a Label (Expr a)
+  | RecordRestrict a Label (Expr a)
+  | RecordUpdate a Label (Expr a) (Expr a)
+  | RecordMerge a (Expr a) (Expr a)
+  | VariantInject a Label (Expr a)
+  | VariantWeaken a Label Type (Expr a)
+  | VariantAbsurd a Type (Expr a)
+  -- | Invocation of an operation, `perform E.op [τ̄] e`. It requires the ambient
+  -- | effect row to have `E` as a key, not a handler to be installed.
+  | Perform a (Qualified EffName) OpName (P.Array Type) (Expr a)
+  | Handle a (Expr a) (Handler a)
+  -- | Effect widening, `openEff [ρ] e`, which is the identity at run time.
+  -- | Containment is an explicit term rather than subtyping (D8).
+  | OpenEff a Type (Expr a)
+
+-- | A binder together with its type.
+type Param =
+  { name :: Ident
+  , ty :: Type
+  }
+
+type Binding a =
+  { name :: Ident
+  , ty :: Type
+  , value :: Expr a
+  }
+
+-- | A handler of one effect constructor.
+-- |
+-- | The clauses exhaust the operations of `effect`, since `handle` removes that
+-- | key from the row and an operation without a clause would have nowhere to
+-- | go.
+type Handler a =
+  { effect :: Qualified EffName
+  , returnClause :: ReturnClause a
+  , opClauses :: P.Array (OpClause a)
+  }
+
+type ReturnClause a =
+  { binder :: Ident
+  , ty :: Type
+  , body :: Expr a
+  }
+
+-- | A clause for one operation.
+-- |
+-- | `tyBinders` binds the operation's own type parameters, which a handler must
+-- | respect. The continuation's type is `τ' -{ρ}-> β`, where `β` is the result
+-- | of the `handle` and `ρ` the row outside it: resuming returns under the same
+-- | handler, which is what makes handlers deep (D15).
+type OpClause a =
+  { op :: OpName
+  , tyBinders :: P.Array TyBinder
+  , argBinder :: Param
+  , contBinder :: Param
+  , body :: Expr a
+  }
+
+-- | A path from a scrutinee, written `o`.
+-- |
+-- | Occurrences are projections and have no effects, so one may be referenced
+-- | any number of times within a tree.
+data Occurrence
+  -- | The i-th scrutinee, 0-origin.
+  = OccScrutinee P.Int
+  -- | The j-th field of a constructor, `o ! Ctor . j`.
+  | OccField Occurrence (Qualified Ident) P.Int
+  -- | A record label, `o . l`.
+  | OccRecordField Occurrence Label
+  -- | The payload of a variant label, `o ? l`.
+  | OccVariantPayload Occurrence Label
+
+-- | A decision tree, written `dt`.
+-- |
+-- | Every `Switch*` is a single dispatch whose branches are mutually exclusive,
+-- | so their written order carries no meaning. `Guard` is the one sequential
+-- | test; fall-through is expressed by placing a `Jump` in its else branch.
+data DecisionTree a
+  = Leaf (Expr a)
+  | Bind Ident Occurrence (DecisionTree a)
+  | SwitchCtor Occurrence (P.Array (CtorBranch a)) (Maybe (DecisionTree a))
+  -- | Literals cannot be exhausted, so the default is mandatory rather than
+  -- | optional.
+  | SwitchLit Occurrence (P.Array (LitBranch a)) (DecisionTree a)
+  -- | Dispatch on a variant's tag. In the default branch the occurrence takes
+  -- | the residual variant type, with the enumerated labels removed.
+  | SwitchLabel Occurrence (P.Array (LabelBranch a)) (Maybe (DecisionTree a))
+  | Guard (Expr a) (DecisionTree a) (DecisionTree a)
+
+type CtorBranch a =
+  { ctor :: Qualified Ident
+  , tree :: DecisionTree a
+  }
+
+type LitBranch a =
+  { lit :: Literal
+  , tree :: DecisionTree a
+  }
+
+type LabelBranch a =
+  { label :: Label
+  , tree :: DecisionTree a
+  }
+
+exprAnnotation :: forall a. Expr a -> a
+exprAnnotation = case _ of
+  Var a _ -> a
+  Global a _ _ -> a
+  Lit a _ -> a
+  Lam a _ _ _ -> a
+  App a _ _ -> a
+  TyLam a _ _ _ -> a
+  TyApp a _ _ -> a
+  ConstraintLam a _ _ -> a
+  ConstraintApp a _ -> a
+  Let a _ _ _ _ -> a
+  LetRec a _ _ -> a
+  Case a _ _ -> a
+  LetJoin a _ _ _ _ -> a
+  Jump a _ _ -> a
+  RecordEmpty a -> a
+  RecordExtend a _ _ _ -> a
+  RecordSelect a _ _ -> a
+  RecordRestrict a _ _ -> a
+  RecordUpdate a _ _ _ -> a
+  RecordMerge a _ _ -> a
+  VariantInject a _ _ -> a
+  VariantWeaken a _ _ _ -> a
+  VariantAbsurd a _ _ -> a
+  Perform a _ _ _ _ -> a
+  Handle a _ _ -> a
+  OpenEff a _ _ -> a
+
+derive instance Eq Literal
+derive instance Ord Literal
+derive instance Generic Literal _
+
+instance Show Literal where
+  show = genericShow
+
+derive instance Eq a => Eq (Expr a)
+derive instance Functor Expr
+derive instance Generic (Expr a) _
+
+instance Show a => Show (Expr a) where
+  show x = genericShow x
+
+derive instance Eq Occurrence
+derive instance Ord Occurrence
+derive instance Generic Occurrence _
+
+instance Show Occurrence where
+  show x = genericShow x
+
+derive instance Eq a => Eq (DecisionTree a)
+derive instance Functor DecisionTree
+derive instance Generic (DecisionTree a) _
+
+instance Show a => Show (DecisionTree a) where
+  show x = genericShow x

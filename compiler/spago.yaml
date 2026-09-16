@@ -4,9 +4,11 @@ package:
   dependencies:
     - effect
     - console
+    - maybe
     - prelude
   test:
     main: Test.Dawn.Compiler
     dependencies:
+      - arrays
       - spec
       - spec-node

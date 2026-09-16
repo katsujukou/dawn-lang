@@ -23,11 +23,13 @@
           "dependencies": [
             "console",
             "effect",
+            "maybe",
             "prelude"
           ]
         },
         "test": {
           "dependencies": [
+            "arrays",
             "spec",
             "spec-node"
           ]
