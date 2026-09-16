@@ -9,11 +9,14 @@ module Dawn.Compiler.TypedCore.Kind
   , Scheme
   , KindScheme
   , monoScheme
+  , kindVarsOf
   ) where
 
 import Prelude
 
 import Dawn.Compiler.TypedCore.Name (KindVar)
+import Data.Set (Set)
+import Data.Set as Set
 import Data.Generic.Rep (class Generic)
 import Data.Show.Generic (genericShow)
 
@@ -49,6 +52,18 @@ type KindScheme = Scheme Kind
 -- | The scheme of something that binds no kind variable.
 monoScheme :: forall a. a -> Scheme a
 monoScheme body = { kindVars: [], body }
+
+-- | The kind variables a kind mentions.
+-- |
+-- | Kind schemes are prenex (D3), so a kind has no binder of its own and every
+-- | variable here is free.
+kindVarsOf :: Kind -> Set KindVar
+kindVarsOf = case _ of
+  KVar k -> Set.singleton k
+  KType -> Set.empty
+  KEffect -> Set.empty
+  KRow _ -> Set.empty
+  KFun a b -> kindVarsOf a <> kindVarsOf b
 
 derive instance Eq RowElemKind
 derive instance Ord RowElemKind

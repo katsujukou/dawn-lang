@@ -31,7 +31,7 @@ import Prim as P
 import Dawn.Compiler.TypedCore.Decl (AttrField, AttrValue(..), Attribute, CtorDecl, DataDecl, Decl(..), declAnnotation, EffectDecl, Export(..), ForeignDecl, Module, OpDecl, ValueBinding)
 import Dawn.Compiler.TypedCore.Entailment (AtomicFacts, DecomposeError(..), decompose, entails, noFacts)
 import Dawn.Compiler.TypedCore.Equality (constraintEquiv, rowEquiv, typeEquiv)
-import Dawn.Compiler.TypedCore.Kind (Kind(..), KindScheme, RowElemKind(..), Scheme, monoScheme)
+import Dawn.Compiler.TypedCore.Kind (Kind(..), KindScheme, RowElemKind(..), Scheme, kindVarsOf, monoScheme)
 import Dawn.Compiler.TypedCore.Name (EffName(..), Ident(..), JoinName(..), KindVar(..), Label(..), ModuleName(..), OpName(..), Qualified(..), TyName(..), TyVar(..), qualifier, unqualified)
 import Dawn.Compiler.TypedCore.Row (RowError(..), RowNormalForm, RowPayload(..), emptyNormalForm, entryPayload, nf)
 import Dawn.Compiler.TypedCore.Term (Binding, CtorBranch, DecisionTree(..), Expr(..), Handler, LabelBranch, LitBranch, Literal(..), OpClause, Occurrence(..), Param, ReturnClause, exprAnnotation)
