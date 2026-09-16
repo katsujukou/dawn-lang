@@ -21,8 +21,6 @@
         "path": "compiler",
         "core": {
           "dependencies": [
-            "console",
-            "effect",
             "maybe",
             "prelude"
           ]
@@ -30,6 +28,7 @@
         "test": {
           "dependencies": [
             "arrays",
+            "effect",
             "spec",
             "spec-node"
           ]
