@@ -9,7 +9,7 @@ module ::= module M where
              decl1 ; … ; decln
 
 decl ::= data    T forall k̄. (ā : κ̄) = Ctor_1 τ̄1 | … | Ctor_n τ̄n   [newtype]
-       | effect  E forall k̄. (ā : κ̄) where op1 : σ1 ; …
+       | effect  E (ā : κ̄) where op1 : σ1 ; …
        | foreign f : σκ
        | nonrec  x : σκ = e
        | rec     { x1 : σκ1 = v1 ; … }
@@ -18,7 +18,7 @@ decl ::= data    T forall k̄. (ā : κ̄) = Ctor_1 τ̄1 | … | Ctor_n τ̄n  
 σκ ::= forall k1 .. kn . σ                (empty for most declarations)
 ```
 
-`forall k̄.` may be omitted from any declaration. A declaration that binds kind variables is instantiated at each use site by `[[κ̄]]`.
+`forall k̄.` may be omitted from any declaration that admits one, and an `effect` declaration admits none ([Kinds](03-Kinds-and-Types.md)). A declaration that binds kind variables is instantiated at each use site by `[[κ̄]]`.
 
 **The order of value declarations is a dependency order.** A `nonrec` does not refer backwards, and every cycle is contained in a `rec` group.
 
@@ -288,7 +288,7 @@ The join point context is empty. Join points do not cross a function boundary, a
 
 ```text
   from every data declaration   data T forall k̄. (ā : κ̄) = …    T : forall k̄. κ̄ -> Type
-  from every effect declaration effect E forall k̄. (ā : κ̄) …    E : forall k̄. κ̄ -> Effect
+  from every effect declaration effect E (ā : κ̄) …    E : κ̄ -> Effect
     where each κ̄ is a qkind (D24)
   ──────────────────────────────────────────────────────────────────
   Σ_ty = Σ_imp ∪ { all of the above }

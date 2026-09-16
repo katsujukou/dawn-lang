@@ -6,7 +6,7 @@
 Σ ::= global signature                         (kind schemes: 03-Kinds-and-Types)
         type constructors   T : forall k̄. κ
         data constructors   Ctor : forall k̄. σ   (with owning type, tag, arity, field types)
-        effect declarations E forall k̄. (ā : κ̄) { op : σ }
+        effect declarations E (ā : κ̄) { op : σ }
         foreign             f : forall k̄. σ
         top-level values    M.x : forall k̄. σ
 

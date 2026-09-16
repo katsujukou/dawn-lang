@@ -24,7 +24,9 @@ QIdent ::= ModuleName "." Ident | Ident
 
 A label is not a name; it is the separate syntactic class above. For records and variants it is the field or tag name that is written; for effects it is the effect constructor at the head of the element ([Rows](04-Rows.md)).
 
-Every Core node carries a source span. Spans have no influence on type checking or semantics; they exist for diagnostics alone, and the grammars below omit them.
+Every expression, declaration, and module carries a source span. Types, kinds, the structure of a decision tree, and the structure of a handler carry none; an error in one of those is reported at the nearest enclosing node that has a span. Spans have no influence on type checking or semantics; they exist for diagnostics alone, and the grammars below omit them.
+
+A diagnostic is located where the problem is, and an enclosing node contributes context rather than a location. The body of a `leaf` that fails to typecheck is reported at that body; a `switch*` that is not locally total, or a handler that omits a clause, is reported at the `case` or `handle` that contains it.
 
 ## Kinds
 
@@ -136,6 +138,8 @@ Kind schemes appear **only on declarations**. The global signature `Σ` carries 
 | Data constructor | `Ctor : forall k̄. σ` |
 | Top-level value or foreign | `M.x : forall k̄. σ` |
 
+**An effect constructor is not among them.** Its kind is `κ̄ -> Effect`, binding no kind variable, so an element of a `Row Effect` is written `E τ̄` and carries no `[[κ̄]]` ([Open Questions](14-Open-Questions.md)).
+
 Neither the type grammar nor the term grammar has a kind **quantifier**: there is no `forall (k : Kind). τ` and no `Λ (k : Kind). e`. Quantification happens only in declarations. A kind variable enters the local context `Γ` only while checking a declaration whose scheme binds it.
 
 ### Instantiation is explicit
@@ -225,7 +229,7 @@ That row extension and row union require **entailment from the context** is the 
 ### Row elements
 
 ```text
-  Γ ⊢ τ : Type                          ( E : forall k̄. κ̄ -> Effect ) ∈ Σ    Γ ⊢ τ̄ : κ̄
+  Γ ⊢ τ : Type                          ( E : κ̄ -> Effect ) ∈ Σ    Γ ⊢ τ̄ : κ̄
   ────────────────────────              ─────────────────────────────────────────────
   Γ ⊢ ( l : τ ) : Type entry            Γ ⊢ E τ̄ : Effect entry
 
@@ -245,7 +249,7 @@ An element of a `Row Effect` **must have a declared effect constructor at its he
 Key well-formedness is determined by `ε`.
 
 ```text
-  ────────────────────          ( E : forall k̄. κ̄ -> Effect ) ∈ Σ
+  ────────────────────          ( E : κ̄ -> Effect ) ∈ Σ
   Γ ⊢ l key Type                ─────────────────────────────────
   (any label)                   Γ ⊢ E key Effect
 ```

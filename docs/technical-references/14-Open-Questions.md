@@ -28,6 +28,10 @@ Kind-polymorphic **data types** such as `Proxy` are expressible; a kind-polymorp
 
 It arises when `Map` or label polymorphism is introduced in Phase D, and should be judged together with reconsidering D2. Withdrawing D2 and unifying kinds with types, as PureScript 0.14+ does, would dissolve this question and the duplication of the rank question at once.
 
+**Kind-polymorphic effect constructors.** An effect constructor carries no kind scheme ([Kinds](03-Kinds-and-Types.md)), so `effect E forall k. (a : k)` cannot be declared and a `Row Effect` element needs no instantiation.
+
+Restoring it costs more than adding a row to that table. The element becomes `E [[κ̄]] τ̄`, and a row's normal form then carries a kind vector beside its argument vector. Row equality and unification compare payloads, so both would compare kinds as well. Entailment is unaffected: it decides by the keys of a normal form and the atomic facts of `Γ*`, and never examines a payload, however rich the payload becomes. Whether an effect parameterized over a kind other than `Type` is ever wanted is the question; no use has arisen. The addition is backward compatible, since an empty scheme writes nothing.
+
 **Label polymorphism and a `Symbol` kind.** D13 restricts labels to literals, so the kind grammar has nothing corresponding to `Symbol` and labels are not types.
 
 **The principal use of `Symbol` is already served.** Reflecting type-level labels to run-time strings — PureScript's `IsSymbol` and `reflectSymbol` — is the work of a metaprogram using `normalizeRow` ([Elaboration](10-Elaboration.md)), so a JSON encoder derived from a closed record row is unaffected.
