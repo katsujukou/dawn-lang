@@ -123,6 +123,8 @@ Keeping them apart matters because the coercion forms that erasure removes — `
 
 Reduction is parameterized by a global environment, obtained by linking a module with those it depends on.
 
+The signature `Σ` is fixed throughout and left implicit, as it is in the typing rules: `cursorΣ` and the rules below consult it whenever a declared type is wanted. `G` is what linking produces, and availability is decided there.
+
 ```text
 G ::= ·
     | G, M.x : σκ = v          a top-level value definition
@@ -149,7 +151,10 @@ A constructor spine is already a value, saturated or not, so it needs no unfoldi
 The order mirrors the three stages of declaration checking ([Modules](09-Modules.md)). Type checking collects every constructor, operation, and `foreign` into `Σ_decl` before checking any value declaration, so a `nonrec` may legitimately refer to a `foreign` or a constructor that appears later in the text. Initialization must therefore populate those first, or such a module would stall.
 
 ```text
-  G_decl = the definitions of the imported modules
+  G_Prim = the data constructors of Prim, which is Prim.Unit alone
+
+  G_decl = G_Prim
+         ∪ the definitions of the imported modules
          ∪ every constructor declared by M
          ∪ every foreign implementation δ_f declared by M
 
@@ -161,6 +166,8 @@ The order mirrors the three stages of declaration checking ([Modules](09-Modules
 
     rec { x̄ : σ̄ = v̄ }     G_{i+1} = G_i, M.x_1 : σκ_1 = v_1, …, M.x_n : σκ_n = v_n
 ```
+
+`G_Prim` mirrors `Σ_Prim` on the value side ([Prim](16-Prim.md)). `Prim` is not imported, so without it a `Prim.Unit` occurring in the module would have nothing to unfold to, and condition (1) of `Σ ⊨ G` would fail. The implementations the runtime ABI is obliged to supply arrive with the imports, since the module that declares them is imported like any other.
 
 A `rec` group installs **every entry at once, with the right-hand sides themselves**. Guardedness makes each `v_i` a value already, so nothing is evaluated, and a recursive reference inside `v_i` is `M.x_j [[κ̄]]`, an ordinary global name resolved by the lookup rule. No local recursive closure is involved, and each `v_i` keeps the kind binder `k̄_i` under which it was checked.
 
@@ -223,8 +230,42 @@ v ::= c
     | inject l v
     | weaken l [τ] v          a value of a wider variant
     | openEff [ρ] v           a function value at a wider effect row
+    | opaque ω [τ]            a value of an intrinsic type, produced by a foreign
 
 ς ::= ·  |  ς, [[κ̄]]  |  ς, [τ]  |  ς, [•]  |  ς, v      an argument spine
+```
+
+### Opaque values
+
+A `foreign` returns a value of its instantiated result type, and what shape that value has follows from the type.
+
+| Result type | The value `δ_f` returns |
+| --- | --- |
+| a data type | a constructor spine |
+| an intrinsic type | the canonical form of `Σ(T)`'s class ([Prim](16-Prim.md)) |
+
+The second row covers more than one case. A `foreign` whose result is `Int` returns a literal, one whose result is a function type returns a function value — `foreign make : forall a. a` instantiated at `Int -> Int` does exactly that, below — and one whose result is a `Record` returns `{}` or an `extend`. Only the `intrinsic opaque` class is left without a form of its own.
+
+`opaque ω [τ]` is what `δ_f` returns there. `ω` is the payload the backend holds — a JavaScript thunk, a Wasm reference, a native handle — and Core knows only that it is there.
+
+```text
+  τ = T τ̄     Σ(T) = intrinsic opaque     Γ ⊢ τ : Type
+  ────────────────────────────────────────────────────
+  Γ;Δ ⊢ opaque ω [τ] : τ ! ρ
+```
+
+The premise names the **canonical-value class** `Σ` records of `T` ([Prim](16-Prim.md)), not merely that `T` is intrinsic. Admitting any intrinsic type here would admit `opaque ω [Boolean]`, and a `guard` would then meet a value that is neither `true` nor `false`; the same argument applies to `Record` against `select` and to `Function` against application. Progress holds class by class, and this is the premise that keeps it so.
+
+**The payload is what distinguishes one opaque value from another.** Two `IO Unit` values obtained from different foreign applications are different values, and a form carrying only `τ` could not say so.
+
+This is a run-time form: elaboration never produces one, and **no rule takes one apart or compares two**. Core carries an opaque value from the `foreign` that produced it to the `foreign` that consumes it, and observes nothing in between — which is what keeps `IO` representation-independent.
+
+`IO` is the case that matters for D25. Reduction halts once it has constructed a value of type `IO`, and `opaque ω [IO Unit]` is what it halts on; executing that value is the runtime ABI's obligation, not a step of this relation.
+
+Erasure keeps the payload, which carries the run-time content, and drops the type.
+
+```text
+⌊opaque ω [τ]⌋ = opaque ω
 ```
 
 A global constructor or foreign accumulates its arguments on a **single ordered spine**. Each entry is a kind, type, or constraint instantiation, or a value, and the order is whatever the declared type calls for; nothing requires the erased entries to precede the values. `values(ς)` is the subsequence of value arguments, which is what erasure keeps and what `δ_f` receives.
@@ -237,13 +278,16 @@ A **constructor spine is always a value**, saturated or not: a saturated one is 
 
 ### Run-time forms
 
-Three forms arise during reduction and are never produced by elaboration.
+Four forms arise during reduction and are never produced by elaboration.
 
 ```text
 match θ dt            descending a decision tree
 openEffC [ρ] e        a computation whose effects are bounded by a wider row
 rec_i(x̄ : σ̄. v̄)       the i-th component of a local recursive binding group
+opaque ω [τ]          a value an implementation returned, typed above
 ```
+
+The last is the only one a `δ_f` produces, and the only one that is a value rather than a step in progress; its rule is given with the values.
 
 ```text
   Γ;Δ ⊢ e : τ ! r    Γ ⊨ r # ρ
@@ -330,8 +374,9 @@ Separating the two is what lets reduction proceed without a `Γ`. **Saturation a
 The atomic global reference forms the initial spine. A defined global unfolds to a value instead; a constructor and a foreign have nothing to unfold to.
 
 ```text
-  ( M.Ctor : σκ ) ∈ Σ  or  ( M.f : σκ = δ_f ) ∈ G
-  ───────────────────────────────────────────────
+  ( M.Ctor ) ∈ G  with  ( M.Ctor : σκ ) ∈ Σ
+  or  ( M.f : σκ = δ_f ) ∈ G
+  ─────────────────────────────────────────────
   G ⊢ M.g [[κ̄]] → M.g ([[κ̄]])
 ```
 

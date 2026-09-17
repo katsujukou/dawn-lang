@@ -23,6 +23,8 @@ The corresponding Core:
 ```text
 module Main where
 
+import Int
+
 data List (a : Type) = Nil | Cons a (List a)
   -- Main.Nil  : forall (a : Type). List a                    tag 0, arity 0
   -- Main.Cons : forall (a : Type). a -> List a -> List a     tag 1, arity 2
@@ -35,7 +37,7 @@ rec {
             Main.Nil  -> leaf 0
             Main.Cons -> bind x  = s0 ! Main.Cons . 0 in
                          bind ys = s0 ! Main.Cons . 1 in
-                         leaf (Prim.intAdd x (Main.sum ys))
+                         leaf (Int.add x (Main.sum ys))
           }
 }
 
@@ -47,7 +49,7 @@ nonrec Main.result : Int
 
 Points to observe.
 
-- **No type class appears.** `+` is `Prim.intAdd : Int -> Int -> Int`. When `Semiring` arrives, this position holds `select add` applied to a dictionary instead, and the shape of Core is unchanged.
+- **No type class appears.** `+` is `Int.add : Int -> Int -> Int`. When `Semiring` arrives, this position holds `select add` applied to a dictionary instead, and the shape of Core is unchanged.
 - Every effect row is `()`. Since `switchCtor` exhausts the constructors there is no `fail`, and no `Partial` effect.
 - The right-hand side of the `rec` group is a `λ`, satisfying guardedness.
 - Type abstraction and application appear in `Main.Cons [Int]`. CoreFn has no counterpart.
@@ -57,12 +59,11 @@ Points to observe.
 
 ## Rows
 
-A row-polymorphic merge, in Core:
+A row-polymorphic merge. `merge` is a term constructor, so this is the shape of its rule rather than a declaration ([Prim](16-Prim.md)):
 
 ```text
-Prim.merge
-  : forall (r : Row Type). forall (s : Row Type).
-    r # s => Record r -> Record s -> Record ( r ⊎ s )
+merge : forall (r : Row Type). forall (s : Row Type).
+        r # s => Record r -> Record s -> Record ( r ⊎ s )
 ```
 
 In surface syntax:
@@ -149,7 +150,7 @@ nonrec Example.tick
   = Λ (e : Row Effect). Λ (_ : State ∉ e).
       λ (_ : Unit).
         let n : Int  = perform State.get [] Prim.Unit in
-        let _ : Unit = perform State.put [] ( Prim.intAdd n 1 ) in
+        let _ : Unit = perform State.put [] ( Int.add n 1 ) in
         n
 ```
 

@@ -123,3 +123,6 @@ These serve as architecture tests as well as demonstrations.
 | [13-Examples](13-Examples.md) | Worked examples in Core |
 | [14-Open-Questions](14-Open-Questions.md) | Questions deferred beyond v0.1 |
 | [15-Implementation-Plan](15-Implementation-Plan.md) | Order of implementation work |
+| [16-Prim](16-Prim.md) | What `Prim` holds, and which part of it Core names |
+
+The numbers record the order the documents were written in rather than the order to read them in. [16-Prim](16-Prim.md) belongs beside [Modules](09-Modules.md).

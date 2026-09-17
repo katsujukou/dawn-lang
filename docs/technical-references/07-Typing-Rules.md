@@ -154,13 +154,14 @@ The rules for global names instantiate a kind scheme with `κ̄'`, which is **pu
   Γ;Δ ⊢ absurd [τ] e : τ ! ρ
 ```
 
-The type of `merge` is the Core form of a row-polymorphic record merge.
+The rule above is what a row-polymorphic record merge amounts to. Written as a type, it reads:
 
 ```text
-Prim.merge
-  : forall (r : Row Type). forall (s : Row Type).
-    r # s => Record r -> Record s -> Record ( r ⊎ s )
+merge : forall (r : Row Type). forall (s : Row Type).
+        r # s => Record r -> Record s -> Record ( r ⊎ s )
 ```
+
+`merge` is a term constructor and not a global name, so that type describes the rule rather than declaring anything ([Prim](16-Prim.md)).
 
 `r # s` is a `C => τ`, not a dictionary argument, and disappears at run time.
 
@@ -221,7 +222,8 @@ The explicitness is the price of D8. The elaborator inserts it, so an author doe
   ────────────────────────             ────────────────────────────────────────────
   Γ;Δ;Ω ⊢ leaf e : τ ! ρ               Γ;Δ;Ω ⊢ bind x = o in dt : τ ! ρ
 
-  Ω ⊢ o : T σ̄       each Ctor_i is a constructor of T, Ctor_i : forall ā. τ̄_i -> T ā
+  Ω ⊢ o : T σ̄       T is a data type, not an intrinsic one (16-Prim)
+  each Ctor_i is a constructor of T, Ctor_i : forall ā. τ̄_i -> T ā
   the Ctor_i are distinct
   each i: Γ;Δ; Ω ∪ { o ! Ctor_i . j ↦ τ_ij[ā := σ̄] } ⊢ dt_i : τ ! ρ
   with a default:     Γ;Δ;Ω ⊢ dt_0 : τ ! ρ

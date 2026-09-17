@@ -32,6 +32,12 @@ It arises when `Map` or label polymorphism is introduced in Phase D, and should 
 
 Restoring it costs more than adding a row to that table. The element becomes `E [[κ̄]] τ̄`, and a row's normal form then carries a kind vector beside its argument vector. Row equality and unification compare payloads, so both would compare kinds as well. Entailment is unaffected: it decides by the keys of a normal form and the atomic facts of `Γ*`, and never examines a payload, however rich the payload becomes. Whether an effect parameterized over a kind other than `Type` is ever wanted is the question; no use has arisen. The addition is backward compatible, since an empty scheme writes nothing.
 
+**The value domains of literals.** [Prim](16-Prim.md) fixes the type of each literal and leaves what those types range over open.
+
+What Core requires is only that literal identity be decidable, since `switchLit` demands distinct literals. What is unsettled is the range of `Int`, the representation of `Number` together with how NaN and signed zero behave under that identity, whether a `Char` is a Unicode scalar value or a code unit, and what a `String` is a sequence of.
+
+These belong in Core rather than in the runtime ABI, because two backends disagreeing on them would give one Core term two meanings — which is exactly what the backend independence of Mid IR exists to prevent. Until they are settled, an implementation's incidental choices are not the specification.
+
 **Label polymorphism and a `Symbol` kind.** D13 restricts labels to literals, so the kind grammar has nothing corresponding to `Symbol` and labels are not types.
 
 **The principal use of `Symbol` is already served.** Reflecting type-level labels to run-time strings — PureScript's `IsSymbol` and `reflectSymbol` — is the work of a metaprogram using `normalizeRow` ([Elaboration](10-Elaboration.md)), so a JSON encoder derived from a closed record row is unaffected.
@@ -93,6 +99,7 @@ The available extension is an **explicit instance name**, comparable to Koka's n
 **Defining the primitive surface and its ABI.** Of D19, the Core type checker enforces only that every arrow of a `foreign` is pure (D23). The rest must be settled as conventions of the standard library and the build system.
 
 - How to define the set of FFI a backend must implement, and how to version it, so that a new backend can state mechanically how much it must implement to work
+- **Which ABI intrinsic type constructors the surface supplies.** `Array` and the uncurried families are intrinsic without being part of Core, so no declaration in any module can produce them ([Prim](16-Prim.md)); the manifest that does is the same one this question is about. Each needs its opaque representation and its `foreign` operations fixed together
 - **Which primitives may fault, and on which inputs.** A pure primitive such as an unchecked array index can fail, and no Dawn type describes it. A fault is not an effect and no handler intercepts it ([Semantics](08-Semantics.md)); Core records only that applying a `foreign` may produce one. Enumerating the faulting primitives and their preconditions belongs here
 - How to restrict the types that may appear in a `foreign` declaration. `Int`, `String`, and opaque handles are safe, but passing a `Record r` or a user-defined ADT raw fixes its representation for every backend. Whether to introduce a mechanism restricting this to types with a declared ABI, or to leave it as convention
 - How to associate a `foreign` declaration with its per-backend implementations. PureScript uses the implicit convention of a `.js` file beside the module, and alternative backends place parallel files. Adding a backend should not require editing modules

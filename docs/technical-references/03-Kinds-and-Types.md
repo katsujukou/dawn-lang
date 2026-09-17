@@ -83,7 +83,7 @@ Two judgements decide the grammar above. `Γ ⊢ κ kind` holds of a kind the ch
 
 A kind variable is quantifiable, and every `[[κ̄]]` requires `qkind` of what it supplies, so a kind variable stands only for a quantifiable kind.
 
-Representative kinds:
+Representative kinds, drawn from `Prim`, the standard library, and a user module alike:
 
 ```text
 Int        : Type
@@ -94,6 +94,8 @@ Variant    : Row Type -> Type
 Function   : Type -> Row Effect -> Type -> Type
 State      : Type -> Effect
 ```
+
+These illustrate the shapes a kind takes; which of them `Prim` declares is settled in [Prim](16-Prim.md).
 
 `Row Type` is the row kind of records and variants; `Row Effect` is that of effect rows. Both share the row theory of [Rows](04-Rows.md).
 

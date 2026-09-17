@@ -144,7 +144,7 @@ The rule is syntactically checkable.
 
 ### Uncurried FFI
 
-To avoid a chain of closures, PureScript uses `Fn2` through `Fn10`. The equivalent in Dawn places a family of n-argument function types in `Prim`.
+To avoid a chain of closures, PureScript uses `Fn2` through `Fn10`. The equivalent in Dawn is a family of n-argument function types, which are ABI intrinsics of a standard library module rather than part of `Prim` ([Prim](16-Prim.md)).
 
 **The family takes no effect row.** Since `runFn2`'s result arrow must also be pure, admitting `Fn2 a b ρ c` would make `runFn2 : Fn2 a b ρ c -> a -> b -{ρ}-> c` undeclarable.
 
@@ -291,10 +291,20 @@ The join point context is empty. Join points do not cross a function boundary, a
   from every effect declaration effect E (ā : κ̄) …    E : κ̄ -> Effect
     where each κ̄ is a qkind (D24)
   ──────────────────────────────────────────────────────────────────
-  Σ_ty = Σ_imp ∪ { all of the above }
+  Σ_ty = Σ_Prim ∪ Σ_ABI(M) ∪ Σ_imp ∪ { all of the above }
 ```
 
+`Σ_Prim` is the signature of `Prim` ([Prim](16-Prim.md)), which no module imports and every module may name. `Σ_ABI(M)` is what the primitive-surface manifest supplies to `M` itself, empty for every module it does not name; a module holding an ABI intrinsic needs its own entries in scope before its declarations are collected.
+
+Core names are fully qualified, so nothing here can collide the way an unqualified name would: a module declaring `Int` contributes `Main.Int`, which is a different entry from `Prim.Int` and shadows it in no way. What the union does require is that **`Prim` be a reserved module name**, so that no module can supply a second `Prim.Int`; that a module declare no name twice within one namespace, as it must anyway; and that an entry arriving through two import paths be the same entry, which it is, since a name belongs to the module that declares it.
+
 Under `Σ_ty` the interiors are checked and the signature extended. This stage does not depend on order.
+
+A type constructor entry is **intrinsic** or **data**. Nothing adds a constructor to an intrinsic entry, and `switchCtor` requires a data one ([Typing Rules](07-Typing-Rules.md)).
+
+An intrinsic entry carries a **canonical-value class** — literal, function, record, variant, or opaque — which says how a value of that type is built and what may examine one. Rules consult it rather than the entry's origin ([Prim](16-Prim.md)).
+
+**No declaration produces an intrinsic entry.** `data` and `newtype` produce data entries, `foreign` declares a value and not a type, and the surface has no third form. An intrinsic reaches `Σ` either as part of `Σ_Prim`, which the compiler holds, or through the manifest of the primitive surface, which a compiler and its backends implement together; the module it then belongs to is imported like any other ([Prim](16-Prim.md)).
 
 ```text
   Σ_ty ⊢ each constructor type Ctor : forall k̄. forall (ā : κ̄). τ̄ -> T ā  is well formed

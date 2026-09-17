@@ -18,6 +18,7 @@ Notation confined to a single document is introduced where it is used.
 | `α` | a spine argument: `[τ]`, `[•]`, or a value |
 | `θ` | a kind and type substitution |
 | `δ_f` | the implementation of a foreign `f` |
+| `ω` | the payload of an opaque value, held by the backend |
 | `l` | labels, that is, row keys |
 | `T` | type constructors |
 | `Ctor` | data constructors |
