@@ -48,7 +48,7 @@ The distinction is also the unit of **separate compilation**. `Σ` is what a mod
 ```text
 Γ ⊢ κ kind                  kind well-formedness
 Γ ⊢ κ qkind                 κ is a quantifiable kind
-Γ ⊢ l key ε                 key well-formedness
+Γ ⊢ k key ε                 key well-formedness
 Γ ⊢ τ : κ                   kinding
 Γ ⊢ C ok                    constraint well-formedness
 Γ ⊨ C                       constraint entailment

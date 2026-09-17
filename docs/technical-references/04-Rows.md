@@ -4,16 +4,43 @@ Rows are a first-class structure of the type system. Structural relationships be
 
 ## A row is a keyed set
 
-Row theory concerns **keyed, unordered, duplicate-free collections**. How a key is written is not a concern of the theory.
+Row theory concerns **keyed, unordered, duplicate-free collections**. Where a key comes from is not a concern of the theory.
 
-| Kind | Element syntax | Key | Payload |
+| Structure | Key | Payload |
+| --- | --- | --- |
+| record | `SymbolKey`, the field name | the field's type |
+| tuple | `PositionKey`, the component's index | the component's type |
+| variant | `TagKey`, the constructor written with it | the payload's type |
+| labelled variant | `SymbolKey`, the name written for it | the payload's type |
+| effect | `EffectKey`, derived from the effect at the head | the effect application |
+| labelled effect | `SymbolKey`, the instance name written for it | the effect application |
+
+Six structures, one theory (D16). What changes between them is which key constructor the elements carry and what a payload is; normalization, equality, and entailment run the same algorithm over all of them and branch on none of it.
+
+**The table reads as the conventional interpretations, not as a restriction.** Kinding admits any structural key in a `Row Type`, so `Record ( #Ok : Int )` is well-kinded; which keys a structure uses is settled by surface syntax and the elaborator ([Kinds](03-Kinds-and-Types.md)).
+
+**A key is always present, even where nothing is written.** A tuple's components are keyed by position because their types cannot tell them apart — `(Int, Int)` has two elements and no way to name either — and an effect's key is its constructor because the payload already carries it. "Unlabelled" means no symbol is written, never that no key exists.
+
+### Structural and nominal
+
+The four key constructors divide once more, and this division the checker does see.
+
+| | Keys | Identity decided by | Needs `Σ` |
 | --- | --- | --- | --- |
-| `Row Type` | `l : τ` | `l`, the field name | `τ` |
-| `Row Effect` | `E τ̄` | `E`, the effect constructor | `τ̄` |
+| **structural** | `SymbolKey`, `TagKey`, `PositionKey` | the syntax itself | no |
+| **nominal** | `EffectKey` | a declaration | yes |
 
-For records and variants the key cannot be recovered from the element's type: `String` alone does not say whether the field is `name` or `title`, so the key is written.
+A `#Ok` written in one module and a `#Ok` written in another are the same key, and neither requires anything to have been declared. That is what lets an open variant be shared between modules that know nothing of each other.
 
-For effects the key is the constructor at the head of the element. Writing `Console` gives the key `Console`; writing `State Int` gives the key `State`. **Nothing needs to be written.** An effect row element has no label component at all (D16).
+An `EffectKey` is the opposite. `Console.Log` and `Audit.Log` are different effects whatever their names look like, and `perform State.get` can only be checked by reading `State`'s declaration for the operation's argument and resumption types. An undeclared effect key would leave a `perform` with no type and a handler with no set of operations to exhaust.
+
+The two meet in a labelled effect, where **the key and the protocol come apart**.
+
+```text
+cache : State Int
+```
+
+Here `SymbolKey cache` identifies the instance within the row, while `State` decides which operations may be performed on it. Collapsing the two would lose one or the other.
 
 Sharing one theory does not mean sharing one notation.
 
@@ -26,25 +53,27 @@ PureScript, following Leijen's scoped labels, admits `( a :: Int, a :: String )`
 With duplicates permitted, `⊎` is not commutative, and worse, the **position of known fields relative to an unknown tail** becomes significant.
 
 ```text
-  ( l : Int ) ⊎ r     versus     r ⊎ ( l : Int )
+  ( k : Int ) ⊎ r     versus     r ⊎ ( k : Int )
 ```
 
-Under scoped labels these differ once `r` turns out to contain `l`. `⊎` then has no normal form, and deciding row equality must wait for `r` to be instantiated — which defeats the goal of normalizing open rows without closing them.
+Under scoped labels these differ once `r` turns out to contain `k`. `⊎` then has no normal form, and deciding row equality must wait for `r` to be instantiated — which defeats the goal of normalizing open rows without closing them.
 
 With sharp rows, `⊎` is a disjoint union: commutative, associative, with unit `()`. A normal form always exists and no row variable need be closed. The price is managing Lacks constraints.
 
-For effect rows, sharpness means that no effect constructor occurs twice. `( Exn String, Exn String )` is not well-kinded, and neither is `( Exn String, Exn Int )`, since both have the key `Exn`. Distinguishing two uses of one effect requires declaring separate effects. Koka-style languages permit duplicates in effect rows and use them for masking (`mask<exn>`); Dawn does not, and has no masking in v0.1.
+For effect rows, sharpness means that no **key** occurs twice, which is not the same as no effect occurring twice. `( Exn String, Exn Int )` is ill-kinded, both elements deriving the key `EffectKey Exn`; `( primary : Exn String, fallback : Exn Int )` is well-kinded, the two carrying different symbols. Writing the instance name is how one effect is used twice.
+
+Koka-style languages permit duplicates in effect rows and use them for masking (`mask<exn>`), which needs an offset — which occurrence of the key — rather than a key. Dawn has no masking in v0.1, and a labelled instance is what it offers instead.
 
 ## Constraints
 
 Core has exactly two constraints.
 
 ```text
-C ::= l ∉ ρ        ρ does not contain the key l
+C ::= k ∉ ρ        ρ does not contain the key k
     | ρ1 # ρ2      ρ1 and ρ2 share no key
 ```
 
-`l ∉ ρ` is equivalent to `( ent | () ) # ρ` for any element `ent` whose key is `l` — `( l : τ | () ) # ρ` at `Row Type`, `( E τ̄ | () ) # ρ` at `Row Effect`. It is kept as a separate form because the kinding rule for row extension uses it constantly.
+`k ∉ ρ` is equivalent to `( ent | () ) # ρ` for any element `ent` whose key is `k` — `( k : τ | () ) # ρ` at `Row Type`, `( E τ̄ | () ) # ρ` at `Row Effect`. It is kept as a separate form because the kinding rule for row extension uses it constantly.
 
 ### Entailment
 
@@ -52,16 +81,16 @@ The rules are **kind-independent**: a row element is an `ent` with key `key(ent)
 
 ```text
   (C) ∈ Γ                    ────────────      ──────────
-  ─────────                  Γ ⊨ l ∉ ()        Γ ⊨ ρ # ()
+  ─────────                  Γ ⊨ k ∉ ()        Γ ⊨ ρ # ()
   Γ ⊨ C
 
-  l ≠ key(ent)    Γ ⊨ l ∉ ρ               Γ ⊨ ρ1 # ρ2
+  k ≠ key(ent)    Γ ⊨ k ∉ ρ               Γ ⊨ ρ1 # ρ2
   ───────────────────────────             ───────────────
-  Γ ⊨ l ∉ ( ent | ρ )                     Γ ⊨ ρ2 # ρ1
+  Γ ⊨ k ∉ ( ent | ρ )                     Γ ⊨ ρ2 # ρ1
 
-  Γ ⊨ l ∉ ρ1    Γ ⊨ l ∉ ρ2                Γ ⊨ ρ1 # ρ3    Γ ⊨ ρ2 # ρ3
+  Γ ⊨ k ∉ ρ1    Γ ⊨ k ∉ ρ2                Γ ⊨ ρ1 # ρ3    Γ ⊨ ρ2 # ρ3
   ────────────────────────                ────────────────────────────
-  Γ ⊨ l ∉ ρ1 ⊎ ρ2                         Γ ⊨ (ρ1 ⊎ ρ2) # ρ3
+  Γ ⊨ k ∉ ρ1 ⊎ ρ2                         Γ ⊨ (ρ1 ⊎ ρ2) # ρ3
 
   Γ ⊨ key(ent) ∉ ρ2    Γ ⊨ ρ1 # ρ2
   ──────────────────────────────────
@@ -81,11 +110,11 @@ Every well-kinded row has a normal form.
 ```text
 RNF ::= ⟨ F ; T ⟩
 
-F : Label ⇀ Payload       a finite map; sharpness makes keys unique
+F : RowKey ⇀ Payload      a finite map; sharpness makes keys unique
 T : { RowVar }            a finite set of row variables
 ```
 
-The payload is determined by the kind: a type `τ` at `Row Type`, an argument vector `τ̄` at `Row Effect`.
+The payload is determined by the kind: a type `τ` at `Row Type`, an effect application `E τ̄` at `Row Effect`. The key is whichever of the four constructors the element carried, and `F` no more distinguishes them than a map distinguishes how its keys were spelled.
 
 `⟨ F ; T ⟩` represents the union of the known elements `F` with the row variables of the unknown tail `T`.
 
@@ -98,14 +127,14 @@ nf( ρ1 ⊎ ρ2 )         = ⟨ F1 ∪ F2 ; T1 ∪ T2 ⟩                   wher
 
 The kinding side conditions guarantee that both unions are disjoint, so `∪` is well defined, and that `T` is a set.
 
-`nf` terminates and its result is unique, provided `key(ent)` cannot change during normalization. For record rows the key is the written label, which is a literal (D13). For effect rows it is the head constructor, which the element well-formedness rule requires to be rigid (D16). **Keys do not depend on metavariables**, and that is the substance of both decisions.
+`nf` terminates and its result is unique, provided `key(ent)` cannot change during normalization. Every key constructor is rigid for its own reason: a `SymbolKey` and a `TagKey` are written literals (D13), a `PositionKey` is fixed by where the element stands, and an `EffectKey` comes from the constructor the element well-formedness rule requires at the head of a payload (D16). **No key depends on a metavariable**, and that is the substance of both decisions.
 
 ### Equality
 
 ```text
 Γ ⊢ ρ1 ≡ ρ2   ⟺   nf(ρ1) = ⟨F1;T1⟩,  nf(ρ2) = ⟨F2;T2⟩,
                    dom(F1) = dom(F2),
-                   ∀l ∈ dom(F1). Γ ⊢ F1(l) ≡ F2(l),
+                   ∀k ∈ dom(F1). Γ ⊢ F1(k) ≡ F2(k),
                    T1 = T2
 ```
 
@@ -117,8 +146,11 @@ nf( ( name : String | r ) ⊎ ( age : Int ) )
   = nf( ( age : Int, name : String | r ) )
 
 nf( ( Console | e ) ⊎ ( State Int ) )
-  = ⟨ {Console ↦ [], State ↦ [Int]} ; {e} ⟩
+  = ⟨ {EffectKey Console ↦ Console, EffectKey State ↦ State Int} ; {e} ⟩
   = nf( ( State Int, Console | e ) )
+
+nf( ( cache : State Int, counter : State Int ) )
+  = ⟨ {SymbolKey cache ↦ State Int, SymbolKey counter ↦ State Int} ; ∅ ⟩
 ```
 
 `T1 = T2` is literal set equality. Order is irrelevant, so `⟨∅;{r,s}⟩` and `⟨∅;{s,r}⟩` are equal. Distinct row variables, however, are **not** identified.
@@ -145,13 +177,13 @@ The symbol `≡` serves two roles that should not be conflated.
 ## Deciding entailment
 
 ```text
-Γ ⊨ l ∉ ρ        ⟺   nf(ρ) = ⟨F;T⟩,  l ∉ dom(F),
-                       ∀t ∈ T. (l ∉ t) ∈ Γ*
+Γ ⊨ k ∉ ρ        ⟺   nf(ρ) = ⟨F;T⟩,  k ∉ dom(F),
+                       ∀t ∈ T. (k ∉ t) ∈ Γ*
 
 Γ ⊨ ρ1 # ρ2      ⟺   nf(ρi) = ⟨Fi;Ti⟩,
                        dom(F1) ∩ dom(F2) = ∅,
-                       ∀t ∈ T1. ∀l ∈ dom(F2). (l ∉ t) ∈ Γ*,
-                       ∀t ∈ T2. ∀l ∈ dom(F1). (l ∉ t) ∈ Γ*,
+                       ∀t ∈ T1. ∀k ∈ dom(F2). (k ∉ t) ∈ Γ*,
+                       ∀t ∈ T2. ∀k ∈ dom(F1). (k ∉ t) ∈ Γ*,
                        ∀t1 ∈ T1. ∀t2 ∈ T2. (t1 # t2) ∈ Γ*
 ```
 
@@ -159,18 +191,18 @@ The symbol `≡` serves two roles that should not be conflated.
 
 ### `Γ*`: decomposing assumptions into atomic facts
 
-The conditions above look for **atomic facts about row variables** — `l ∉ t` and `t1 # t2` — whereas assumptions in `Γ` concern composite rows. Each assumption is decomposed over the normal form.
+The conditions above look for **atomic facts about row variables** — `k ∉ t` and `t1 # t2` — whereas assumptions in `Γ` concern composite rows. Each assumption is decomposed over the normal form.
 
 ```text
-assumption (l ∉ ρ)      with nf(ρ) = ⟨F;T⟩
-                          if l ∈ dom(F) the assumption is unsatisfiable
-                          otherwise it yields  { l ∉ t | t ∈ T }
+assumption (k ∉ ρ)      with nf(ρ) = ⟨F;T⟩
+                          if k ∈ dom(F) the assumption is unsatisfiable
+                          otherwise it yields  { k ∉ t | t ∈ T }
 
 assumption (ρ1 # ρ2)    with nf(ρi) = ⟨Fi;Ti⟩
                           if dom(F1) ∩ dom(F2) ≠ ∅ the assumption is unsatisfiable
                           otherwise it yields
-                            { l ∉ t | l ∈ dom(F1), t ∈ T2 }
-                            { l ∉ t | l ∈ dom(F2), t ∈ T1 }
+                            { k ∉ t | k ∈ dom(F1), t ∈ T2 }
+                            { k ∉ t | k ∈ dom(F2), t ∈ T1 }
                             { t1 # t2 | t1 ∈ T1, t2 ∈ T2 }
 ```
 
@@ -180,7 +212,7 @@ The only closure added is symmetry of `#`. Since `Γ` is finite and each `nf` is
 
 `Γ ⊨ C` is the finite, syntax-directed relation above, and the only closure `Γ*` computes is symmetry of `#`. It is **sound with respect to the set-theoretic reading of rows, and intentionally incomplete**: a constraint may hold of every row satisfying the assumptions without being derivable.
 
-`r # r` is the clearest instance. It is admissible, and it restricts the instantiations of `r` to the empty row, yet it entails neither `l ∉ r` nor `r # s`; nor does type equality identify `r` with `()`.
+`r # r` is the clearest instance. It is admissible, and it restricts the instantiations of `r` to the empty row, yet it entails neither `k ∉ r` nor `r # s`; nor does type equality identify `r` with `()`.
 
 Leaving that consequence out is not a matter of cost. `Γ*` could record which variables are known to be empty and consult that table, and deciding would remain a scan. The reason is that each such addition carries a further piece of the row semantics into the entailment relation, and this one widens the set of accepted programs very little. The question is worth reopening if a need for it is observed.
 
@@ -203,7 +235,7 @@ It does not appear as an instance resolution error. A failure that is a row prob
 
 ## Why `Difference` and `Map` are not in Core
 
-**`Difference ρ L`.** For an open row, `ρ - {l}` has no determinate meaning unless membership of `l` is known. Where `l` is a known field, the term-level `restrict` already covers it, with type `Record (l : τ | ρ) -> Record ρ`. A type-level `Difference` would be needed only to name the remainder of `ρ` while assuming `l ∈ ρ`, and that is an **equality constraint**, `ρ ≡ (l : τ | ρ')`. A `HasField l τ r` predicate is therefore not a new constraint in Core but the equation `r ≡ ( l : τ | r' )` for a fresh `r'`. The solver solves an equation, not a predicate.
+**`Difference ρ K`.** For an open row, `ρ - {k}` has no determinate meaning unless membership of `k` is known. Where `k` is a known field, the term-level `restrict` already covers it, with type `Record (k : τ | ρ) -> Record ρ`. A type-level `Difference` would be needed only to name the remainder of `ρ` while assuming `k ∈ ρ`, and that is an **equality constraint**, `ρ ≡ (k : τ | ρ')`. A `HasField k τ r` predicate is therefore not a new constraint in Core but the equation `r ≡ ( k : τ | r' )` for a fresh `r'`. The solver solves an equation, not a predicate.
 
 **`Map f ρ`.** This requires type-level functions, whose introduction and termination are unsettled. Admitting computation of unknown termination into the trusted core is not compatible with the checker's self-contained character. Uses such as `Record (Map Maybe r)` are expressed for now with term-level residual evidence ([Elaboration](10-Elaboration.md)).
 

@@ -14,15 +14,32 @@ ModuleName ::= Upper ("." Upper)*
 Ident      ::= value-level identifier
 TyIdent    ::= type-level identifier
 Ctor       ::= data constructor name
-Label      ::= a row key: a record field name, a variant tag, or an effect constructor name
+Symbol     ::= a written field or instance name
+Tag        ::= a structural constructor of a variant
 EffName    ::= effect name
 OpName     ::= effect operation name
 JoinName   ::= join point name
 
-QIdent ::= ModuleName "." Ident | Ident
+QIdent   ::= ModuleName "." Ident | Ident
+QEffName ::= ModuleName "." EffName
 ```
 
-A label is not a name; it is the separate syntactic class above. For records and variants it is the field or tag name that is written; for effects it is the effect constructor at the head of the element ([Rows](04-Rows.md)).
+An effect name is always qualified where it is a key, since an `EffectKey` is the identity of a declaration and identities do not float free of the module that made them.
+
+A row key is not a name either; it is one of four things.
+
+```text
+RowKey ::= SymbolKey Symbol        a written field or instance name
+         | TagKey Tag              a structural variant constructor
+         | PositionKey Nat         a component of a tuple, 0-origin
+         | EffectKey QEffName      a declared effect, fully qualified
+```
+
+`Nat` is a non-negative integer, written in the key and nowhere else; it is not a type, and the kind grammar gains nothing from it.
+
+**The first three are structural and the last is nominal.** A `SymbolKey` and a `TagKey` are what they are by virtue of being written, a `PositionKey` by where the component it keys stands; nothing declares any of them, and two occurrences of `#Ok` in unrelated modules are the same key. An `EffectKey` is the identity of a declaration in `Σ`, so `Console.Log` and `Audit.Log` are different keys however alike they read ([Rows](04-Rows.md)).
+
+Neither the row theory nor the solver distinguishes them: to those, all four are rigid keys that compare for equality. What distinguishes them is well-formedness, since only an `EffectKey` sends the checker to `Σ`.
 
 Every expression, declaration, and module carries a source span. Types, kinds, the structure of a decision tree, and the structure of a handler carry none; an error in one of those is reported at the nearest enclosing node that has a span. Spans have no influence on type checking or semantics; they exist for diagnostics alone, and the grammars below omit them.
 
@@ -101,7 +118,7 @@ These illustrate the shapes a kind takes; which of them `Prim` declares is settl
 
 ### Why the three layers
 
-**`Row` takes only `ε`.** Row element well-formedness is defined for exactly two shapes: `l : τ` at `Row Type` and `E τ̄` at `Row Effect`. Permitting `Row κ` for arbitrary `κ` would admit degenerate row kinds such as `Row (Type -> Type)`, inhabited only by the empty row, row variables, and `⊎`, and having no elements at all.
+**`Row` takes only `ε`.** Row element well-formedness is defined for the shapes of exactly two kinds: a key paired with a type at `Row Type`, and an effect application with or without a written key at `Row Effect`. Permitting `Row κ` for arbitrary `κ` would admit degenerate row kinds such as `Row (Type -> Type)`, inhabited only by the empty row, row variables, and `⊎`, and having no elements at all.
 
 **Quantification is restricted to `q`**, expressed by the judgement `Γ ⊢ κ qkind`.
 
@@ -179,12 +196,18 @@ Surface syntax never contains `[[κ]]`; the elaborator emits it.
           | ( ent | ρ )              row extension
           | ρ1 ⊎ ρ2                  row union
 
-ent ::= l : τ                        a `Row Type` element; the key `l` is written
-      | E τ̄                          a `Row Effect` element; the key `E` is derived
+ent ::= k : τ                        a `Row Type` element; the key is written
+      | E τ̄                          a `Row Effect` element; the key is derived
+      | SymbolKey s : E τ̄            a labelled `Row Effect` element
 
-C ::= l ∉ ρ                          Lacks
+k   ::= a RowKey                     one of the four constructors above
+s   ::= a Symbol                     the written name of a labelled element
+
+C ::= k ∉ ρ                          Lacks
     | ρ1 # ρ2                        Disjoint
 ```
+
+**Core writes the key constructor; these documents drop it where it is evident.** `( name : String | r )` abbreviates `( SymbolKey name : String | r )`, and `( cache : State Int )` abbreviates `( SymbolKey cache : State Int )`. The abbreviation is for reading only: what an AST holds, and what the rules below match on, is the constructor.
 
 A function type is an application of the type constructor `Function`; Core has no arrow syntax.
 
@@ -230,37 +253,66 @@ That row extension and row union require **entailment from the context** is the 
 
 ### Row elements
 
-```text
-  Γ ⊢ τ : Type                          ( E : κ̄ -> Effect ) ∈ Σ    Γ ⊢ τ̄ : κ̄
-  ────────────────────────              ─────────────────────────────────────────────
-  Γ ⊢ ( l : τ ) : Type entry            Γ ⊢ E τ̄ : Effect entry
+An element pairs a key with a payload. What may stand on each side is fixed by the row element kind.
 
-  key( l : τ ) = l                      key( E τ̄ ) = E
+```text
+  k ∈ { SymbolKey s, TagKey t, PositionKey n }      Γ ⊢ τ : Type
+  ──────────────────────────────────────────────────────────────
+  Γ ⊢ ( k : τ ) : Type entry                        key( k : τ ) = k
+
+  ( E : κ̄ -> Effect ) ∈ Σ      Γ ⊢ τ̄ : κ̄
+  ────────────────────────────────────────
+  Γ ⊢ E τ̄ : Effect entry                            key( E τ̄ ) = EffectKey E
+
+  ( E : κ̄ -> Effect ) ∈ Σ      Γ ⊢ τ̄ : κ̄
+  ────────────────────────────────────────
+  Γ ⊢ ( SymbolKey s : E τ̄ ) : Effect entry          key( SymbolKey s : E τ̄ ) = SymbolKey s
 ```
 
-An element of a `Row Effect` **must have a declared effect constructor at its head**; an element headed by a type variable is not admitted. Effect row keys are therefore always rigid, independent of how metavariables are solved, which is what makes row equality decidable ([Rows](04-Rows.md)). The `qkind` condition of D24 reinforces this: since `Effect` is not quantifiable, `forall (e : Effect). …` cannot be written, so a type variable can never reach the head of an element.
+At `Row Type` the key is written and the payload is the type. At `Row Effect` there are two forms, and they differ only in where the key comes from: **the unlabelled form derives it from the effect at the head, and the labelled form writes one**. Either way the payload is an application of a declared effect constructor, which is what the operations of a `perform` are looked up through.
+
+**A `Row Type` element admits any structural key, and the type constructor wrapping the row does not narrow that.** `Record ( #Ok : Int )` and `Variant ( 0 : Int )` are well-kinded, oddly as they read. Core keeps one row theory rather than three, and which keys a structure conventionally uses is a matter for surface syntax and the elaborator, not for kinding.
+
+The alternative was rejected on a concrete ground: a restriction would have to hold of open rows too, and `Record r` says nothing about the keys of `r`. Enforcing it would mean carrying a per-constructor condition through unification and entailment, which is precisely the generality the row theory exists to avoid.
+
+The labelled form is what lets one effect appear twice.
+
+```text
+( State Int )                                     one State
+( cache : State Int, counter : State Int )        two, distinguished by their keys
+```
+
+Without it the row would be ill-kinded, both elements having the key `EffectKey State`.
+
+An element of a `Row Effect` **must have a declared effect constructor at the head of its payload**; a payload headed by a type variable is not admitted. Keys are therefore rigid whatever their kind — a `SymbolKey`, a `TagKey`, and a `PositionKey` are structural constants, independent of how metavariables are solved, and an `EffectKey` is a declaration identity — which is what makes row equality decidable ([Rows](04-Rows.md)). The `qkind` condition of D24 reinforces this: since `Effect` is not quantifiable, `forall (e : Effect). …` cannot be written, so a type variable can never reach the head of a payload.
 
 ### Constraint well-formedness
 
 ```text
-  Γ ⊢ ρ : Row ε    Γ ⊢ l key ε          Γ ⊢ ρ1 : Row ε    Γ ⊢ ρ2 : Row ε
+  Γ ⊢ ρ : Row ε    Γ ⊢ k key ε          Γ ⊢ ρ1 : Row ε    Γ ⊢ ρ2 : Row ε
   ─────────────────────────────         ───────────────────────────────
-  Γ ⊢ l ∉ ρ ok                          Γ ⊢ ρ1 # ρ2 ok
+  Γ ⊢ k ∉ ρ ok                          Γ ⊢ ρ1 # ρ2 ok
 ```
 
 Key well-formedness is determined by `ε`.
 
 ```text
-  ────────────────────          ( E : κ̄ -> Effect ) ∈ Σ
-  Γ ⊢ l key Type                ─────────────────────────────────
-  (any label)                   Γ ⊢ E key Effect
+  k ∈ { SymbolKey s, TagKey t, PositionKey n }      ( E : κ̄ -> Effect ) ∈ Σ
+  ────────────────────────────────────────────      ────────────────────────────
+  Γ ⊢ k key Type                                    Γ ⊢ EffectKey E key Effect
+
+  ──────────────────────────────
+  Γ ⊢ SymbolKey s key Effect
 ```
 
-A `Row Type` key is any label; a `Row Effect` key must be a **declared effect constructor name**. A Lacks constraint over field labels therefore cannot be imposed on a `Row Effect`.
+A structural key is well formed wherever it may occur, needing nothing from `Σ`. An `EffectKey` is well formed only where the declaration exists, which is the whole of the difference between the two.
+
+`SymbolKey` occurs at both kinds, since it is the key of a record field and of a labelled effect instance alike. A `TagKey` and a `PositionKey` are confined to `Row Type`: an effect row's payload is an effect application, and neither a tag nor a position says which effect.
 
 ```text
-name ∉ ( Console )        -- not admitted: `name` is not an effect constructor
-Console ∉ e               -- admitted when e : Row Effect
+cache ∉ e                 -- admitted: `cache` may key a labelled instance
+Console ∉ e               -- admitted: `Console` is declared
+#Ok ∉ e                   -- not admitted: a tag is not a key of a Row Effect
 ```
 
 Both sides of `#` must share the same `ε`; a Disjoint constraint spanning `Row Type` and `Row Effect` is not expressible.

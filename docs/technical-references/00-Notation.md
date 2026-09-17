@@ -60,7 +60,7 @@ x̄, ē, v̄                   sequences of value variables, terms, and values
 | `A ⇀ B` | finite map, that is, a partial function | [Rows](04-Rows.md) |
 | `l ↦ τ` | an entry of a finite map | [Rows](04-Rows.md) |
 | `Γ ⊢ κ qkind` | `κ` is a quantifiable kind | [Kinds](03-Kinds-and-Types.md) |
-| `Γ ⊢ l key ε` | `l` is a well-formed key for rows of `ε` | [Types](03-Kinds-and-Types.md) |
+| `Γ ⊢ k key ε` | `k` is a well-formed key for rows of `ε` | [Types](03-Kinds-and-Types.md) |
 | `Γ ⊢ C ok` | constraint well-formedness | [Types](03-Kinds-and-Types.md) |
 | `σ ->* τ` | an operation signature: an argument type paired with the type the continuation resumes with. **Not a function type** | [Effects](05-Effects.md) |
 | `C => τ` | constraint abstraction, erased at run time | [Types](03-Kinds-and-Types.md) |
