@@ -121,33 +121,33 @@ The rules for global names instantiate a kind scheme with `κ̄'`, which is **pu
   ───────────────────────────
   Γ;Δ ⊢ {} : Record () ! ρ
 
-  Γ;Δ ⊢ e1 : τ ! ρ    Γ;Δ ⊢ e2 : Record r ! ρ    Γ ⊨ l ∉ r
-  ────────────────────────────────────────────────────────
-  Γ;Δ ⊢ extend l e1 e2 : Record ( l : τ | r ) ! ρ
+  Γ;Δ ⊢ e1 : τ ! ρ    Γ;Δ ⊢ e2 : Record r ! ρ    Γ ⊢ k key Type    Γ ⊨ k ∉ r
+  ─────────────────────────────────────────────────────────────────────────
+  Γ;Δ ⊢ extend k e1 e2 : Record ( k : τ | r ) ! ρ
 
-  Γ;Δ ⊢ e : Record ( l : τ | r ) ! ρ
-  ──────────────────────────────────
-  Γ;Δ ⊢ select l e : τ ! ρ
+  Γ;Δ ⊢ e : Record ( k : τ | r ) ! ρ    Γ ⊢ k key Type
+  ──────────────────────────────────────────────────────
+  Γ;Δ ⊢ select k e : τ ! ρ
 
-  Γ;Δ ⊢ e : Record ( l : τ | r ) ! ρ
-  ─────────────────────────────────────
-  Γ;Δ ⊢ restrict l e : Record r ! ρ
+  Γ;Δ ⊢ e : Record ( k : τ | r ) ! ρ    Γ ⊢ k key Type
+  ──────────────────────────────────────────────────────
+  Γ;Δ ⊢ restrict k e : Record r ! ρ
 
-  Γ;Δ ⊢ e1 : Record ( l : τ | r ) ! ρ    Γ;Δ ⊢ e2 : τ' ! ρ
-  ────────────────────────────────────────────────────────   ← the type may change
-  Γ;Δ ⊢ update l e1 e2 : Record ( l : τ' | r ) ! ρ
+  Γ;Δ ⊢ e1 : Record ( k : τ | r ) ! ρ    Γ;Δ ⊢ e2 : τ' ! ρ    Γ ⊢ k key Type
+  ──────────────────────────────────────────────────────────────────────────   ← the type may change
+  Γ;Δ ⊢ update k e1 e2 : Record ( k : τ' | r ) ! ρ
 
   Γ;Δ ⊢ e1 : Record r1 ! ρ    Γ;Δ ⊢ e2 : Record r2 ! ρ    Γ ⊨ r1 # r2
   ───────────────────────────────────────────────────────────────────
   Γ;Δ ⊢ merge e1 e2 : Record (r1 ⊎ r2) ! ρ
 
-  Γ;Δ ⊢ e : τ ! ρ    Γ ⊨ l ∉ r    Γ ⊢ r : Row Type
-  ────────────────────────────────────────────────
-  Γ;Δ ⊢ inject l e : Variant ( l : τ | r ) ! ρ
+  Γ;Δ ⊢ e : τ ! ρ    Γ ⊢ k key Type    Γ ⊨ k ∉ r    Γ ⊢ r : Row Type
+  ─────────────────────────────────────────────────────────────────────
+  Γ;Δ ⊢ inject k e : Variant ( k : τ | r ) ! ρ
 
-  Γ;Δ ⊢ e : Variant r ! ρ    Γ ⊨ l ∉ r    Γ ⊢ τ : Type
-  ────────────────────────────────────────────────────
-  Γ;Δ ⊢ weaken l [τ] e : Variant ( l : τ | r ) ! ρ
+  Γ;Δ ⊢ e : Variant r ! ρ    Γ ⊢ k key Type    Γ ⊨ k ∉ r    Γ ⊢ τ : Type
+  ─────────────────────────────────────────────────────────────────────
+  Γ;Δ ⊢ weaken k [τ] e : Variant ( k : τ | r ) ! ρ
 
   Γ;Δ ⊢ e : Variant () ! ρ    Γ ⊢ τ : Type
   ────────────────────────────────────────
@@ -168,20 +168,22 @@ merge : forall (r : Row Type). forall (s : Row Type).
 ## Effects
 
 ```text
-  nf(ρ) = ⟨ F ; T ⟩      F(E) = τ̄
-  ( op : forall (b̄ : κ̄'). σ ->* τ ) ∈ Σ(E)      E's type parameters are ā
+  nf(ρ) = ⟨ F ; T ⟩      F(k) = E τ̄                ← the key selects the element
+  ( op : forall (b̄ : κ̄'). σ ->* τ ) ∈ Σ(E)         ← the payload selects the protocol
+  E's type parameters are ā
   Γ ⊢ σ̄ : κ̄'      Γ;Δ ⊢ e : σ[ā := τ̄][b̄ := σ̄] ! ρ
   ────────────────────────────────────────────────────
-  Γ;Δ ⊢ perform E.op [σ̄] e : τ[ā := τ̄][b̄ := σ̄] ! ρ
+  Γ;Δ ⊢ perform k.op [σ̄] e : τ[ā := τ̄][b̄ := σ̄] ! ρ
 
-  h = { return (x : α) -> e_r ; E.op_i [b̄_i] (x_i : σ_i', k_i : τ_i' -{ρ}-> β) -> e_i }
-  Γ;· ⊢ e : α ! ( E τ̄ | ρ )                         ← inside handle the row grows
+  h = { key k ; return (x : α) -> e_r ; op_i [b̄_i] (x_i : σ_i', k_i : τ_i' -{ρ}-> β) -> e_i }
+  Γ;· ⊢ e : α ! ( ent | ρ )                         ← inside handle the row grows
+  key(ent) = k     payload(ent) = E τ̄               ← one element, chosen by the key
   Γ, x : α; · ⊢ e_r : β ! ρ
   each i:  Σ(E).op_i = forall (b̄_i : κ̄_i). σ_i ->* τ_i
            σ_i' = σ_i[ā := τ̄]    τ_i' = τ_i[ā := τ̄]
            Γ, b̄_i : κ̄_i, x_i : σ_i', k_i : τ_i' -{ρ}-> β; · ⊢ e_i : β ! ρ
            (b̄_i is bound by the clause; a handler must respect an operation's polymorphism)
-  { op_i } = dom(Σ(E))                              ← the clauses exhaust E's operations
+  { op_i } = dom(Σ(E))    and the op_i are distinct   ← the clauses exhaust E's operations, once each
   ───────────────────────────────────────────────────────────────────────
   Γ;Δ ⊢ handle e with h : β ! ρ
 
@@ -190,7 +192,7 @@ merge : forall (r : Row Type). forall (s : Row Type).
   Γ;Δ ⊢ openEff [r'] e : τ1 -{r1 ⊎ r'}-> τ2 ! ρ
 ```
 
-That handlers are deep (D15) shows in the type of the continuation `k_i`, namely `τ_i -{ρ}-> β`: calling it returns under the same handler, so the result type is `β`, the result of the `handle`, and the ambient row is `ρ`, the row outside it. A shallow handler would give `τ_i -{( E τ̄ | ρ )}-> α`.
+That handlers are deep (D15) shows in the type of the continuation `k_i`, namely `τ_i -{ρ}-> β`: calling it returns under the same handler, so the result type is `β`, the result of the `handle`, and the ambient row is `ρ`, the row outside it. A shallow handler would give `τ_i -{( ent | ρ )}-> α`.
 
 `openEff` is required where a pure function is used in an effectful context.
 
@@ -239,13 +241,13 @@ The explicitness is the price of D8. The elaborator inserts it, so an author doe
   Γ;Δ;Ω ⊢ switchLit o { c_i -> dt_i } default -> dt_0 : τ ! ρ
 
   Ω ⊢ o : Variant r        nf(r) = ⟨F ; T⟩
-  each l_i ∈ dom(F) and the l_i are distinct
-  each i: Γ;Δ; Ω ∪ { o ? l_i ↦ F(l_i) } ⊢ dt_i : τ ! ρ
+  each k_i ∈ dom(F) and the k_i are distinct
+  each i: Γ;Δ; Ω ∪ { o ? k_i ↦ F(k_i) } ⊢ dt_i : τ ! ρ
   with a default:     Γ;Δ; Ω ∪ { o ↦ Variant r' } ⊢ dt_0 : τ ! ρ
-                      where nf(r') = ⟨ F ∖ {l_1..l_n} ; T ⟩
-  without a default:  T = ∅ and {l_i} = dom(F)
+                      where nf(r') = ⟨ F ∖ {k_1..k_n} ; T ⟩
+  without a default:  T = ∅ and {k_i} = dom(F)
   ─────────────────────────────────────────────────────────────
-  Γ;Δ;Ω ⊢ switchLabel o { l_i -> dt_i } [default -> dt_0] : τ ! ρ
+  Γ;Δ;Ω ⊢ switchKey o { k_i -> dt_i } [default -> dt_0] : τ ! ρ
 
   Γ;Δ ⊢ e : Boolean ! ρ    Γ;Δ;Ω ⊢ dt_1 : τ ! ρ    Γ;Δ;Ω ⊢ dt_2 : τ ! ρ
   ─────────────────────────────────────────────────────────────────────
@@ -256,6 +258,6 @@ The explicitness is the price of D8. The elaborator inserts it, so an author doe
   Γ;Δ;Ω ⊢ fail : τ ! ρ
 ```
 
-In the default branch of `switchCtor` and `switchLit` the occurrence context `Ω` is unchanged, because Core does not track the refinement "not one of the enumerated cases". Refinement happens only in the default branch of `switchLabel`, where the occurrence takes the residual type `Variant r'`.
+In the default branch of `switchCtor` and `switchLit` the occurrence context `Ω` is unchanged, because Core does not track the refinement "not one of the enumerated cases". Refinement happens only in the default branch of `switchKey`, where the occurrence takes the residual type `Variant r'`.
 
-That branch is the term-level appearance of residual computation over an unknown tail: when `T ≠ ∅` the condition `{l_i} = dom(F)` cannot be met, so a default is required, and its type is the residual. An open variant cannot be enumerated by pretending it is closed.
+That branch is the term-level appearance of residual computation over an unknown tail: when `T ≠ ∅` the condition `{k_i} = dom(F)` cannot be met, so a default is required, and its type is the residual. An open variant cannot be enumerated by pretending it is closed.

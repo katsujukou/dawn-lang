@@ -13,18 +13,37 @@ Exn     : Type -> Effect
 
 `IO` is not among them: `IO` is an ordinary monad, not an effect (D20).
 
-**Elements of an effect row carry no label.** The key is the effect constructor at the head of the element.
+**An element's key is derived from the effect at the head of its payload, unless one is written for it** (D16). Writing none is the ordinary case, and nothing is lost by it: the payload already says which effect it is.
 
 ```text
 ()                          pure
-( Console )                 Console alone; the key is Console
-( State Int | e )           contains State Int, with an unknown remainder
-( Console, State Int | e )  two known effects and an unknown tail
+( Console )                 key EffectKey Console
+( State Int | e )           key EffectKey State, with an unknown remainder
+( Console, State Int | e )  two keys and an unknown tail
 ```
 
-There is no need to write `( console : Console | e )`. This is not an abbreviation: an effect row has no label component to begin with.
+Writing a key is how one effect appears twice.
 
-Effect rows are sharp (D4), so no effect constructor occurs twice.
+```text
+( cache : State Int, counter : State Int )
+  -- keys SymbolKey cache and SymbolKey counter
+  -- payloads State Int and State Int, so both offer get and put
+```
+
+Effect rows are sharp (D4), so no **key** occurs twice. `( State Int, State String )` is ill-kinded, both elements deriving `EffectKey State`; the labelled form above is well-kinded, and is what distinguishes two instances of one effect.
+
+### The key and the protocol are separate
+
+An element carries two things, and they answer different questions.
+
+| | What it is | What it decides |
+| --- | --- | --- |
+| the key | `EffectKey E` or `SymbolKey s` | which element of the row this is |
+| the payload | `E τ̄` | which operations may be performed, and at what types |
+
+For an unlabelled element the two coincide in appearance, which is why the distinction is easy to miss. A labelled one pulls them apart: `cache : State Int` is identified in the row by `cache` and offers `get` and `put` because its payload is a `State`.
+
+**Nothing but the payload decides the protocol.** A key is a name for a position in a row; it has no operations, no type parameters, and no declaration behind it unless it happens to be an `EffectKey`. This is what lets two instances of `State` behave identically while remaining distinct elements.
 
 ## Effects on the arrow
 
@@ -110,34 +129,44 @@ Core requires no change, and destructuring in handler clauses is likewise surfac
 
 ```text
 e ::= ...
-    | perform E.op [τ̄] e              invoke an operation
+    | perform k.op [τ̄] e              invoke an operation of the element keyed k
     | handle e with h                 apply a handler
     | openEff [ρ'] e                  effect widening, erased
 
-h ::= { return (x : τ) -> e_r
-      ; E.op1 [b̄1] (x1 : σ1, k1 : τ1 -{ρ}-> β) -> e1
+h ::= { key k
+      ; return (x : τ) -> e_r
+      ; op1 [b̄1] (x1 : σ1, k1 : τ1 -{ρ}-> β) -> e1
       ; ...
-      ; E.opn [b̄n] (xn : σn, kn : τn -{ρ}-> β) -> en }
+      ; opn [b̄n] (xn : σn, kn : τn -{ρ}-> β) -> en }
 ```
 
-- `perform E.op [τ̄] e` invokes operation `op` of effect constructor `E`. It requires the ambient effect row to contain `E` as a key, that is, to have the form `( E τ̄ | _ )`.
-- `handle e with h` removes the element keyed `E` from `e`'s effect row and processes it with the clauses of `h`. Handlers are **deep** (D15): after a resumption, control is under the same handler.
+- `perform k.op [τ̄] e` invokes operation `op` of the element the ambient row keys with `k`. It requires that row to contain such an element, and the operation is looked up in the effect at the head of that element's **payload**, not in `k`.
+- `handle e with h` removes the element keyed `h.key` from `e`'s effect row and processes it with the clauses of `h`. Handlers are **deep** (D15): after a resumption, control is under the same handler.
 - `openEff [ρ'] e` turns `e : τ1 -{ρ}-> τ2` into `τ1 -{ρ ⊎ ρ'}-> τ2`. Effect containment is an explicit term rather than subtyping (D8). At run time it is the identity and disappears during lowering.
 
-**A handler must cover every operation of `E`.** Since `handle` removes `E` from the row, an operation without a clause would leave its `perform` with nowhere to go. This is the same requirement as local totality of a decision tree ([Terms and Matching](06-Terms-and-Matching.md)).
+**A handler names one key, and a `perform` names one key.** Where the key is an `EffectKey` the two read as they always have — `perform Console.log`, a handler with `key Console` — and where it is a `SymbolKey` they name the instance instead.
 
-Every clause therefore gives its operation a meaning of its own: it resumes the continuation, abandons it, or translates the operation into another effect. **Passing an operation on to an outer handler of the same `E` is not expressible.** The row `( E τ̄ | ρ )` is sharp, so `E ∉ ρ`, while a clause body is typed at the ambient row `ρ`; a `perform E.op` there would require `E` to be in `ρ`. Forwarding of that kind, and a partial handler that leaves `E` in the row, each require a construct that v0.1 does not have; the candidates are recorded in [Open Questions](14-Open-Questions.md).
+```text
+perform cache.get [] Prim.Unit        -- the element keyed `cache`
+handle e with { key cache ; … }       -- removes that element, leaves `counter`
+```
+
+A handler for `cache` and a handler for `counter` have the same clauses, `get` and `put`, because both elements carry a `State` payload. They are nonetheless different handlers removing different elements.
+
+**A handler must cover every operation of the effect its element carries.** Since `handle` removes that element from the row, an operation without a clause would leave its `perform` with nowhere to go. Which operations those are is read from the payload: a handler keyed `cache` over a payload `State Int` owes clauses for `get` and `put`. This is the same requirement as local totality of a decision tree ([Terms and Matching](06-Terms-and-Matching.md)).
+
+Every clause therefore gives its operation a meaning of its own: it resumes the continuation, abandons it, or translates the operation into another effect. **Passing an operation on to an outer handler of the same key is not expressible.** The row `( ent | ρ )` is sharp, so `key(ent) ∉ ρ`, while a clause body is typed at the ambient row `ρ`; a `perform` on that key there would require it to be in `ρ`. Two instances of one effect are a different matter: `cache` and `counter` are different keys, so a handler for one may perform on the other. Forwarding of that kind, and a partial handler that leaves the handled element in the row, each require a construct that v0.1 does not have; the candidates are recorded in [Open Questions](14-Open-Questions.md).
 
 ### `perform` does not require a handler to exist
 
-What `perform E.op` requires is that **the ambient effect row contain `E`**, not that a handler be installed. The type system tracks an obligation, not the presence of a handler.
+What `perform k.op` requires is that **the ambient effect row contain an element keyed `k`**, not that a handler be installed. The type system tracks an obligation, not the presence of a handler.
 
 Handlers are installed as a dynamic nesting on the call stack, so whether one exists cannot be asked statically at the `perform` site. What can be asked is which effects a computation may perform, and that is the effect row.
 
 **The absence of a handler anywhere is not in itself a type error.** An unhandled effect is an obligation recorded in a type.
 
 ```text
-f : Unit -{( E )}-> Unit          -- performs E.op internally
+f : Unit -{( E )}-> Unit          -- performs an operation of E internally
 ```
 
 This is well typed. A library exporting only such functions compiles and ships; installing a handler is the caller's responsibility. If `f` is never called, the obligation is never passed on.
@@ -179,7 +208,7 @@ A partial function therefore carries `( Partial | e )` in its type. The effect o
 
 The common spread rules are in [Rows](04-Rows.md); this section covers what is specific to effect rows.
 
-**The brackets are `{|` and `|}`.** Elements are effect types, written without labels.
+**The brackets are `{|` and `|}`.** What follows covers the **unlabelled form**, where an element is an effect type alone and its key is derived.
 
 ```purescript
 log :: String -> Unit / {| Console |}
@@ -192,6 +221,8 @@ log :: String -> Unit / {| Console |}
 {| Console, ...e |}            ⟹  ( Console ) ⊎ e
 {| Console, State Int, ...e |} ⟹  ( Console, State Int ) ⊎ e
 ```
+
+**The surface spelling of a labelled instance is not settled here.** Core has the form — `( cache : State Int )`, keyed `SymbolKey cache` — and what remains is how a signature writes one and how ordinary code says which of `cache` and `counter` it means, given that `perform` never appears in surface syntax (D17). Both belong with the rest of the surface design ([Rows](04-Rows.md)).
 
 **`/` attaches to the last arrow, not to the function type as a whole.**
 
@@ -381,8 +412,9 @@ foreign primLog :: String -> IO Unit
 runConsoleIO :: forall a. (Unit -> a / {| Console |}) -> IO a
 runConsoleIO thunk =
   handle (thunk ()) with
-    { return x            -> IO.pure x
-    ; Console.log (s, k)  -> IO.bind (primLog s) (\_ -> k ())
+    { key Console
+    ; return x        -> IO.pure x
+    ; log (s, k)      -> IO.bind (primLog s) (\_ -> k ())
     }
 ```
 

@@ -269,6 +269,16 @@ An element pairs a key with a payload. What may stand on each side is fixed by t
   Γ ⊢ ( SymbolKey s : E τ̄ ) : Effect entry          key( SymbolKey s : E τ̄ ) = SymbolKey s
 ```
 
+Two functions read an element apart, and both are total on well-formed ones.
+
+```text
+key( k : τ )                = k             payload( k : τ )                = τ
+key( E τ̄ )                  = EffectKey E   payload( E τ̄ )                  = E τ̄
+key( SymbolKey s : E τ̄ )    = SymbolKey s   payload( SymbolKey s : E τ̄ )    = E τ̄
+```
+
+Normalization pairs them — `nf` maps `ent` to `key(ent) ↦ payload(ent)` ([Rows](04-Rows.md)) — and the rule for `handle` uses both, one to find the element and the other to find its operations ([Typing Rules](07-Typing-Rules.md)).
+
 At `Row Type` the key is written and the payload is the type. At `Row Effect` there are two forms, and they differ only in where the key comes from: **the unlabelled form derives it from the effect at the head, and the labelled form writes one**. Either way the payload is an application of a declared effect constructor, which is what the operations of a `perform` are looked up through.
 
 **A `Row Type` element admits any structural key, and the type constructor wrapping the row does not narrow that.** `Record ( #Ok : Int )` and `Variant ( 0 : Int )` are well-kinded, oddly as they read. Core keeps one row theory rather than three, and which keys a structure conventionally uses is a matter for surface syntax and the elaborator, not for kinding.

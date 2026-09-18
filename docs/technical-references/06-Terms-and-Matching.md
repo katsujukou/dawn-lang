@@ -19,17 +19,17 @@ e ::= x | M.x [[κ̄]]                    variable; `M.x` when κ̄ is empty
     | fail τ                           non-exhaustive; derived notation
     -- records
     | {}
-    | extend l e1 e2
-    | select l e
-    | restrict l e
-    | update l e1 e2
+    | extend k e1 e2
+    | select k e
+    | restrict k e
+    | update k e1 e2
     | merge e1 e2
     -- variants
-    | inject l e
-    | weaken l [τ] e
+    | inject k e
+    | weaken k [τ] e
     | absurd [τ] e
     -- effects
-    | perform E.op [τ̄] e
+    | perform k.op [τ̄] e
     | handle e with h
     | openEff [ρ] e
 
@@ -46,8 +46,8 @@ v ::= c
     | Λ (a : κ) . v
     | Λ (_ : C) . v
     | M.Ctor ς                 a constructor spine
-    | {} | extend l v1 v2
-    | inject l v
+    | {} | extend k v1 v2
+    | inject k v
 ```
 
 `ς` is the spine of arguments the constructor has accumulated: kind, type, and constraint instantiations together with values, in whatever order the declared type calls for. [Semantics](08-Semantics.md) gives the full value grammar, which adds the forms that arise only during reduction.
@@ -122,8 +122,8 @@ An occurrence is a path from a scrutinee.
 ```text
 o ::= s_i              the i-th scrutinee, 0-origin
     | o ! Ctor . j     the j-th field of constructor Ctor
-    | o . l            record label l
-    | o ? l            the payload of variant label l
+    | o . k            the payload of the record element keyed k
+    | o ? k            the payload of the variant element keyed k
 ```
 
 Occurrences are **projections only** and have no effects, so the same occurrence may be referenced any number of times within a tree.
@@ -135,13 +135,13 @@ dt ::= leaf e
      | bind x = o in dt
      | switchCtor  o { Ctor_1 -> dt1 ; … ; Ctor_n -> dtn } [ default -> dt0 ]
      | switchLit   o { c1 -> dt1 ; … ; cn -> dtn }   default -> dt0
-     | switchLabel o { l1 -> dt1 ; … ; ln -> dtn } [ default -> dt0 ]
+     | switchKey   o { k1 -> dt1 ; … ; kn -> dtn } [ default -> dt0 ]
      | guard e dt_then dt_else
      | fail
 ```
 
 - `switchCtor` is a single dispatch on a data type's tag. The branches are mutually exclusive and their written order carries no meaning.
-- `switchLabel` dispatches on a variant's tag. In the `default` branch the occurrence has the residual variant type `Variant ρ'`, with the enumerated labels removed. This is the structural decomposition of an open variant.
+- `switchKey` dispatches on the key of a variant element. In the `default` branch the occurrence has the residual variant type `Variant ρ'`, with the enumerated keys removed. This is the structural decomposition of an open variant.
 - `guard` is the only sequential test, corresponding to CoreFn's `Guard`. Fall-through is expressed by placing `jump j` in `dt_else`.
 - `fail` is derived notation for `leaf (perform Partial.abort [τ] Prim.Unit)` and produces a `Partial` effect (D10).
 
@@ -207,8 +207,8 @@ The condition for having no default differs by node.
 | --- | --- |
 | `switchCtor` | `{Ctor_i}` exhausts the constructors of `T` |
 | `switchLit` | unattainable; **a default is mandatory**, since literals cannot be exhausted |
-| `switchLabel` | the unknown tail is empty and `{l_i} = dom(F)` |
+| `switchKey` | the unknown tail is empty and `{k_i} = dom(F)` |
 
-For `switchLabel` over a closed variant, a tree that enumerates only some known labels and omits the default is **not admitted**; without this condition a value could be left with no destination at run time.
+For `switchKey` over a closed variant, a tree that enumerates only some known keys and omits the default is **not admitted**; without this condition a value could be left with no destination at run time.
 
 This separation keeps the trusted core free of a coverage algorithm, which grows complex quickly with GADTs, views, and literal ranges. What it keeps is the local and self-evident check that each dispatch is exhaustive or has a default.
