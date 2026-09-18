@@ -11,8 +11,10 @@ module Dawn.Compiler.Elaborate.Type
   ( MetaVar(..)
   , XType(..)
   , XRowEntry(..)
+  , XRowPayload(..)
   , XConstraint(..)
   , xRowEntryKey
+  , xRowEntryPayload
   , fromCore
   , fromCoreEntry
   , fromCoreConstraint
@@ -32,7 +34,7 @@ import Prelude
 
 import Prim as P
 
-import Dawn.Compiler.TypedCore (Constraint(..), EffName, Kind, KindVar, Label, Qualified, RowEntry(..), RowKey(..), TyName, TyVar, Type(..), kindVarsOf)
+import Dawn.Compiler.TypedCore (Constraint(..), EffName, Kind, KindVar, Qualified, RowEntry(..), RowKey(..), Symbol, TyName, TyVar, Type(..), kindVarsOf)
 import Data.Foldable (foldMap)
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..))
@@ -58,21 +60,37 @@ data XType
   | XRowExtend XRowEntry XType
   | XRowUnion XType XType
 
+-- | An element of a row of Core⁺, in the three forms Core has.
 data XRowEntry
-  = XRowField Label XType
+  = XRowTypeEntry RowKey XType
   | XRowEffectEntry (Qualified EffName) (P.Array XType)
+  | XRowLabelledEffectEntry Symbol (Qualified EffName) (P.Array XType)
+
+-- | What an element carries once its key is taken away. Two elements sharing a
+-- | key are equal exactly when these are, which is what unification decides.
+data XRowPayload
+  = XTypePayload XType
+  | XEffectPayload (Qualified EffName) (P.Array XType)
 
 data XConstraint
   = XLacks RowKey XType
   | XDisjoint XType XType
 
--- | Keys stay rigid in Core⁺ as well: a label is a literal and an effect key is
--- | the head constructor, so neither depends on how a metavariable is solved.
--- | That is what lets a normal form be computed before unification finishes.
+-- | Keys stay rigid in Core⁺ as well: a structural key is a literal and a
+-- | nominal one is the head constructor, so neither depends on how a
+-- | metavariable is solved. That is what lets a normal form be computed before
+-- | unification finishes.
 xRowEntryKey :: XRowEntry -> RowKey
 xRowEntryKey = case _ of
-  XRowField l _ -> FieldKey l
+  XRowTypeEntry k _ -> k
   XRowEffectEntry e _ -> EffectKey e
+  XRowLabelledEffectEntry s _ _ -> SymbolKey s
+
+xRowEntryPayload :: XRowEntry -> XRowPayload
+xRowEntryPayload = case _ of
+  XRowTypeEntry _ ty -> XTypePayload ty
+  XRowEffectEntry e args -> XEffectPayload e args
+  XRowLabelledEffectEntry _ e args -> XEffectPayload e args
 
 fromCore :: Type -> XType
 fromCore = case _ of
@@ -87,8 +105,9 @@ fromCore = case _ of
 
 fromCoreEntry :: RowEntry -> XRowEntry
 fromCoreEntry = case _ of
-  RowField l ty -> XRowField l (fromCore ty)
+  RowTypeEntry k ty -> XRowTypeEntry k (fromCore ty)
   RowEffectEntry e args -> XRowEffectEntry e (map fromCore args)
+  RowLabelledEffectEntry s e args -> XRowLabelledEffectEntry s e (map fromCore args)
 
 fromCoreConstraint :: Constraint -> XConstraint
 fromCoreConstraint = case _ of
@@ -112,8 +131,9 @@ toCore = case _ of
 
 toCoreEntry :: XRowEntry -> Maybe RowEntry
 toCoreEntry = case _ of
-  XRowField l ty -> RowField l <$> toCore ty
+  XRowTypeEntry k ty -> RowTypeEntry k <$> toCore ty
   XRowEffectEntry e args -> RowEffectEntry e <$> traverse toCore args
+  XRowLabelledEffectEntry s e args -> RowLabelledEffectEntry s e <$> traverse toCore args
 
 toCoreConstraint :: XConstraint -> Maybe Constraint
 toCoreConstraint = case _ of
@@ -136,8 +156,9 @@ metasOf = case _ of
 
 entryMetas :: XRowEntry -> Set MetaVar
 entryMetas = case _ of
-  XRowField _ ty -> metasOf ty
+  XRowTypeEntry _ ty -> metasOf ty
   XRowEffectEntry _ args -> foldMap metasOf args
+  XRowLabelledEffectEntry _ _ args -> foldMap metasOf args
 
 constraintMetas :: XConstraint -> Set MetaVar
 constraintMetas = case _ of
@@ -170,8 +191,9 @@ freeRigids = go Set.empty
     XRowUnion l r -> go bound l <> go bound r
 
   goEntry bound = case _ of
-    XRowField _ ty -> go bound ty
+    XRowTypeEntry _ ty -> go bound ty
     XRowEffectEntry _ args -> foldMap (go bound) args
+    XRowLabelledEffectEntry _ _ args -> foldMap (go bound) args
 
   goConstraint bound = case _ of
     XLacks _ row -> go bound row
@@ -196,8 +218,9 @@ freeKindVars = case _ of
 
 entryKindVars :: XRowEntry -> Set KindVar
 entryKindVars = case _ of
-  XRowField _ ty -> freeKindVars ty
+  XRowTypeEntry _ ty -> freeKindVars ty
   XRowEffectEntry _ args -> foldMap freeKindVars args
+  XRowLabelledEffectEntry _ _ args -> foldMap freeKindVars args
 
 constraintKindVars :: XConstraint -> Set KindVar
 constraintKindVars = case _ of
@@ -240,6 +263,12 @@ derive instance Eq XRowEntry
 derive instance Generic XRowEntry _
 
 instance Show XRowEntry where
+  show x = genericShow x
+
+derive instance Eq XRowPayload
+derive instance Generic XRowPayload _
+
+instance Show XRowPayload where
   show x = genericShow x
 
 derive instance Eq XConstraint

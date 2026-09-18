@@ -7,7 +7,7 @@ import Prelude
 
 import Prim as P
 
-import Dawn.Compiler.TypedCore (AttrValue(..), Constraint(..), Decl(..), DecisionTree(..), EffName(..), EffectDecl, Expr(..), Ident(..), Kind(..), Label(..), Literal(..), Module, ModuleName(..), OpName(..), Occurrence(..), Qualified(..), RowElemKind(..), RowEntry(..), RowKey(..), TyName(..), TyVar(..), Type(..), declAnnotation, exprAnnotation, monoScheme, rowEntryKey)
+import Dawn.Compiler.TypedCore (AttrValue(..), Constraint(..), Decl(..), DecisionTree(..), EffName(..), EffectDecl, Expr(..), Ident(..), Kind(..), Literal(..), Module, ModuleName(..), OpName(..), Occurrence(..), Qualified(..), RowElemKind(..), RowEntry(..), RowKey(..), RowPayload(..), Symbol(..), Tag(..), TyName(..), TyVar(..), Type(..), declAnnotation, exprAnnotation, monoScheme, rowEntryKey, rowEntryPayload)
 import Data.Array (index)
 import Data.Maybe (Maybe(..))
 import Test.Spec (Spec, describe, it)
@@ -130,7 +130,7 @@ toMaybe =
     $ Lam 4 (Ident "thunk") thunkTy
     $
       Handle 5 (App 6 (Var 7 (Ident "thunk")) (Global 8 primUnit []))
-        { effect: partialEff
+        { key: EffectKey partialEff
         , returnClause:
             { binder: Ident "x"
             , ty: TVar (TyVar "a")
@@ -154,6 +154,9 @@ toMaybe =
 
 partialEff :: Qualified EffName
 partialEff = Qualified prim (EffName "Partial")
+
+stateEff :: Qualified EffName
+stateEff = Qualified prim (EffName "State")
 
 primUnit :: Qualified Ident
 primUnit = Qualified prim (Ident "Unit")
@@ -231,11 +234,28 @@ spec = describe "Dawn.Compiler.TypedCore" do
       map _.resumesWith stateEffect.operations `shouldEqual` [ TVar (TyVar "s"), tUnit ]
 
   describe "row keys" do
-    it "come from the written label at Row Type" do
-      rowEntryKey (RowField (Label "name") tInt) `shouldEqual` FieldKey (Label "name")
+    it "are written at Row Type, in any of the structural constructors" do
+      rowEntryKey (RowTypeEntry (SymbolKey (Symbol "name")) tInt)
+        `shouldEqual` SymbolKey (Symbol "name")
+      rowEntryKey (RowTypeEntry (TagKey (Tag "Some")) tInt)
+        `shouldEqual` TagKey (Tag "Some")
+      rowEntryKey (RowTypeEntry (PositionKey 0) tInt)
+        `shouldEqual` PositionKey 0
 
-    it "come from the head constructor at Row Effect, which carries no label" do
+    it "come from the head constructor at Row Effect where none is written" do
       rowEntryKey (RowEffectEntry partialEff []) `shouldEqual` EffectKey partialEff
+
+    it "come from the written Symbol where one is, which is what lets an effect repeat" do
+      rowEntryKey (RowLabelledEffectEntry (Symbol "cache") stateEff [ tInt ])
+        `shouldEqual` SymbolKey (Symbol "cache")
+
+    it "leave the payload to name the protocol, whichever key stands over it" do
+      -- A `perform` reads its operation's signature from the payload; the two
+      -- elements below differ in key and agree in everything else
+      rowEntryPayload (RowLabelledEffectEntry (Symbol "cache") stateEff [ tInt ])
+        `shouldEqual` EffectPayload stateEff [ tInt ]
+      rowEntryPayload (RowEffectEntry stateEff [ tInt ])
+        `shouldEqual` EffectPayload stateEff [ tInt ]
 
   describe "attributes" do
     it "carry a key and a structured value, and nothing the checker reads" do

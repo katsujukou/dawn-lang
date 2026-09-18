@@ -1,8 +1,8 @@
 -- | Row unification over Core⁺.
 -- |
 -- | Solving `ρ1 ≡ ρ2` operates on the normal form, and the procedure is
--- | identical at `Row Type` and `Row Effect`: effect keys are rigid, so the
--- | domain of a normal form does not depend on how metavariables are solved.
+-- | identical at `Row Type` and `Row Effect`: every key is rigid, so the domain
+-- | of a normal form does not depend on how metavariables are solved.
 -- |
 -- | Three outcomes are distinguished. `Solved` records a substitution,
 -- | `Mismatch` is a failure to report, and `Stuck` is neither: it names the
@@ -24,7 +24,7 @@ import Prelude
 
 import Prim as P
 
-import Dawn.Compiler.Elaborate.Row (XRowError, XRowNormalForm, payloadTypes, rebuild, xnf)
+import Dawn.Compiler.Elaborate.Row (XRowError, XRowNormalForm, payloadEquations, rebuild, xnf)
 import Dawn.Compiler.Elaborate.Type (MetaVar(..), Scope, XConstraint(..), XRowEntry(..), XType(..), occursIn, outOfScope)
 import Dawn.Compiler.TypedCore (Constraint(..), Kind(..), KindVar, RowElemKind(..), RowKey, TyVar, Type(..))
 import Dawn.Compiler.TypedCore.Entailment (AtomicFacts, entails)
@@ -38,6 +38,7 @@ import Data.Maybe (Maybe(..))
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Show.Generic (genericShow)
+import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..), snd)
 
 -- | What `Ψ` records of an unsolved metavariable, that is, `?α : κ [Γ]`.
@@ -74,6 +75,8 @@ data UnifyError
   | OccursCheck MetaVar XType
   -- | A solution would carry a key the metavariable is assumed to lack.
   | LacksViolated RowKey
+  -- | Two entries share a key but carry payloads no substitution equates.
+  | PayloadMismatch RowKey XRowEntry XRowEntry
   -- | A solution puts a rigid tail where the context does not prove the Lacks
   -- | the metavariable carries.
   | LacksUnproven RowKey TyVar
@@ -130,8 +133,9 @@ substitute ctx = go
     ty -> ty
 
   goEntry = case _ of
-    XRowField l ty -> XRowField l (go ty)
+    XRowTypeEntry k ty -> XRowTypeEntry k (go ty)
     XRowEffectEntry e args -> XRowEffectEntry e (map go args)
+    XRowLabelledEffectEntry s e args -> XRowLabelledEffectEntry s e (map go args)
 
   -- A constraint carries rows of its own, and a hole left in one of them would
   -- survive zonking and fail `toCore`.
@@ -141,9 +145,10 @@ substitute ctx = go
 
 -- | `solve(ρ1 ≡ ρ2)`.
 -- |
--- | Payload equations are returned rather than solved: equating `F1(l)` with
--- | `F2(l)` is type unification, which is a separate judgement. The caller
--- | discharges them.
+-- | Payload equations are returned rather than solved: equating `F1(k)` with
+-- | `F2(k)` is type unification, which is a separate judgement. The caller
+-- | discharges them. A payload the two sides cannot share at all is decided
+-- | here, since no substitution repairs it.
 unifyRow :: AtomicFacts -> MetaContext -> XType -> XType -> Tuple UnifyResult (P.Array (Tuple XType XType))
 unifyRow facts ctx row1 row2 =
   case xnf (substitute ctx row1), xnf (substitute ctx row2) of
@@ -153,15 +158,20 @@ unifyRow facts ctx row1 row2 =
 
 solve :: AtomicFacts -> MetaContext -> XRowNormalForm -> XRowNormalForm -> Tuple UnifyResult (P.Array (Tuple XType XType))
 solve facts ctx n1 n2 =
-  Tuple (step4 facts ctx d1 d2 r1 r2 m1 m2 n1 n2) equations
+  case traverse payloadsAt (Set.toUnfoldable shared :: P.Array RowKey) of
+    Left err ->
+      Tuple (Mismatch err) []
+    Right equations ->
+      Tuple (step4 facts ctx d1 d2 r1 r2 m1 m2 n1 n2) (Array.concat equations)
   where
   -- 1. match the payloads of shared keys
   shared = Set.intersection (domain n1) (domain n2)
-  equations = Array.concatMap payloadEquations (Set.toUnfoldable shared)
 
-  payloadEquations key = case Map.lookup key n1.known, Map.lookup key n2.known of
-    Just e1, Just e2 -> Array.zip (payloadTypes e1) (payloadTypes e2)
-    _, _ -> []
+  payloadsAt key = case Map.lookup key n1.known, Map.lookup key n2.known of
+    Just e1, Just e2 -> case payloadEquations e1 e2 of
+      Just equations -> Right equations
+      Nothing -> Left (PayloadMismatch key e1 e2)
+    _, _ -> Right []
 
   d1 = Map.filterKeys (\k -> not (Set.member k shared)) n1.known
   d2 = Map.filterKeys (\k -> not (Set.member k shared)) n2.known
@@ -388,9 +398,9 @@ obligationUnmet facts info solution = case xnf solution of
     disjointHolds (Tuple t u) = entails facts (Disjoint (TVar t) (TVar u)) == Right true
 
 -- | The row element kind a solution commits to, which its known elements give
--- | away: a field element belongs to `Row Type`, an effect element to
--- | `Row Effect`. A row of variables alone commits to neither, and there is
--- | nothing to check.
+-- | away: an element carrying a type belongs to `Row Type`, one carrying an
+-- | effect to `Row Effect`. A row of variables alone commits to neither, and
+-- | there is nothing to check.
 rowKindOf :: XType -> Maybe Kind
 rowKindOf ty = case xnf ty of
   Left _ -> Nothing
@@ -398,8 +408,9 @@ rowKindOf ty = case xnf ty of
 
 entryKind :: XRowEntry -> Kind
 entryKind = case _ of
-  XRowField _ _ -> KRow RowType
+  XRowTypeEntry _ _ -> KRow RowType
   XRowEffectEntry _ _ -> KRow RowEffect
+  XRowLabelledEffectEntry _ _ _ -> KRow RowEffect
 
 -- | What `?r` lacks, the flexible tail of its solution must lack too.
 propagateLacks :: MetaContext -> MetaInfo -> XType -> UnifyResult

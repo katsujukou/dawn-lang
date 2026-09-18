@@ -15,7 +15,7 @@ module Dawn.Compiler.TypedCore.Term
   , DecisionTree(..)
   , CtorBranch
   , LitBranch
-  , LabelBranch
+  , KeyBranch
   , exprAnnotation
   ) where
 
@@ -24,8 +24,8 @@ import Prelude
 import Prim as P
 
 import Dawn.Compiler.TypedCore.Kind (Kind)
-import Dawn.Compiler.TypedCore.Name (EffName, Ident, JoinName, Label, OpName, Qualified, TyVar)
-import Dawn.Compiler.TypedCore.Type (Constraint, TyBinder, Type)
+import Dawn.Compiler.TypedCore.Name (Ident, JoinName, OpName, Qualified, TyVar)
+import Dawn.Compiler.TypedCore.Type (Constraint, RowKey, TyBinder, Type)
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe)
 import Data.Show.Generic (genericShow)
@@ -72,17 +72,18 @@ data Expr a
   -- | A jump to a join point, which occurs in tail position only.
   | Jump a JoinName (P.Array (Expr a))
   | RecordEmpty a
-  | RecordExtend a Label (Expr a) (Expr a)
-  | RecordSelect a Label (Expr a)
-  | RecordRestrict a Label (Expr a)
-  | RecordUpdate a Label (Expr a) (Expr a)
+  | RecordExtend a RowKey (Expr a) (Expr a)
+  | RecordSelect a RowKey (Expr a)
+  | RecordRestrict a RowKey (Expr a)
+  | RecordUpdate a RowKey (Expr a) (Expr a)
   | RecordMerge a (Expr a) (Expr a)
-  | VariantInject a Label (Expr a)
-  | VariantWeaken a Label Type (Expr a)
+  | VariantInject a RowKey (Expr a)
+  | VariantWeaken a RowKey Type (Expr a)
   | VariantAbsurd a Type (Expr a)
-  -- | Invocation of an operation, `perform E.op [τ̄] e`. It requires the ambient
-  -- | effect row to have `E` as a key, not a handler to be installed.
-  | Perform a (Qualified EffName) OpName (P.Array Type) (Expr a)
+  -- | Invocation of an operation, `perform k.op [τ̄] e`. It requires the ambient
+  -- | effect row to have `k` as a key, not a handler to be installed. The
+  -- | operation's signature comes from the effect the payload at `k` names.
+  | Perform a RowKey OpName (P.Array Type) (Expr a)
   | Handle a (Expr a) (Handler a)
   -- | Effect widening, `openEff [ρ] e`, which is the identity at run time.
   -- | Containment is an explicit term rather than subtyping (D8).
@@ -100,13 +101,14 @@ type Binding a =
   , value :: Expr a
   }
 
--- | A handler of one effect constructor.
+-- | A handler of one element of the effect row.
 -- |
--- | The clauses exhaust the operations of `effect`, since `handle` removes that
--- | key from the row and an operation without a clause would have nowhere to
--- | go.
+-- | `key` selects the element; the effect whose operations the clauses must
+-- | exhaust is the one the payload at that key names. The clauses exhaust them
+-- | because `handle` removes the key from the row, leaving an operation without
+-- | a clause nowhere to go.
 type Handler a =
-  { effect :: Qualified EffName
+  { key :: RowKey
   , returnClause :: ReturnClause a
   , opClauses :: P.Array (OpClause a)
   }
@@ -140,10 +142,10 @@ data Occurrence
   = OccScrutinee P.Int
   -- | The j-th field of a constructor, `o ! Ctor . j`.
   | OccField Occurrence (Qualified Ident) P.Int
-  -- | A record label, `o . l`.
-  | OccRecordField Occurrence Label
-  -- | The payload of a variant label, `o ? l`.
-  | OccVariantPayload Occurrence Label
+  -- | The element of a record at a key, `o . k`.
+  | OccRecordField Occurrence RowKey
+  -- | The payload a variant carries at a key, `o ? k`.
+  | OccVariantPayload Occurrence RowKey
 
 -- | A decision tree, written `dt`.
 -- |
@@ -157,9 +159,10 @@ data DecisionTree a
   -- | Literals cannot be exhausted, so the default is mandatory rather than
   -- | optional.
   | SwitchLit Occurrence (P.Array (LitBranch a)) (DecisionTree a)
-  -- | Dispatch on a variant's tag. In the default branch the occurrence takes
-  -- | the residual variant type, with the enumerated labels removed.
-  | SwitchLabel Occurrence (P.Array (LabelBranch a)) (Maybe (DecisionTree a))
+  -- | Dispatch on the key a variant carries. In the default branch the
+  -- | occurrence takes the residual variant type, with the enumerated keys
+  -- | removed.
+  | SwitchKey Occurrence (P.Array (KeyBranch a)) (Maybe (DecisionTree a))
   | Guard (Expr a) (DecisionTree a) (DecisionTree a)
 
 type CtorBranch a =
@@ -172,8 +175,8 @@ type LitBranch a =
   , tree :: DecisionTree a
   }
 
-type LabelBranch a =
-  { label :: Label
+type KeyBranch a =
+  { key :: RowKey
   , tree :: DecisionTree a
   }
 

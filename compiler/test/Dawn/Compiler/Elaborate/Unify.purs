@@ -13,7 +13,7 @@ import Prim as P
 import Dawn.Compiler.Elaborate.Row (xnf)
 import Dawn.Compiler.Elaborate.Type (MetaVar, XConstraint(..), XRowEntry(..), XType(..))
 import Dawn.Compiler.Elaborate.Unify (MetaBinding(..), MetaContext, MetaInfo, UnifyError(..), UnifyResult(..), emptyContext, freshMeta, lookupMeta, substitute, unifyRow)
-import Dawn.Compiler.TypedCore (Constraint(..), Kind(..), KindVar(..), Label(..), ModuleName(..), Qualified(..), RowElemKind(..), RowKey(..), TyName(..), TyVar(..), Type(..))
+import Dawn.Compiler.TypedCore (Constraint(..), EffName(..), Kind(..), KindVar(..), ModuleName(..), Qualified(..), RowElemKind(..), RowKey(..), Symbol(..), TyName(..), TyVar(..), Type(..))
 import Dawn.Compiler.TypedCore.Entailment (AtomicFacts, decompose, noFacts)
 import Data.Array as Array
 import Data.Either (Either(..))
@@ -33,18 +33,31 @@ tA = XCon (Qualified prim (TyName "A")) []
 tB :: XType
 tB = XCon (Qualified prim (TyName "B")) []
 
-a :: Label
-a = Label "a"
+a :: Symbol
+a = Symbol "a"
 
-b :: Label
-b = Label "b"
+b :: Symbol
+b = Symbol "b"
+
+cache :: Symbol
+cache = Symbol "cache"
+
+stateEff :: Qualified EffName
+stateEff = Qualified prim (EffName "State")
+
+readerEff :: Qualified EffName
+readerEff = Qualified prim (EffName "Reader")
 
 rigidR :: TyVar
 rigidR = TyVar "r"
 
 -- | `( l : τ | ρ )`
-field :: Label -> XType -> XType -> XType
-field l ty rest = XRowExtend (XRowField l ty) rest
+field :: Symbol -> XType -> XType -> XType
+field l ty rest = XRowExtend (XRowTypeEntry (SymbolKey l) ty) rest
+
+-- | `( s : E τ̄ | ρ )`
+labelledEffect :: Symbol -> Qualified EffName -> P.Array XType -> XType -> XType
+labelledEffect s eff args rest = XRowExtend (XRowLabelledEffectEntry s eff args) rest
 
 -- | A metavariable created where `r` is in scope, which is what the escape
 -- | check compares a solution against.
@@ -55,6 +68,9 @@ rowTypeInfo =
   , lacks: Set.empty
   , disjointFrom: Set.empty
   }
+
+effectRowInfo :: MetaInfo
+effectRowInfo = rowTypeInfo { kind = KRow RowEffect }
 
 lacking :: P.Array RowKey -> MetaInfo
 lacking keys = rowTypeInfo { lacks = Set.fromFoldable keys }
@@ -110,8 +126,8 @@ spec = describe "Dawn.Compiler.Elaborate.Unify" do
         result = unifyRow noAssumptions m.ctx (field a tA (XMeta m.r)) (field b tB (XMeta m.s))
       case fst result of
         Solved ctx -> do
-          knownKeysOf ctx m.r `shouldEqual` Just [ FieldKey b ]
-          knownKeysOf ctx m.s `shouldEqual` Just [ FieldKey a ]
+          knownKeysOf ctx m.r `shouldEqual` Just [ SymbolKey b ]
+          knownKeysOf ctx m.s `shouldEqual` Just [ SymbolKey a ]
           -- the same fresh tail stands on both sides
           (tailOf ctx m.r == tailOf ctx m.s) `shouldEqual` true
           map Array.length (tailOf ctx m.r) `shouldEqual` Just 1
@@ -120,16 +136,16 @@ spec = describe "Dawn.Compiler.Elaborate.Unify" do
     it "carries the Lacks of both sides onto the fresh tail" do
       -- Lacks(?t) ⊇ dom(D1) ∪ dom(D2) ∪ Lacks(?r) ∪ Lacks(?s)
       let
-        m = twoMetas (lacking [ FieldKey (Label "x") ]) rowTypeInfo
+        m = twoMetas (lacking [ SymbolKey (Symbol "x") ]) rowTypeInfo
         result = unifyRow noAssumptions m.ctx (field a tA (XMeta m.r)) (field b tB (XMeta m.s))
       case fst result of
         Solved ctx ->
           case tailOf ctx m.r of
             Just [ t ] -> case lookupMeta ctx t of
               Just (Unsolved info) -> do
-                Set.member (FieldKey (Label "x")) info.lacks `shouldEqual` true
-                Set.member (FieldKey a) info.lacks `shouldEqual` true
-                Set.member (FieldKey b) info.lacks `shouldEqual` true
+                Set.member (SymbolKey (Symbol "x")) info.lacks `shouldEqual` true
+                Set.member (SymbolKey a) info.lacks `shouldEqual` true
+                Set.member (SymbolKey b) info.lacks `shouldEqual` true
               _ -> "the fresh tail is unsolved" `shouldEqual` "…"
             _ -> "one fresh tail" `shouldEqual` "…"
         other -> show other `shouldEqual` "Solved"
@@ -141,7 +157,7 @@ spec = describe "Dawn.Compiler.Elaborate.Unify" do
         m = twoMetas rowTypeInfo rowTypeInfo
         result = unifyRow noAssumptions m.ctx (XMeta m.s) (field a tA (XVar rigidR))
       case fst result of
-        Solved ctx -> knownKeysOf ctx m.s `shouldEqual` Just [ FieldKey a ]
+        Solved ctx -> knownKeysOf ctx m.s `shouldEqual` Just [ SymbolKey a ]
         other -> show other `shouldEqual` "Solved"
 
     it "does not let a rigid tail absorb a known field" do
@@ -196,10 +212,10 @@ spec = describe "Dawn.Compiler.Elaborate.Unify" do
     it "refuses a solution carrying a key the metavariable lacks" do
       -- `a ∉ ?s` assumed, so `?s := ( a : A )` is refused
       let
-        m = twoMetas rowTypeInfo (lacking [ FieldKey a ])
+        m = twoMetas rowTypeInfo (lacking [ SymbolKey a ])
         result = unifyRow noAssumptions m.ctx (XMeta m.s) (field a tA XRowEmpty)
       case fst result of
-        Mismatch (LacksViolated key) -> key `shouldEqual` FieldKey a
+        Mismatch (LacksViolated key) -> key `shouldEqual` SymbolKey a
         other -> show other `shouldEqual` "Mismatch (LacksViolated …)"
 
     it "refuses a solution of the wrong row kind" do
@@ -227,18 +243,18 @@ spec = describe "Dawn.Compiler.Elaborate.Unify" do
     it "refuses a rigid tail the context does not prove the Lacks of" do
       -- `a ∉ ?m` assumed of the metavariable, nothing assumed of `r`
       let
-        m = twoMetas rowTypeInfo (lacking [ FieldKey a ])
+        m = twoMetas rowTypeInfo (lacking [ SymbolKey a ])
         result = unifyRow noAssumptions m.ctx (XMeta m.s) (XVar rigidR)
       case fst result of
         Mismatch (LacksUnproven key t) -> do
-          key `shouldEqual` FieldKey a
+          key `shouldEqual` SymbolKey a
           t `shouldEqual` rigidR
         other -> show other `shouldEqual` "Mismatch (LacksUnproven …)"
 
     it "accepts that rigid tail once the context proves it" do
       let
-        m = twoMetas rowTypeInfo (lacking [ FieldKey a ])
-        facts = assuming [ Lacks (FieldKey a) (TVar rigidR) ]
+        m = twoMetas rowTypeInfo (lacking [ SymbolKey a ])
+        facts = assuming [ Lacks (SymbolKey a) (TVar rigidR) ]
         result = unifyRow facts m.ctx (XMeta m.s) (XVar rigidR)
       case fst result of
         Solved _ -> pure unit
@@ -262,14 +278,14 @@ spec = describe "Dawn.Compiler.Elaborate.Unify" do
         result = unifyRow noAssumptions m.ctx (XMeta m.s) (field a tA XRowEmpty)
       case fst result of
         Mismatch (LacksUnproven key u) -> do
-          key `shouldEqual` FieldKey a
+          key `shouldEqual` SymbolKey a
           u `shouldEqual` rigidR
         other -> show other `shouldEqual` "Mismatch (LacksUnproven …)"
 
     it "accepts that known key once the context proves it absent" do
       let
         m = twoMetas rowTypeInfo (rowTypeInfo { disjointFrom = Set.singleton rigidR })
-        facts = assuming [ Lacks (FieldKey a) (TVar rigidR) ]
+        facts = assuming [ Lacks (SymbolKey a) (TVar rigidR) ]
         result = unifyRow facts m.ctx (XMeta m.s) (field a tA XRowEmpty)
       case fst result of
         Solved _ -> pure unit
@@ -315,11 +331,11 @@ spec = describe "Dawn.Compiler.Elaborate.Unify" do
       let
         m = twoMetas rowTypeInfo rowTypeInfo
         result = unifyRow noAssumptions m.ctx (XMeta m.s) XRowEmpty
-        constrained = XConstrained (XLacks (FieldKey a) (XMeta m.s)) (XVar rigidR)
+        constrained = XConstrained (XLacks (SymbolKey a) (XMeta m.s)) (XVar rigidR)
       case fst result of
         Solved ctx ->
           substitute ctx constrained
-            `shouldEqual` XConstrained (XLacks (FieldKey a) XRowEmpty) (XVar rigidR)
+            `shouldEqual` XConstrained (XLacks (SymbolKey a) XRowEmpty) (XVar rigidR)
         other -> show other `shouldEqual` "Solved"
 
     it "does not solve two bare metavariables of different row kinds" do
@@ -337,3 +353,35 @@ spec = describe "Dawn.Compiler.Elaborate.Unify" do
         m = twoMetas rowTypeInfo rowTypeInfo
         result = unifyRow noAssumptions m.ctx (field a tA (XMeta m.r)) (field a tB (XMeta m.s))
       snd result `shouldEqual` [ Tuple tA tB ]
+
+    it "equates the arguments of two elements sharing a key and an effect" do
+      let
+        m = twoMetas effectRowInfo effectRowInfo
+        result = unifyRow noAssumptions m.ctx
+          (labelledEffect cache stateEff [ tA ] (XMeta m.r))
+          (labelledEffect cache stateEff [ tB ] (XMeta m.s))
+      snd result `shouldEqual` [ Tuple tA tB ]
+
+    it "fails where a shared key stands over different effects" do
+      -- A written key does not determine the payload, so two elements can agree
+      -- on the key and still name different protocols
+      let
+        m = twoMetas effectRowInfo effectRowInfo
+        result = unifyRow noAssumptions m.ctx
+          (labelledEffect cache stateEff [ tA ] (XMeta m.r))
+          (labelledEffect cache readerEff [ tA ] (XMeta m.s))
+      case fst result of
+        Mismatch (PayloadMismatch key _ _) -> key `shouldEqual` SymbolKey cache
+        other -> show other `shouldEqual` "Mismatch (PayloadMismatch …)"
+
+    it "fails where a shared key and effect stand over different arities" do
+      -- Arity belongs to the payload, so the shorter argument vector is a
+      -- mismatch rather than a prefix of the longer one
+      let
+        m = twoMetas effectRowInfo effectRowInfo
+        result = unifyRow noAssumptions m.ctx
+          (labelledEffect cache stateEff [ tA ] (XMeta m.r))
+          (labelledEffect cache stateEff [ tA, tB ] (XMeta m.s))
+      case fst result of
+        Mismatch (PayloadMismatch key _ _) -> key `shouldEqual` SymbolKey cache
+        other -> show other `shouldEqual` "Mismatch (PayloadMismatch …)"

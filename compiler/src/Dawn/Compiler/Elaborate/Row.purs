@@ -13,7 +13,7 @@ module Dawn.Compiler.Elaborate.Row
   , XRowError(..)
   , emptyXNormalForm
   , xnf
-  , payloadTypes
+  , payloadEquations
   , rebuild
   ) where
 
@@ -21,8 +21,9 @@ import Prelude
 
 import Prim as P
 
-import Dawn.Compiler.Elaborate.Type (MetaVar, XRowEntry(..), XType(..), xRowEntryKey)
+import Dawn.Compiler.Elaborate.Type (MetaVar, XRowEntry, XRowPayload(..), XType(..), xRowEntryKey, xRowEntryPayload)
 import Dawn.Compiler.TypedCore (RowKey, TyVar)
+import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Foldable (foldr)
 import Data.Generic.Rep (class Generic)
@@ -32,6 +33,7 @@ import Data.Maybe (Maybe(..))
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Show.Generic (genericShow)
+import Data.Tuple (Tuple(..))
 
 -- | `⟨ F ; T ⟩` with `T` separated into the part that cannot be solved and the
 -- | part that can.
@@ -48,12 +50,22 @@ data XRowError
 emptyXNormalForm :: XRowNormalForm
 emptyXNormalForm = { known: Map.empty, rigid: Set.empty, flexible: Set.empty }
 
--- | What an entry carries, which is what unification equates when two rows
--- | share a key.
-payloadTypes :: XRowEntry -> P.Array XType
-payloadTypes = case _ of
-  XRowField _ ty -> [ ty ]
-  XRowEffectEntry _ args -> args
+-- | The type equations two entries sharing a key impose.
+-- |
+-- | `Nothing` is a payload mismatch, which no substitution repairs. A key does
+-- | not determine the payload: a written key leaves the effect constructor free,
+-- | so two entries can share a key and still carry different protocols.
+payloadEquations :: XRowEntry -> XRowEntry -> Maybe (P.Array (Tuple XType XType))
+payloadEquations e1 e2 = case xRowEntryPayload e1, xRowEntryPayload e2 of
+  XTypePayload a, XTypePayload b ->
+    Just [ Tuple a b ]
+
+  XEffectPayload n1 as, XEffectPayload n2 bs
+    | n1 == n2 && Array.length as == Array.length bs ->
+        Just (Array.zip as bs)
+
+  _, _ ->
+    Nothing
 
 -- | `nf` over Core⁺.
 -- |

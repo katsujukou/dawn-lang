@@ -7,10 +7,12 @@ module Dawn.Compiler.TypedCore.Type
   ( Type(..)
   , RowEntry(..)
   , RowKey(..)
+  , RowPayload(..)
   , Constraint(..)
   , TyBinder
   , TypeScheme
   , rowEntryKey
+  , rowEntryPayload
   ) where
 
 import Prelude
@@ -21,7 +23,7 @@ import Prelude
 import Prim as P
 
 import Dawn.Compiler.TypedCore.Kind (Kind, Scheme)
-import Dawn.Compiler.TypedCore.Name (EffName, Label, Qualified, TyName, TyVar)
+import Dawn.Compiler.TypedCore.Name (EffName, Qualified, Symbol, Tag, TyName, TyVar)
 import Data.Generic.Rep (class Generic)
 import Data.Show.Generic (genericShow)
 
@@ -49,28 +51,63 @@ data Type
 
 -- | An element of a row.
 -- |
--- | A `Row Type` element carries the label that is written; a `Row Effect`
--- | element carries no label, since its key is the constructor at its head.
+-- | Every element is a key together with a payload. At `Row Type` the key is
+-- | written; at `Row Effect` it is derived from the effect at the head of the
+-- | payload unless a `Symbol` is written for it.
 data RowEntry
-  = RowField Label Type
+  -- | `k : τ` — an element of a `Row Type`. The key is written, and any
+  -- | structural key may stand there; which one a structure conventionally
+  -- | uses is settled by the surface, not by kinding.
+  = RowTypeEntry RowKey Type
+  -- | `E τ̄` — an element of a `Row Effect` whose key is derived from the
+  -- | effect at the head of its payload.
   | RowEffectEntry (Qualified EffName) (P.Array Type)
+  -- | `SymbolKey s : E τ̄` — the same, with a key written for it. This is what
+  -- | lets one effect appear twice in a row.
+  | RowLabelledEffectEntry Symbol (Qualified EffName) (P.Array Type)
 
 -- | The key of a row element. Keys are rigid — independent of metavariable
 -- | solving — which is what makes row equality decidable (D13, D16).
+-- | Three of these are **structural**, decided by the syntax that writes them,
+-- | and one is **nominal**, decided by a declaration in `Σ`. The row theory
+-- | tells them apart nowhere: to normalization, equality, and entailment all
+-- | four are rigid keys that compare for equality. Only well-formedness looks,
+-- | since only an `EffectKey` sends the checker to `Σ`.
 data RowKey
-  = FieldKey Label
+  = SymbolKey Symbol
+  | TagKey Tag
+  -- | A tuple component, 0-origin. Elaborating a tuple derives it from where
+  -- | the component stands (D13).
+  | PositionKey P.Int
   | EffectKey (Qualified EffName)
+
+-- | What an element carries once its key is taken away.
+-- |
+-- | At `Row Type` that is the type; at `Row Effect` it is an application of a
+-- | declared effect constructor, and **the payload is what decides the
+-- | protocol** — a `perform` reads its operation's signature from `E`, never
+-- | from the key.
+data RowPayload
+  = TypePayload Type
+  | EffectPayload (Qualified EffName) (P.Array Type)
 
 rowEntryKey :: RowEntry -> RowKey
 rowEntryKey = case _ of
-  RowField l _ -> FieldKey l
+  RowTypeEntry k _ -> k
   RowEffectEntry e _ -> EffectKey e
+  RowLabelledEffectEntry s _ _ -> SymbolKey s
+
+rowEntryPayload :: RowEntry -> RowPayload
+rowEntryPayload = case _ of
+  RowTypeEntry _ ty -> TypePayload ty
+  RowEffectEntry e args -> EffectPayload e args
+  RowLabelledEffectEntry _ e args -> EffectPayload e args
 
 -- | A row constraint. Core has exactly two, and neither carries run-time
 -- | content: the checker re-derives entailment rather than accepting a proof
 -- | term (D5).
 data Constraint
-  -- | `l ∉ ρ`
+  -- | `k ∉ ρ`
   = Lacks RowKey Type
   -- | `ρ1 # ρ2`
   | Disjoint Type Type
@@ -107,6 +144,13 @@ derive instance Generic RowKey _
 
 instance Show RowKey where
   show = genericShow
+
+derive instance Eq RowPayload
+derive instance Ord RowPayload
+derive instance Generic RowPayload _
+
+instance Show RowPayload where
+  show x = genericShow x
 
 derive instance Eq Constraint
 derive instance Ord Constraint

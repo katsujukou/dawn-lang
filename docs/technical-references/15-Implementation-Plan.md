@@ -115,6 +115,8 @@ The heading of each group names the step of the plan that the group belongs to.
 | `( cache : State Int, counter : State Int )` | **Accepted.** One effect, two elements, distinguished by their keys |
 | `( cache : State Int, cache : State String )` | Rejected. The same key twice, whatever the payloads |
 | `( State Int, State String )` | Rejected. Both derive `EffectKey State` |
+| `( PositionKey (-1) : Int )` | Rejected. The grammar gives `PositionKey` a `Nat`, and the AST holds an `Int`, so the bound is a kinding side condition |
+| `( EffectKey State : Int )` | Rejected. `Γ ⊢ k key Type` admits the structural keys only |
 | A handler keyed `cache` enclosing `perform counter.get` | The `perform` passes through. `Ev_k` matches on the key, and `counter` is not `cache` |
 | `perform cache.get` where the row has `cache ↦ State Int` | The operation's type comes from `Σ(State)`, not from `cache`. A checker that looked the key up in `Σ` would fail here and pass on the unlabelled form |
 | Two handlers of one key, nested | The innermost is chosen. Sharpness governs rows, not the handler stack |

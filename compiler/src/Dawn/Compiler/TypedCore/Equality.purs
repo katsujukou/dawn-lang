@@ -24,8 +24,8 @@ import Prelude
 import Prim as P
 
 import Dawn.Compiler.TypedCore.Name (TyVar)
-import Dawn.Compiler.TypedCore.Row (RowError, RowNormalForm, RowPayload(..), nf)
-import Dawn.Compiler.TypedCore.Type (Constraint(..), RowKey, Type(..))
+import Dawn.Compiler.TypedCore.Row (RowError, RowNormalForm, nf)
+import Dawn.Compiler.TypedCore.Type (Constraint(..), RowKey, RowPayload(..), Type(..))
 import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Map as Map
@@ -140,11 +140,11 @@ payloadsEquiv sc n1 n2 =
 
 payloadEquiv :: Scope -> RowPayload -> RowPayload -> Either RowError P.Boolean
 payloadEquiv sc p1 p2 = case p1, p2 of
-  FieldPayload a, FieldPayload b ->
+  TypePayload a, TypePayload b ->
     equiv sc a b
 
-  EffectPayload as, EffectPayload bs
-    | Array.length as == Array.length bs ->
+  EffectPayload e1 as, EffectPayload e2 bs
+    | e1 == e2 && Array.length as == Array.length bs ->
         map (Array.all identity) (traverse (\(Tuple a b) -> equiv sc a b) (Array.zip as bs))
 
   _, _ ->

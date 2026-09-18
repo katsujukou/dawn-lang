@@ -5,15 +5,14 @@
 -- | standing for the unknown tail. Normalization never closes a row variable,
 -- | which is what makes row equality decidable on open rows.
 -- |
--- | Keys are rigid — a label is a literal (D13) and an effect key is the head
--- | constructor (D16) — so no key changes while a row is normalized.
+-- | Keys are rigid — a structural key is a literal (D13) and a derived effect
+-- | key is the head constructor (D16) — so no key changes while a row is
+-- | normalized.
 module Dawn.Compiler.TypedCore.Row
-  ( RowPayload(..)
-  , RowNormalForm
+  ( RowNormalForm
   , RowError(..)
   , emptyNormalForm
   , nf
-  , entryPayload
   ) where
 
 import Prelude
@@ -21,7 +20,7 @@ import Prelude
 import Prim as P
 
 import Dawn.Compiler.TypedCore.Name (TyVar)
-import Dawn.Compiler.TypedCore.Type (RowEntry(..), RowKey, Type(..), rowEntryKey)
+import Dawn.Compiler.TypedCore.Type (RowKey, RowPayload, Type(..), rowEntryKey, rowEntryPayload)
 import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
 import Data.Map (Map)
@@ -30,12 +29,6 @@ import Data.Maybe (Maybe(..))
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Show.Generic (genericShow)
-
--- | What a row element carries once its key is taken away: a type at
--- | `Row Type`, an argument vector at `Row Effect`.
-data RowPayload
-  = FieldPayload Type
-  | EffectPayload (P.Array Type)
 
 -- | `⟨ F ; T ⟩`.
 -- |
@@ -55,11 +48,6 @@ data RowError
 
 emptyNormalForm :: RowNormalForm
 emptyNormalForm = { known: Map.empty, tail: Set.empty }
-
-entryPayload :: RowEntry -> RowPayload
-entryPayload = case _ of
-  RowField _ ty -> FieldPayload ty
-  RowEffectEntry _ args -> EffectPayload args
 
 -- | `nf`.
 -- |
@@ -90,7 +78,7 @@ nf = case _ of
     case Map.lookup key known of
       Just _ -> Left (DuplicateKey key)
       Nothing ->
-        Right { known: Map.insert key (entryPayload entry) known, tail }
+        Right { known: Map.insert key (rowEntryPayload entry) known, tail }
 
   TRowUnion left right -> do
     l <- nf left
@@ -111,13 +99,6 @@ union l r =
         }
   where
   keysOf n = Set.fromFoldable (Map.keys n.known)
-
-derive instance Eq RowPayload
-derive instance Ord RowPayload
-derive instance Generic RowPayload _
-
-instance Show RowPayload where
-  show x = genericShow x
 
 derive instance Eq RowError
 derive instance Generic RowError _

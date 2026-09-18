@@ -1,6 +1,6 @@
 -- | The entailment decision `Γ ⊨ C`.
 -- |
--- | The conditions look for atomic facts about row variables — `l ∉ t` and
+-- | The conditions look for atomic facts about row variables — `k ∉ t` and
 -- | `t1 # t2` — whereas assumptions concern composite rows, so each assumption
 -- | is decomposed over its normal form once, into `Γ*`. The only closure added
 -- | is symmetry of `#`.
@@ -37,7 +37,7 @@ import Data.Tuple (Tuple(..))
 
 -- | `Γ*`.
 -- |
--- | `lacks` holds each `l ∉ t`, and `disjoint` each `t1 # t2` together with its
+-- | `lacks` holds each `k ∉ t`, and `disjoint` each `t1 # t2` together with its
 -- | mirror image, which is the whole of the closure.
 type AtomicFacts =
   { lacks :: Map TyVar (Set RowKey)
@@ -47,7 +47,7 @@ type AtomicFacts =
 -- | An assumption can be unsatisfiable on its own, which is a property of the
 -- | context rather than of the constraint being decided.
 data DecomposeError
-  -- | `l ∉ ρ` where `ρ` is known to contain `l`.
+  -- | `k ∉ ρ` where `ρ` is known to contain `k`.
   = LacksContradiction RowKey
   -- | `ρ1 # ρ2` where the two share a known key.
   | DisjointContradiction RowKey
@@ -79,7 +79,7 @@ addAssumption facts = case _ of
       Nothing ->
         Right (withPairs (withKeysOf r l (withKeysOf l r facts)))
         where
-        -- { l ∉ t | l ∈ dom(F_a), t ∈ T_b }
+        -- { k ∉ t | k ∈ dom(F_a), t ∈ T_b }
         withKeysOf a b acc =
           foldr (\t inner -> foldr (\key i -> addLacks key t i) inner (domainArray a)) acc (tailOf b)
 
@@ -108,8 +108,8 @@ entails facts = case _ of
 -- | row, and an assumption entails itself. What makes `r ⊎ r` ill-kinded in an
 -- | ordinary context is that nothing derives `r # r` there.
 -- |
--- | Its consequence — that `r` is then empty, so `l ∉ r` and `r # s` hold of
--- | every `l` and `s` — is not derived. `Γ ⊨ C` is sound for the set-theoretic
+-- | Its consequence — that `r` is then empty, so `k ∉ r` and `r # s` hold of
+-- | every `k` and `s` — is not derived. `Γ ⊨ C` is sound for the set-theoretic
 -- | reading of rows and intentionally incomplete: the only closure `Γ*`
 -- | computes is symmetry of `#`. Recording which variables are known empty
 -- | would be implementable and would still decide by a scan; it is left out

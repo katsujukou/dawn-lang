@@ -1,15 +1,16 @@
 -- | Properties of the row solver.
 -- |
--- | The generators draw from a small fixed alphabet of variables, labels, and
+-- | The generators draw from a small fixed alphabet of variables, keys, and
 -- | effect constructors, so that collisions between keys and between tails
--- | arise often rather than by chance.
+-- | arise often rather than by chance. One spelling is shared by the `Symbol`
+-- | and the `Tag` alphabet, so the two keys meet in a row regularly.
 module Test.Dawn.Compiler.TypedCore.RowProperties (spec) where
 
 import Prelude
 
 import Prim as P
 
-import Dawn.Compiler.TypedCore (Constraint(..), EffName(..), Label(..), ModuleName(..), Qualified(..), RowEntry(..), RowKey(..), TyName(..), TyVar(..), Type(..), decompose, entails, nf, rowEquiv)
+import Dawn.Compiler.TypedCore (Constraint(..), EffName(..), ModuleName(..), Qualified(..), RowEntry(..), RowKey(..), Symbol(..), Tag(..), TyName(..), TyVar(..), Type(..), decompose, entails, nf, rowEquiv)
 import Data.Array as Array
 import Data.Array.NonEmpty as NEA
 import Data.Either (Either(..), isRight)
@@ -26,14 +27,31 @@ prim = ModuleName "Prim"
 genTyVar :: Gen TyVar
 genTyVar = elements (NEA.cons' (TyVar "r") [ TyVar "s", TyVar "e" ])
 
-genLabel :: Gen Label
-genLabel = elements (NEA.cons' (Label "name") [ Label "age", Label "id" ])
+genSymbol :: Gen Symbol
+genSymbol = elements (NEA.cons' (Symbol "name") [ Symbol "age", Symbol "id" ])
+
+genTag :: Gen Tag
+genTag = elements (NEA.cons' (Tag "Some") [ Tag "None", Tag "id" ])
+
+-- | A key of a `Row Type` element. Any structural key may stand there, and
+-- | which one a structure uses is not a matter of kinding.
+genTypeKey :: Gen RowKey
+genTypeKey = oneOf
+  ( NEA.cons' (SymbolKey <$> genSymbol)
+      [ TagKey <$> genTag
+      , PositionKey <$> chooseInt 0 2
+      ]
+  )
 
 genEffName :: Gen (Qualified EffName)
 genEffName = elements
   ( NEA.cons' (Qualified prim (EffName "Console"))
       [ Qualified prim (EffName "State"), Qualified prim (EffName "Exn") ]
   )
+
+-- | A key of a `Row Effect` element, derived or written.
+genEffectKey :: Gen RowKey
+genEffectKey = oneOf (NEA.cons' (EffectKey <$> genEffName) [ SymbolKey <$> genSymbol ])
 
 genPayloadType :: Gen Type
 genPayloadType = elements
@@ -64,12 +82,13 @@ rawRecordRow = sized go
     | otherwise = oneOf
         ( NEA.cons' (pure TRowEmpty)
             [ TVar <$> genTyVar
-            , TRowExtend <$> (RowField <$> genLabel <*> genPayloadType) <*> resize (size - 1) rawRecordRow
+            , TRowExtend <$> (RowTypeEntry <$> genTypeKey <*> genPayloadType) <*> resize (size - 1) rawRecordRow
             , TRowUnion <$> resize (size / 2) rawRecordRow <*> resize (size / 2) rawRecordRow
             ]
         )
 
--- | A normalizable row at `Row Effect`, whose elements carry no label.
+-- | A normalizable row at `Row Effect`. An element carries a written key as
+-- | often as it derives one, so one effect appearing twice is reachable.
 genEffectRow :: Gen Type
 genEffectRow = suchThat rawEffectRow normalizable
 
@@ -81,10 +100,16 @@ rawEffectRow = sized go
     | otherwise = oneOf
         ( NEA.cons' (pure TRowEmpty)
             [ TVar <$> genTyVar
-            , TRowExtend <$> (RowEffectEntry <$> genEffName <*> arrayOf genPayloadType) <*> resize (size - 1) rawEffectRow
+            , TRowExtend <$> genEffectEntry <*> resize (size - 1) rawEffectRow
             , TRowUnion <$> resize (size / 2) rawEffectRow <*> resize (size / 2) rawEffectRow
             ]
         )
+
+genEffectEntry :: Gen RowEntry
+genEffectEntry = oneOf
+  ( NEA.cons' (RowEffectEntry <$> genEffName <*> arrayOf genPayloadType)
+      [ RowLabelledEffectEntry <$> genSymbol <*> genEffName <*> arrayOf genPayloadType ]
+  )
 
 genRow :: Gen Type
 genRow = oneOf (NEA.cons' genRecordRow [ genEffectRow ])
@@ -93,8 +118,8 @@ genRow = oneOf (NEA.cons' genRecordRow [ genEffectRow ])
 -- | ill-formed, so both sides are drawn from one generator.
 genConstraint :: Gen Constraint
 genConstraint = oneOf
-  ( NEA.cons' (Lacks <$> (FieldKey <$> genLabel) <*> genRecordRow)
-      [ Lacks <$> (EffectKey <$> genEffName) <*> genEffectRow
+  ( NEA.cons' (Lacks <$> genTypeKey <*> genRecordRow)
+      [ Lacks <$> genEffectKey <*> genEffectRow
       , Disjoint <$> genRecordRow <*> genRecordRow
       , Disjoint <$> genEffectRow <*> genEffectRow
       ]
