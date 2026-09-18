@@ -32,15 +32,15 @@ Recording `[Γ]` allows the scope check that decides whether a solution mentioni
 Constraint ::= κ1 ≡ κ2                 kind equality
              | τ1 ≡ τ2                 type equality
              | ρ1 ≡ ρ2                 row equality
-             | l ∉ ρ                   Lacks, as in Core
+             | k ∉ ρ                   Lacks, as in Core
              | ρ1 # ρ2                 Disjoint, as in Core
              | Synth ?m τ f            synthesis goal
 ```
 
-A `HasField l τ r` predicate is not a separate constraint. It is the row equality
+A `HasField k τ r` predicate is not a separate constraint. It is the row equality
 
 ```text
-r ≡ ( l : τ | ?r )
+r ≡ ( k : τ | ?r )
 ```
 
 for a fresh `?r`. Likewise `t = Union r s` is `t ≡ r ⊎ s`. Keeping the number of constraint forms small is what keeps the solver small.
@@ -69,7 +69,7 @@ solve(ρ1 ≡ ρ2):
 
   1. match the payloads of shared keys
      L = dom(F1) ∩ dom(F2)
-     emit F1(l) ≡ F2(l) for each l ∈ L
+     emit F1(k) ≡ F2(k) for each k ∈ L
      D1 = F1 ∖ L,  D2 = F2 ∖ L        (thereafter dom(D1) ∩ dom(D2) = ∅)
 
   2. cancel shared tails
@@ -130,7 +130,7 @@ Stuck in (d) is not failure; the scheduler resumes it.
 
 Every substitution constructs a `⊎` and must satisfy its well-formedness conditions.
 
-- For `?s := D1 ⊎ R1`, check that every `l ∉ ?s` assumed of `?s` holds of `D1` and `R1`.
+- For `?s := D1 ⊎ R1`, check that every `k ∉ ?s` assumed of `?s` holds of `D1` and `R1`.
 - For the fresh `?t` of case (c), impose
 
 ```text

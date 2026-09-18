@@ -50,7 +50,7 @@ over :: Proxy l -> (a -> b) -> { l :: a, ...r } -> { l :: b, ...r }   -- not exp
 
 Direct access is unaffected, since `rec.name` becomes `select name rec`, so only libraries are affected.
 
-**The condition for introducing it.** Adding `Symbol` to the kinds entails re-validating row normalization: once labels are types, the `l` of `( l : τ | ρ )` may be a type variable, row keys cease to be rigid, and the decidability of `nf` collapses.
+**The condition for introducing it.** Adding `Symbol` to the kinds entails re-validating row normalization: once symbols are types, the `s` of a `SymbolKey s` may be a type variable, row keys cease to be rigid, and the decidability of `nf` collapses.
 
 The condition is the one already imposed on effect row elements: **keep label variables out of Core's row-extension position, confining them to constraints and the elaboration layer.** This is how PureScript handles label variables through `Cons` and `RowToList` while keeping them out of `RCons`. So long as the condition holds, adding `Symbol` is compatible with D4 and D16.
 
@@ -80,19 +80,19 @@ In the standard library this constraint falls on terminal interpreters, producin
 
 Making it uniform requires either indexing `IO` by an effect row, or giving `IO.bind` a different semantics as a runtime primitive aware of the handler context. The latter must solve the problem that deferring `k` until the `IO` executes takes the residual effect outside the handler's dynamic context.
 
-**Masking and scoped labels for effect rows.** Effect rows are sharp (D4), so Koka's `mask<exn>` is not expressible. Named instances, below, would cover many of the uses, but temporarily hiding one occurrence of an effect may still require something separate.
+**Masking and scoped labels for effect rows.** Effect rows are sharp (D4), so Koka's `mask<exn>` is not expressible. Named instances, below, cover many of the uses, but temporarily hiding one occurrence of an effect may still require something separate.
 
-Forwarding belongs to the same gap. A clause cannot pass its operation on to an outer handler of the same effect, since `handle` removes `E` from the row and the clause body is typed without it ([Effects](05-Effects.md)). What is needed is a semantics that distinguishes the current handler for `E` from an outer one, and a second occurrence of the key is only one way to obtain it. Three candidates are available.
+Forwarding belongs to the same gap, and what it cannot cross is a **key**, not an effect. A clause cannot pass its operation on to an outer handler of the same key, since `handle` removes that element from the row and the clause body is typed without it ([Effects](05-Effects.md)). Two instances of one effect are unaffected: a handler keyed `cache` may perform on `counter` freely, those being different keys. What is needed is a semantics that distinguishes the current handler for `k` from an outer handler of `k`, and a second occurrence of the key in the row is only one way to obtain it. Three candidates are available.
 
 - **Masking, or scoped duplicates.** The distinction is carried by the row, as in Koka
 - **An explicit `forward`.** The distinction is carried by a term that skips the current handler
-- **A partial handler that keeps `E`.** Its rule takes `( E τ̄ | ρ )` to `( E τ̄ | ρ )`, so one `E` remains in the row and the operations the clauses do not name travel outwards. A single key suffices
+- **A partial handler that keeps the element.** Its rule takes `( ent | ρ )` to `( ent | ρ )`, so the keyed element remains in the row and the operations the clauses do not name travel outwards. A single key suffices
 
-**Multiple instances of one effect constructor.** By D16 an effect row's key is the constructor name, so `( Exn String, Exn Int )` and two independent `State`s are not expressible. The workaround is to declare separate effects.
+**Multiple instances of one effect constructor — settled.** An effect element may carry a written `SymbolKey`, so `( cache : State Int, counter : State Int )` is well-kinded and two instances of one effect are distinguished by their keys (D16, [Effects](05-Effects.md)).
 
-Making the key the whole element type would remove the limitation but is not available: whether `( State ?a, State Int )` has one element or two would depend on solving `?a`, so the point at which sharpness can be decided would depend on the progress of inference — the very property D4 exists to eliminate.
+Making the key the whole element type would have removed the limitation too, and remains unavailable: whether `( State ?a, State Int )` has one element or two would depend on solving `?a`, so the point at which sharpness can be decided would depend on the progress of inference — the very property D4 exists to eliminate. A written key is rigid, and decides nothing later than it decides now.
 
-The available extension is an **explicit instance name**, comparable to Koka's named handlers, allowing the key to be overridden as in `{| cache : State Int, counter : State Int |}`. Effect row elements would then have two forms, one with a derived key and one with an explicit key. Row theory is unchanged.
+What the surface writes for such an instance, and how ordinary code names one, is not settled ([Effects](05-Effects.md)).
 
 ## FFI and backends
 
@@ -118,7 +118,7 @@ Should that frequency prove high, the option is to **limit anonymous `...` at `R
 
 Neither rule is backward compatible with the other. Code that writes names works under both, so making multiple anonymous spreads a warning is a way to defer the decision.
 
-**Brackets for variant rows.** Records use `{ … }` and effects use `{| … |}`, so variants need brackets of their own. The element syntax `L :: τ` and the spread `...ρ` are shared; only the brackets remain to be chosen.
+**Brackets for variant rows.** Records use `{ … }` and effects use `{| … |}`, so variants need brackets of their own. A variant element is keyed by a `TagKey` written `#Ok`, or by a `SymbolKey` where a name is wanted, and the spread `...ρ` is shared; only the brackets remain to be chosen ([Rows](04-Rows.md)).
 
 **Classical monads and `do` syntax.** D17 settles effect sequencing as direct style but leaves open whether monads as data structures, such as `Maybe` or a parser, should be writable with something like `<-`. **The direction is coexistence**; the syntax is not fixed.
 

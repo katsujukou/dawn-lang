@@ -257,11 +257,16 @@ ent ::= element                 written per kind
       | "..."                   anonymous spread
 ```
 
-| Kind | Brackets | Element | Example |
-| --- | --- | --- | --- |
-| `Row Type` (record) | `{` `}` | `l :: τ` | `{ name :: String, age :: Int }` |
-| `Row Type` (variant) | undetermined | `L :: τ` | — |
-| `Row Effect` | `{\|` `\|}` | `E τ̄` | `{\| Console, State Int \|}` |
+| Structure | Brackets | Element | Key it makes | Example |
+| --- | --- | --- | --- | --- |
+| record | `{` `}` | `s :: τ` | `SymbolKey s` | `{ name :: String, age :: Int }` |
+| tuple | undetermined | `τ` | `PositionKey n`, from where it stands | — |
+| variant | undetermined | `#T :: τ` | `TagKey T` | — |
+| labelled variant | as the variant's | `s :: τ` | `SymbolKey s` | — |
+| effect | `{\|` `\|}` | `E τ̄` | `EffectKey E`, derived | `{\| Console, State Int \|}` |
+| labelled effect | `{\|` `\|}` | `s :: E τ̄` | `SymbolKey s` | — |
+
+The brackets of a tuple and of a variant, and the spelling a labelled effect takes, are open ([Open Questions](14-Open-Questions.md)). What is fixed is the element form and the key each produces.
 
 Desugaring is `⊎` at every kind.
 

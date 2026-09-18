@@ -90,7 +90,7 @@ The heading of each group names the step of the plan that the group belongs to.
 | `( name : String \| r ) ≡ ( name : String \| s )`, `r` and `s` distinct rigid variables | Fails. Distinct row variables are not identified |
 | `⟨∅;{r,s}⟩ ≡ ⟨∅;{s,r}⟩` | Succeeds. The tail is a set |
 | `⟨∅;{?r,?s}⟩ ≡ ⟨{a↦A};∅⟩` | Stuck, not failure. Two solutions exist, so the constraint waits |
-| A solved `?r := D ⊎ ?t` where `l ∉ ?r` was assumed | The Lacks constraint propagates to `?t`, and `l ∉ dom(D)` is checked. Omitting this produces Core that is not well-kinded |
+| A solved `?r := D ⊎ ?t` where `k ∉ ?r` was assumed | The Lacks constraint propagates to `?t`, and `k ∉ dom(D)` is checked. Omitting this produces Core that is not well-kinded |
 | `r ⊎ r` | Ill-kinded. The disjointness side condition rejects it before normalization |
 
 ### Kinds and constraints (step 3)
@@ -103,9 +103,21 @@ The heading of each group names the step of the plan that the group belongs to.
 | `forall (f : Type -> Type). …` | **Accepted.** Higher-kinded types must survive the restriction |
 | `forall (r : Row Effect). …` | Accepted |
 | `Row (Type -> Type)` | Ill-formed. `Row` takes only a row element kind |
-| `name ∉ ( Console )` | Rejected. A field label is not a key of a `Row Effect` |
+| `#Ok ∉ ( Console )` | Rejected. A tag is not a key of a `Row Effect`; a `SymbolKey` would be admitted, since it may key a labelled instance |
 | `ρ1 # ρ2` with `ρ1 : Row Type` and `ρ2 : Row Effect` | Rejected. Both sides share one row element kind |
 | `Proxy [[Type]] [Int]` and `Proxy [[Row Type]] [( x : Int )]` | Both accepted. Type and data constructors carry independent kind schemes |
+
+### Row keys (step 3)
+
+| Input | Required outcome |
+| --- | --- |
+| `( SymbolKey X : Int, TagKey X : Int )` | **Accepted.** The two are different keys; sharing a spelling does not make them collide |
+| `( cache : State Int, counter : State Int )` | **Accepted.** One effect, two elements, distinguished by their keys |
+| `( cache : State Int, cache : State String )` | Rejected. The same key twice, whatever the payloads |
+| `( State Int, State String )` | Rejected. Both derive `EffectKey State` |
+| A handler keyed `cache` enclosing `perform counter.get` | The `perform` passes through. `Ev_k` matches on the key, and `counter` is not `cache` |
+| `perform cache.get` where the row has `cache ↦ State Int` | The operation's type comes from `Σ(State)`, not from `cache`. A checker that looked the key up in `Σ` would fail here and pass on the unlabelled form |
+| Two handlers of one key, nested | The innermost is chosen. Sharpness governs rows, not the handler stack |
 
 ### Decision trees and handlers (step 3)
 
@@ -113,11 +125,11 @@ The heading of each group names the step of the plan that the group belongs to.
 | --- | --- |
 | `switchCtor` with no default, not exhausting the constructors | Rejected |
 | `switchLit` with no default | Rejected. A default is mandatory |
-| `switchLabel` over a closed variant enumerating only some labels, no default | Rejected. A value would be left with no destination |
-| `switchLabel` over a row with an unknown tail, no default | Rejected |
+| `switchKey` over a closed variant enumerating only some keys, no default | Rejected. A value would be left with no destination |
+| `switchKey` over a row with an unknown tail, no default | Rejected |
 | `switchCtor` with a default whose body is ill-typed | Rejected. The default branch is typed like any other |
-| `switchLabel` default | The occurrence is refined to the residual `Variant r'`, not left at the original type |
-| A handler omitting an operation of `E` | Rejected. `handle` removes `E` from the row, so an operation without a clause has nowhere to go |
+| `switchKey` default | The occurrence is refined to the residual `Variant r'`, not left at the original type |
+| A handler omitting an operation of `E` | Rejected. `handle` removes the keyed element, so an operation without a clause has nowhere to go |
 | A handler clause that does not respect an operation's own `forall b̄` | Rejected |
 | `handle (perform E.op v) with h` at ambient row `()` | **Accepted.** Effect safety is not "no operation is performed" |
 | A `λ` whose body jumps to a join point bound outside it | Rejected. The join point context is discarded at a lambda |
@@ -146,7 +158,7 @@ The heading of each group names the step of the plan that the group belongs to.
 | `IO.pure [Int]` | Steps. A polymorphic foreign accumulates the type argument on its spine |
 | `letjoin j (x) = e1 in let y = (λz.z) 1 in jump j y` | The body reduces before the jump fires |
 | `letrec { f = λx. … } in e` | Unfolds only in elimination position. No term steps to itself |
-| `switchLabel` on a value wrapped in `weaken` | Dispatches on the label actually injected. `weaken` is a value form and is looked through |
+| `switchKey` on a value wrapped in `weaken` | Dispatches on the key actually injected. `weaken` is a value form and is looked through |
 | `bind x = o in guard (p x) …` | The substitution happens before descending, so the guard's condition has no free `x` |
 | A saturated foreign whose `δ_f` faults | Steps to `fault φ`, which propagates out of every context including `handle`. It is not caught by a handler and is not the `Partial` effect |
 | A term at ambient row `()` reaching a `perform` with no enclosing handler | Does not arise. This is what effect safety asserts |

@@ -35,8 +35,8 @@ Conversely, some things CoreFn has do not appear in Dawn's Core.
 | (absent) | `T [[κ̄]]` / `M.x [[κ̄]]` | New. Explicit instantiation of kind schemes |
 | `Literal Ann (Literal Expr)` | `c` | No `LitArray` or `LitObject` |
 | `Constructor Ann T Ctor [Ident]` | (no term node) | Moved into the declaration table; `M.Ctor` is an ordinary global variable |
-| `Accessor Ann String Expr` | `select l e` | Typed |
-| `ObjectUpdate Ann Expr (Maybe [String]) [(String, Expr)]` | `update l e1 e2` | No `copyFields` |
+| `Accessor Ann String Expr` | `select k e` | Typed, and keyed by a `RowKey` rather than a string |
+| `ObjectUpdate Ann Expr (Maybe [String]) [(String, Expr)]` | `update k e1 e2` | No `copyFields` |
 | (absent) | `{}`, `extend`, `restrict`, `merge` | New. Row-polymorphic record operations |
 | (absent) | `inject`, `weaken`, `absurd` | New. Row-polymorphic variant operations |
 | `Case Ann [Expr] [CaseAlternative]` | `case (ē) of dt` | A decision tree rather than a list of alternatives |

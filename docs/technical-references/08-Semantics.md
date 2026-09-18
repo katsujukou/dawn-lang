@@ -7,13 +7,13 @@ Evaluation is strict and call-by-value. Because effect rows expose the points at
 | Construct | Order |
 | --- | --- |
 | `e1 e2` | `e1` → `e2` → apply |
-| `extend l e1 e2` | `e1` → `e2` |
-| `update l e1 e2` | `e1` → `e2` |
+| `extend k e1 e2` | `e1` → `e2` |
+| `update k e1 e2` | `e1` → `e2` |
 | `merge e1 e2` | `e1` → `e2` |
 | `let x = e1 in e2` | `e1` → `e2` |
 | `case (e1 … en) of dt` | `e1` → … → `en` → `dt` |
 | `jump j (e1 … en)` | `e1` → … → `en` → transfer |
-| `perform E.op [τ̄] e` | `e` → capture the continuation |
+| `perform k.op [τ̄] e` | `e` → capture the continuation |
 | `handle e with h` | install the handler → `e` |
 
 `e1 e2` evaluates the function before the argument, matching JavaScript. The Wasm backend observes the same order.
@@ -42,11 +42,11 @@ A number of forms carry no run-time content and are removed before evaluation on
 
 ## Handlers and continuations
 
-Handlers are deep. `perform E.op` captures the continuation up to the **innermost** handler for key `E` and passes `(argument, continuation)` to that handler's `op` clause. Resuming the continuation reinstalls the same handler.
+Handlers are deep. `perform k.op` captures the continuation up to the **innermost** handler whose key is `k`, and passes `(argument, continuation)` to that handler's `op` clause. Resuming the continuation reinstalls the same handler.
 
-Because rows are sharp, the same key cannot nest, so **the target handler is determined by the key alone**.
+**Handlers of one key do nest at run time**, and the innermost wins. A function that handles `E` internally is pure to its caller, so calling it through `openEff [( E )]` from under an outer handler for `E` puts two on the stack at once. `Ev_k` is what picks between them: every `handle` on the path from the chosen one to the hole has some other key.
 
-A design permitting duplicates, as Koka's scoped labels do, can also resolve the target statically through evidence passing. What it needs, however, is not a key but an offset — which occurrence of that key — and `mask` manipulates that offset. In Dawn the notion of an offset does not arise. This is a by-product of D4.
+What sharpness gives is narrower and static: **no row holds one key twice**, so a `perform` names the element it means with a key alone, and needs nothing to say which occurrence. A design permitting duplicates within the row, as Koka's scoped labels do, must name an occurrence instead — which `E` of the several the row carries — and `mask` manipulates that offset. In Dawn the notion of an offset does not arise, and that is the by-product of D4.
 
 ### How many times a continuation may be resumed
 
@@ -226,9 +226,9 @@ v ::= c
     | M.Ctor ς                 a constructor spine
     | M.f ς                    a foreign spine that is not saturated
     | rec_i(x̄ : σ̄. v̄)         a component of a local recursive group
-    | {} | extend l v1 v2
-    | inject l v
-    | weaken l [τ] v          a value of a wider variant
+    | {} | extend k v1 v2
+    | inject k v
+    | weaken k [τ] v          a value of a wider variant
     | openEff [ρ] v           a function value at a wider effect row
     | opaque ω [τ]            a value of an intrinsic type, produced by a foreign
 
@@ -274,7 +274,7 @@ Without a spine, a polymorphic `foreign` could not be used at all: `IO.pure : fo
 
 A **constructor spine is always a value**, saturated or not: a saturated one is a completed structure, an unsaturated one behaves as a function. A **foreign spine is a value only while it is unsaturated**; once saturated it is a redex that invokes `δ_f`.
 
-`weaken` and `openEff` are **value forms, not redexes**. Reducing them away would change the type — `weaken l [τ] v : Variant ( l : τ | r )` while `v : Variant r` — and D8 provides no subtyping to identify the two. They are consumed by the constructs that examine them: pattern matching looks through `weaken`, and application looks through `openEff`.
+`weaken` and `openEff` are **value forms, not redexes**. Reducing them away would change the type — `weaken k [τ] v : Variant ( k : τ | r )` while `v : Variant r` — and D8 provides no subtyping to identify the two. They are consumed by the constructs that examine them: pattern matching looks through `weaken`, and application looks through `openEff`.
 
 ### Run-time forms
 
@@ -418,17 +418,17 @@ Ev ::= []
      | Ev e  |  v Ev                        function before argument
      | Ev [τ]  |  Ev [•]
      | openEff [ρ] Ev  |  openEffC [ρ] Ev
-     | extend l Ev e  |  extend l v Ev
-     | update l Ev e  |  update l v Ev
+     | extend k Ev e  |  extend k v Ev
+     | update k Ev e  |  update k v Ev
      | merge Ev e  |  merge v Ev
-     | select l Ev  |  restrict l Ev
-     | inject l Ev  |  weaken l [τ] Ev  |  absurd [τ] Ev
+     | select k Ev  |  restrict k Ev
+     | inject k Ev  |  weaken k [τ] Ev  |  absurd [τ] Ev
      | let x : τ = Ev in e
      | case (v̄, Ev, ē) of dt
      | match θ (guard Ev dt1 dt2)
      | letjoin j (x̄ : τ̄) = e1 in Ev
      | jump j (v̄, Ev, ē)
-     | perform E.op [τ̄] Ev
+     | perform k.op [τ̄] Ev
      | handle Ev with h
 ```
 
@@ -443,8 +443,8 @@ That `handle Ev with h` is a context expresses evaluation proceeding **under** a
 Capturing a continuation requires a second notion: a context installing no handler for the key in question.
 
 ```text
-Ev_E ::= an evaluation context in which every `handle _ with h'` on the path
-         to the hole handles a key other than E
+Ev_k ::= an evaluation context in which every `handle _ with h'` on the path
+         to the hole has a key other than k
 ```
 
 A `jump` appears only in tail position, so the position it may occupy is narrower than a general context.
@@ -466,14 +466,14 @@ Tl ::= []  |  letjoin j' (x̄ : τ̄) = e' in Tl
 
   let x : τ = v in e                 →  e[x := v]
 
-  select l (extend l v1 v2)          →  v1
-  select l (extend l' v1 v2)         →  select l v2               when l ≠ l'
-  restrict l (extend l v1 v2)        →  v2
-  restrict l (extend l' v1 v2)       →  extend l' v1 (restrict l v2)   when l ≠ l'
-  update l (extend l v1 v2) v3       →  extend l v3 v2
-  update l (extend l' v1 v2) v3      →  extend l' v1 (update l v2 v3)  when l ≠ l'
+  select k (extend k v1 v2)          →  v1
+  select k (extend k' v1 v2)         →  select k v2               when k ≠ k'
+  restrict k (extend k v1 v2)        →  v2
+  restrict k (extend k' v1 v2)       →  extend k' v1 (restrict k v2)   when k ≠ k'
+  update k (extend k v1 v2) v3       →  extend k v3 v2
+  update k (extend k' v1 v2) v3      →  extend k' v1 (update k v2 v3)  when k ≠ k'
   merge {} v                         →  v
-  merge (extend l v1 v2) v3          →  extend l v1 (merge v2 v3)
+  merge (extend k v1 v2) v3          →  extend k v1 (merge v2 v3)
 ```
 
 `absurd [τ] v` has no rule: its argument has type `Variant ()`, which is uninhabited, so the redex does not arise.
@@ -524,14 +524,14 @@ Descending a decision tree takes reduction steps of its own, so that a `guard`'s
      →  match θ dt_i        when θ(o) = c_i
      →  match θ dt_0        otherwise
 
-  match θ (switchLabel o { l_i -> dt_i } [default -> dt_0])
-     →  match θ dt_i        when θ(o) injects l_i, looking through weaken
+  match θ (switchKey o { k_i -> dt_i } [default -> dt_0])
+     →  match θ dt_i        when θ(o) injects k_i, looking through weaken
      →  match θ dt_0        otherwise, if a default is present
 ```
 
 Substituting in `bind` **before** the recursive step is what allows a later `guard` to mention the bound variable; deferring the substitution would leave the condition with a free variable and no way to evaluate.
 
-`θ(o)` follows the projection path of the occurrence, which involves no computation. `switchLabel` looks through any `weaken` wrapping the value to find the label actually injected.
+`θ(o)` follows the projection path of the occurrence, which involves no computation. `switchKey` looks through any `weaken` wrapping the value to find the key actually injected.
 
 Local totality ([Terms and Matching](06-Terms-and-Matching.md)) guarantees that one case always applies, so `match` never gets stuck.
 
@@ -555,17 +555,17 @@ The second rule discards a binding whose join point is no longer reachable.
 ```text
   handle v with h                             →  e_r[x := v]
 
-  handle Ev_E[ perform E.op [σ̄] v ] with h    →  e_i[ b̄_i := σ̄,  x_i := v,
-                                                     k_i := λ(y : τ_i'). handle Ev_E[y] with h ]
-                                                 where the clause for op in h is
-                                                   E.op [b̄_i] (x_i, k_i) -> e_i
+  handle Ev_k[ perform k.op [σ̄] v ] with h    →  e_i[ b̄_i := σ̄,  x_i := v,
+                                                     k_i := λ(y : τ_i'). handle Ev_k[y] with h ]
+                                                 where h has key k and its clause for op is
+                                                   op [b̄_i] (x_i, k_i) -> e_i
 ```
 
 Two things are visible in the second rule.
 
-**The handler is reinstalled.** The continuation `k_i` rebuilds `handle Ev_E[y] with h`, so resuming returns under the same handler. This is what makes handlers deep (D15).
+**The handler is reinstalled.** The continuation `k_i` rebuilds `handle Ev_k[y] with h`, so resuming returns under the same handler. This is what makes handlers deep (D15).
 
-**The target is determined by the key alone.** `Ev_E` installs no handler for `E`, so the `handle` in the rule is the innermost one for that key. Since rows are sharp, no second handler for `E` can be nested, and no offset or index is needed to identify it.
+**The innermost handler of the key is the target.** `Ev_k` lets no `handle` of key `k` stand between the chosen one and the hole, which is what makes it innermost; handlers of one key may nest, and this is how one is picked. No offset is needed to say which element of the row is meant, since sharpness leaves only one of that key. Two instances of one effect do not interfere either: a handler keyed `cache` is not a handler for `counter`, and a `perform counter.get` passes straight through it.
 
 `k_i` is an ordinary function value. Nothing in the rule restricts how often it may be applied, which is the sense in which the reference semantics is multi-shot (D18).
 
@@ -603,12 +603,12 @@ Erasure `⌊·⌋` removes the forms that carry no run-time content.
 ⌊Λ (_ : C) . v⌋   = ⌊v⌋        ⌊e [•]⌋           = ⌊e⌋
 ⌊T [[κ̄]]⌋         = ⌊T⌋        ⌊M.x [[κ̄]]⌋       = ⌊M.x⌋
 ⌊openEff [ρ] e⌋   = ⌊e⌋        ⌊openEffC [ρ] e⌋  = ⌊e⌋
-⌊weaken l [τ] e⌋  = ⌊e⌋
+⌊weaken k [τ] e⌋  = ⌊e⌋
 ```
 
 This is **not** a reduction relation. `openEff`, `openEffC`, `weaken`, and `[[κ̄]]` change a term's type or its ambient row, and `[[κ̄]]` additionally discards an instantiation that the typed rules require. A backend erases first and then evaluates; the typed relation above evaluates without erasing.
 
-A variant value loses its `weaken` wrappers, so an erased `switchLabel` dispatches on the label the value carries directly. Recursive closures survive erasure, since `rec_i(x̄. v̄)` carries computational content.
+A variant value loses its `weaken` wrappers, so an erased `switchKey` dispatches on the key the value carries directly. Recursive closures survive erasure, since `rec_i(x̄. v̄)` carries computational content.
 
 ## Properties
 
@@ -628,7 +628,7 @@ The third case is what admitting faults in condition (3) of `Σ ⊨ G` buys. A s
 
 Condition (1) of `Σ ⊨ G` is what linking establishes. Without it a global name has nothing to unfold to, and the property fails for a reason unrelated to the type system.
 
-**Effect safety.** If `Σ ⊨ G` and `·; · ⊢ e : τ ! ()`, then no reduction sequence from `e` reaches a term of the form `Ev_E[ perform E.op [σ̄] v ]` in which no handler for `E` encloses the hole.
+**Effect safety.** If `Σ ⊨ G` and `·; · ⊢ e : τ ! ()`, then no reduction sequence from `e` reaches a term of the form `Ev_k[ perform k.op [σ̄] v ]` in which no handler of key `k` encloses the hole.
 
 The claim is **not** that operations are never performed. A term may be well typed at ambient row `()` and still perform operations internally: `handle (perform E.op v) with h` is such a term, and its reduction does reach the clause for `op`. What the empty row guarantees is that no operation **escapes**: every `perform` that runs is enclosed by a handler for its key, so evaluation never gets stuck on an unhandled operation.
 

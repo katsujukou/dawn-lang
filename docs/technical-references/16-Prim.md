@@ -41,7 +41,7 @@ Each is here because at least one rule names it.
 | --- | --- |
 | `Function` | `λ` and application, and therefore every arrow these documents write as `τ1 -{ρ}-> τ2` |
 | `Record` | `{}`, `extend`, `select`, `restrict`, `update`, `merge` |
-| `Variant` | `inject`, `weaken`, `absurd`, and the residual type in a `switchLabel` default |
+| `Variant` | `inject`, `weaken`, `absurd`, and the residual type in a `switchKey` default |
 | `Int`, `Number`, `String`, `Char`, `Boolean` | `litType`, which gives a literal its type |
 | `Boolean` | also the condition of a `guard` |
 | `IO`, `Unit` | the entry point `main : IO Unit` |
@@ -91,7 +91,7 @@ Having no constructors, an intrinsic type gets its values another way. Which way
 | `intrinsic literal` | `Int`, `Number`, `String`, `Char`, `Boolean` | a literal | `switchLit`, `guard` |
 | `intrinsic function` | `Function` | `λ`, an unsaturated spine, `openEff`, `rec_i` | application |
 | `intrinsic record` | `Record` | `{}`, `extend` | `select`, `restrict`, `update`, `merge` |
-| `intrinsic variant` | `Variant` | `inject`, `weaken` | `switchLabel`, `absurd` |
+| `intrinsic variant` | `Variant` | `inject`, `weaken` | `switchKey`, `absurd` |
 | `intrinsic opaque` | `IO`, and every ABI intrinsic | `opaque ω [τ]` | nothing |
 
 `switchCtor` is absent from the last column throughout: it takes a **data** value apart, and no intrinsic has one.

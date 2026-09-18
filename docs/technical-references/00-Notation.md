@@ -19,7 +19,8 @@ Notation confined to a single document is introduced where it is used.
 | `θ` | a kind and type substitution |
 | `δ_f` | the implementation of a foreign `f` |
 | `ω` | the payload of an opaque value, held by the backend |
-| `l` | labels, that is, row keys |
+| `k` | row keys |
+| `s` | the symbol of a `SymbolKey` |
 | `T` | type constructors |
 | `Ctor` | data constructors |
 | `E` | effect constructors |
@@ -52,7 +53,7 @@ x̄, ē, v̄                   sequences of value variables, terms, and values
 | Symbol | Reading | Defined in |
 | --- | --- | --- |
 | `⊎` | row union | [Types](03-Kinds-and-Types.md), [Rows](04-Rows.md) |
-| `l ∉ ρ` | Lacks constraint | [Rows](04-Rows.md) |
+| `k ∉ ρ` | Lacks constraint | [Rows](04-Rows.md) |
 | `ρ1 # ρ2` | Disjoint constraint | [Rows](04-Rows.md) |
 | `Γ ⊨ C` | constraint entailment | [Rows](04-Rows.md) |
 | `Γ ⊢ τ1 ≡ τ2` | type equality | [Types](03-Kinds-and-Types.md), [Rows](04-Rows.md) |
