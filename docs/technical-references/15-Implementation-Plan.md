@@ -139,6 +139,7 @@ The heading of each group names the step of the plan that the group belongs to.
 | `switchKey` default | The occurrence is refined to the residual `Variant r'`, not left at the original type |
 | A handler omitting an operation of `E` | Rejected. `handle` removes the keyed element, so an operation without a clause has nowhere to go |
 | A handler clause that does not respect an operation's own `forall b̄` | Rejected |
+| An interpreter sequencing a native action before resuming a continuation, the residual row not being closed | Rejected. That continuation is `a -{ρ}-> IO r`, which the pure arrow of `IO.bind` does not take. Abandoning the continuation, or resuming it first, is admitted |
 | `handle (perform E.op v) with h` at ambient row `()` | **Accepted.** Effect safety is not "no operation is performed" |
 | A `λ` whose body jumps to a join point bound outside it | Rejected. The join point context is discarded at a lambda |
 
@@ -151,7 +152,7 @@ The heading of each group names the step of the plan that the group belongs to.
 | `foreign primLog : String -> IO Unit` | Accepted. This is the shape every real-world leaf takes |
 | `foreign use : Record ( cb : Int -{( Console )}-> Int ) -> Unit` | Rejected. An arrow reaches the boundary through the payload of a row as readily as through an argument |
 | A `foreign` whose only effectful arrow stands inside a constraint | Accepted. A constraint is an erased proposition and carries no value across the boundary |
-| An effect with an operation `liftIO : forall a. IO a ->* a` | Rejected by policy. The signature says nothing, and admitting it restores an effect with no operation signature |
+| An effect with an operation `liftIO : forall a. IO a ->* a` | **Accepted.** `perform` carries the opaque `IO` to the handler without executing it. What it costs is the granularity of the capability, not soundness |
 | `newtype` on a type with two constructors, or with one constructor of two fields | Rejected. The backend erases the representation on the strength of this flag |
 | A `nonrec` whose right-hand side refers to a `foreign` declared later in the text | Initializes. Constructors and foreign implementations enter the environment before any value declaration is evaluated |
 | A `nonrec` referring to a later `nonrec` | Rejected. Value declarations are in dependency order |

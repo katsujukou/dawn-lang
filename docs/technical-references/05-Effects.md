@@ -397,11 +397,11 @@ runConsoleIO :: forall a. (Unit -> a / {| Console |}) -> IO a
 
 The target of interpretation need not be `IO`: a handler may interpret `Partial` into `Maybe`, which is the pure side. All that is required is that by the time control reaches `main`, the row is `()` or the result is `IO`.
 
-### `IO` appears in exactly one place
+### `IO` is executed in exactly one place
 
 Operations are **declared without implementations**. Writing `effect Console where log :: String ->* Unit` makes `log : String -> Unit / {| Console |}` available, elaborated to `perform Console.log`. There is nothing to define.
 
-`IO` appears only inside an interpreter's clauses.
+An `IO` value may flow through ordinary code — an operation may take one, and a caller may hand one over — but **executing one happens only in the runtime ABI**, applied to `main` (D25). Interpreters are where such a value is ordinarily built and sequenced; nothing about the type confines it to them.
 
 ```purescript
 effect Console where
@@ -428,29 +428,73 @@ This is a trust boundary that **should be accepted**. That is what FFI is, and [
 
 What matters is its **location**: at the `foreign` declaration, and nowhere else. An interpreter such as `runConsoleIO` is ordinary safe Dawn code and is not a trust boundary. The boundaries do not multiply.
 
-### Do not introduce a lift
+### A lift is sound, and coarse
 
-The structure collapses if a lift is provided.
+A lift may be provided, and it is not a hole in the type system.
 
 ```purescript
-liftConsoleIO :: forall a. IO a -> a / {| Console |}     -- must not exist
+effect LiftIO where
+  liftIO :: forall a. IO a ->* a
 ```
 
-For it to typecheck, `Console` would need the operation
+**`perform` does not execute the `IO` value.** It performs the operation — control moves to the matching handler — and the argument travels there as an opaque value. What reaches the outside world does so when the runtime ABI executes `main` (D25), exactly as with any other interpreter.
+
+```purescript
+program :: Unit / {| LiftIO |}
+program = liftIO (primLog "Hello")           -- builds an IO value; writes nothing
+
+main :: IO Unit
+main =
+  handle program with
+    { key LiftIO
+    ; return x        -> IO.pure x
+    ; liftIO (act, k) -> IO.bind act k
+    }
+```
+
+That clause keeps `k` and runs it after `act`, and it typechecks for the same reason `runConsoleIO`'s does.
 
 ```text
-effect Console where liftIO : forall a. IO a ->* a
+act : IO a
+k   : a -> IO r          ← pure, because the residual row is closed
+IO.bind act k : IO r
 ```
 
-`log : String ->* Unit` is a meaningful signature; `liftIO : IO a ->* a` says nothing. It is precisely the "effect with no operation signature" that D20 excludes, wearing the name `Console` — `IO :: Effect` again, one step removed.
+**A continuation-preserving interpreter that sequences `act` before `k` requires a closed residual row.** Were the row not closed, `k` would be `a -{ρ}-> IO r`, and `IO.bind` takes a pure arrow, so a native action cannot be deferred behind effects that are still to be interpreted. A clause that abandons `k`, or that resumes it before sequencing anything, is under no such condition. That discipline is what excludes the unsound case, not a restriction on the signature.
 
-The meaning of an effect is given by its operation signatures. **No operation may admit an arbitrary `IO`.** An `effect Unsafe where liftIO : forall a. IO a ->* a` is tempting for prototyping, but it is a hole through which D20's discipline drains, and should be marked unsafe if provided at all.
+D20 keeps `IO` out of the effect world. It does not exclude an effect whose *operation* takes an `IO`: `LiftIO` is an ordinary key in the row, removed by an ordinary handler, and no rule of the type system makes `Console` a part of it.
+
+Nor could a restriction be made to hold. `IO` is opaque, and a newtype hides it.
+
+```purescript
+newtype Action a = Action (IO a)
+
+effect Lift where
+  lift :: forall a. Action a ->* a
+```
+
+A rule rejecting the occurrence of `Prim.IO` in an operation signature would reject the first and admit the second, which makes it a lint rather than a condition on soundness. The Core type checker imposes none ([Modules](09-Modules.md)).
+
+What a lift costs is **the granularity of what a type says**. Code carrying `LiftIO` asks for "some runtime action" rather than for a capability, so the row no longer tells `Console` from `FileSystem`. That is a real loss and it is the argument for keeping a lift out of ordinary code — a matter of what a library offers rather than of what the checker admits. What is not lost: the row still names `LiftIO`, and passing between the two is an explicit handler.
+
+**Declare a lift with operation polymorphism, never with an effect parameter.**
+
+```purescript
+effect LiftIO where liftIO :: forall a. IO a ->* a      -- one key, every a
+effect LiftIO (a : Type) where liftIO :: IO a ->* a     -- one a per instance, all sharing one key
+```
+
+Rows are sharp, and two unlabelled instances of the second form share the key `EffectKey LiftIO`, so a computation lifting an `IO String` and an `IO Unit` has no well-kinded row. Writing keys for them recovers one — `( stringLift : LiftIO String, unitLift : LiftIO Unit )` is well-kinded ([Rows](04-Rows.md)) — at the price of a key and a handler for every type lifted. Operation polymorphism needs neither.
+
+A standard library providing one puts it in a module named for what it is — `Unsafe` or `Runtime` — so that importing it records the choice.
+
+A pure elimination is a different matter. `foreign unsafePerformIO : forall a. IO a -> a` satisfies D23 and the checker admits the declaration, but **no conforming `δ_f` implements it**: the implementation would have to execute the action, and D25 places execution outside Core ([Semantics](08-Semantics.md)). It is unimplementable rather than ill-typed, which is why Dawn does not provide one.
 
 ### Confining `IO` is a discipline
 
 Making `IO` a monad gives functions that perform real IO the type `a -> IO b`, which is exactly the monadic division D7 avoids.
 
-It holds together only if `IO` stays inside interpreters and `main`. That requires every real-world capability to be a named effect.
+Ordinary fine-grained code therefore keeps `IO` inside interpreters and `main`, which requires every real-world capability to be a named effect.
 
 ```purescript
 effect Console    where log :: String ->* Unit
@@ -459,6 +503,6 @@ effect Clock      where now :: Unit ->* Instant
 effect Random     where nextInt :: Unit ->* Int
 ```
 
-Ordinary code says "uses `Console` and `FileSystem`", not "does IO". `IO` is written only by interpreters and by `main`.
+Code written this way says "uses `Console` and `FileSystem`", not "does IO", and `IO` is written by interpreters and by `main`.
 
-D7 is lost the moment ordinary code starts writing `-> IO a`. This is therefore a matter of **policy** rather than of types, and the shape of the standard library must support it. Conversely, so long as the discipline holds, the effect system is used as it is meant to be.
+D7's granularity is lost the moment ordinary code starts writing `-> IO a`. This is a matter of **policy** rather than of types, and the shape of the standard library must support it. Importing an `Unsafe` or `Runtime` lift opts out of the granularity explicitly, and soundness is untouched either way; what a lift costs is what the row tells a reader. So long as the discipline holds, the effect system is used as it is meant to be.

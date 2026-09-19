@@ -272,6 +272,27 @@ spec = describe "TypedCore.Declare" do
           ]
       verdict m `shouldEqual` Left (IllKinded (NotQuantifiable KEffect))
 
+    it "accepts an operation admitting an arbitrary IO" do
+      -- a lift hands an opaque `IO` to the handler and executes nothing, so
+      -- what it costs is the granularity of the capability
+      let
+        a = TyVar "a"
+        m = moduleOf
+          [ DeclEffect unit
+              { name: EffName "LiftIO"
+              , params: []
+              , operations:
+                  [ { name: OpName "liftIO"
+                    , tyBinders: [ { name: a, kind: KType } ]
+                    , argument: io (TVar a)
+                    , resumesWith: TVar a
+                    }
+                  ]
+              , attributes: []
+              }
+          ]
+      verdict m `shouldEqual` Right unit
+
     it "refuses one operation name twice" do
       let
         op = { name: OpName "log", tyBinders: [], argument: string, resumesWith: unitTy' }
