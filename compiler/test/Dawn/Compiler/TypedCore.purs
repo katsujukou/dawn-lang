@@ -7,19 +7,17 @@ import Prelude
 
 import Prim as P
 
-import Dawn.Compiler.TypedCore (AttrValue(..), Constraint(..), Decl(..), DecisionTree(..), EffName(..), EffectDecl, Expr(..), Ident(..), Kind(..), Literal(..), Module, ModuleName(..), OpName(..), Occurrence(..), Qualified(..), RowElemKind(..), RowEntry(..), RowKey(..), RowPayload(..), Symbol(..), Tag(..), TyName(..), TyVar(..), Type(..), declAnnotation, exprAnnotation, monoScheme, rowEntryKey, rowEntryPayload)
+import Dawn.Compiler.TypedCore (AttrValue(..), Constraint(..), Decl(..), DecisionTree(..), EffName(..), EffectDecl, Expr(..), Ident(..), Kind(..), ModuleName(..), OpName(..), Qualified(..), RowElemKind(..), RowEntry(..), RowKey(..), RowPayload(..), Symbol(..), Tag(..), TyName(..), TyVar(..), Type(..), declAnnotation, exprAnnotation, rowEntryKey, rowEntryPayload)
 import Data.Array (index)
 import Data.Maybe (Maybe(..))
 import Test.Spec (Spec, describe, it)
+import Test.Dawn.Compiler.TypedCore.VerticalSlice (verticalSlice)
 import Test.Spec.Assertions (shouldEqual)
 
 -- Names used by the examples.
 
 prim :: ModuleName
 prim = ModuleName "Prim"
-
-main_ :: ModuleName
-main_ = ModuleName "Main"
 
 example :: ModuleName
 example = ModuleName "Example"
@@ -34,91 +32,6 @@ tUnit = TCon (Qualified prim (TyName "Unit")) []
 fn :: Type -> Type -> Type -> Type
 fn arg row result =
   TApp (TApp (TApp (TCon (Qualified prim (TyName "Function")) []) arg) row) result
-
-pureFn :: Type -> Type -> Type
-pureFn arg result = fn arg TRowEmpty result
-
-listOf :: Type -> Type
-listOf a = TApp (TCon (Qualified main_ (TyName "List")) []) a
-
-nil :: Qualified Ident
-nil = Qualified main_ (Ident "Nil")
-
-cons :: Qualified Ident
-cons = Qualified main_ (Ident "Cons")
-
-sumName :: Qualified Ident
-sumName = Qualified main_ (Ident "sum")
-
-intAdd :: Qualified Ident
-intAdd = Qualified prim (Ident "intAdd")
-
--- | The vertical slice of the Examples document. The module carries 0 and its
--- | declarations 1, 2, and 3, so that annotations are observable.
-verticalSlice :: Module P.Int
-verticalSlice =
-  { annotation: 0
-  , name: main_
-  , imports: []
-  , exports: []
-  , decls:
-      [ DeclData 1
-          { name: TyName "List"
-          , kindVars: []
-          , params: [ { name: TyVar "a", kind: KType } ]
-          , constructors:
-              [ { name: Ident "Nil", tag: 0, fields: [] }
-              , { name: Ident "Cons", tag: 1, fields: [ TVar (TyVar "a"), listOf (TVar (TyVar "a")) ] }
-              ]
-          , isNewtype: false
-          , attributes: []
-          }
-      , DeclRec 2
-          [ { name: Ident "sum"
-            , scheme: monoScheme (pureFn (listOf tInt) tInt)
-            , value: sumBody
-            , attributes: []
-            }
-          ]
-      , DeclNonRec 3
-          { name: Ident "result"
-          , scheme: monoScheme tInt
-          , value: resultBody
-          , attributes: []
-          }
-      ]
-  }
-
-sumBody :: Expr P.Int
-sumBody =
-  Lam 0 (Ident "xs") (listOf tInt)
-    $ Case 0 [ Var 0 (Ident "xs") ]
-    $
-      SwitchCtor (OccScrutinee 0)
-        [ { ctor: nil, tree: Leaf (Lit 0 (LitInt 0)) }
-        , { ctor: cons
-          , tree:
-              Bind (Ident "x") (OccField (OccScrutinee 0) cons 0)
-                $ Bind (Ident "ys") (OccField (OccScrutinee 0) cons 1)
-                $ Leaf
-                $
-                  App 0
-                    (App 0 (Global 0 intAdd []) (Var 0 (Ident "x")))
-                    (App 0 (Global 0 sumName []) (Var 0 (Ident "ys")))
-          }
-        ]
-        Nothing
-
-resultBody :: Expr P.Int
-resultBody =
-  App 0 (Global 0 sumName []) $
-    consAt 1 (consAt 2 (consAt 3 (TyApp 0 (Global 0 nil []) tInt)))
-  where
-  consAt :: P.Int -> Expr P.Int -> Expr P.Int
-  consAt n rest =
-    App 0
-      (App 0 (TyApp 0 (Global 0 cons []) tInt) (Lit 0 (LitInt n)))
-      rest
 
 -- | The `Partial` handler of the Examples document, annotated with the line each
 -- | node stands on, so that a traversal over annotations is observable.
