@@ -357,12 +357,12 @@ Expressiveness is unaffected. Handlers nest, and only the one stage that sequenc
 
 ```purescript
 -- inner handlers stay effect-polymorphic
-runState :: forall a s. (Unit -> a / {| State s, ... |}) -> Tuple a s / {| ... |}
+runState :: forall a s. (Unit -> a / {| State s, ... |}) -> s -> Tuple a s / {| ... |}
 
 -- only the terminal one is closed
 runConsoleIO :: forall a. (Unit -> a / {| Console |}) -> IO a
 
-main = runConsoleIO (\_ -> runState (\_ -> body))
+main = runConsoleIO (\_ -> runState (\_ -> body) 0)
 ```
 
 A `Monad` instance is placed on `IO.bind` by the standard library. To Core, `IO` is an ordinary type constructor with no special status.

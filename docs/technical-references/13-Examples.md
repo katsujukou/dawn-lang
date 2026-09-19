@@ -190,7 +190,8 @@ This handler stays effect-polymorphic because it abandons the continuation rathe
 runConsoleIO :: forall a. (Unit -> a / {| Console |}) -> IO a
 runConsoleIO thunk =
   handle (thunk ()) with
-    { return x            -> IO.pure x
-    ; Console.log (s, k)  -> IO.bind (primLog s) (\_ -> k ())
+    { handles Console
+    ; return x        -> IO.pure x
+    ; log (s, k)      -> IO.bind (primLog s) (\_ -> k ())
     }
 ```

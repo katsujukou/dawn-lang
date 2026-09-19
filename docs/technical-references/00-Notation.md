@@ -33,6 +33,8 @@ Notation confined to a single document is introduced where it is used.
 | `?α`, `?m`, `?r` | metavariables, which exist only in Core⁺ |
 | `Int`, `Unit`, `Function`, … | type constructors from `Prim`. These documents write them unqualified for readability; their Core names are fully qualified, as in `Prim.Function` |
 
+`k` and `s` each range over two things, and position tells them apart. A `k` is a kind variable under the binder of a kind scheme and a row key everywhere else; an `s` is a row variable where a row is expected and the symbol of a `SymbolKey` where a key is.
+
 ## Sequences
 
 An overbar (combining macron, U+0304) denotes a sequence of zero or more items.
