@@ -110,7 +110,9 @@ The kind scheme is normally empty. The Core type checker does not examine a `for
 
 ### Every arrow in a `foreign` type is pure
 
-**Every arrow appearing in a `foreign` type must have an empty effect row** (D23), on the argument side as well as the result side. Effects on the outside world are expressed by **returning `IO`**.
+**Every arrow in a runtime-bearing position of a `foreign` type must have an empty effect row** (D23), on the argument side as well as the result side. Effects on the outside world are expressed by **returning `IO`**.
+
+A runtime-bearing position is anywhere a value passes through, the payload of a row element included: `Record ( cb : a -{ρ}-> b )` hands a callback across the boundary as an argument does. A constraint is excluded, being an erased proposition that carries no value; neither handler bypass nor a leaking calling convention can arise inside one.
 
 ```text
 foreign Console.primLog : String -> IO Unit             ← correct

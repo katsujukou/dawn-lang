@@ -4,6 +4,7 @@ import Prelude
 
 import Effect (Effect)
 import Test.Dawn.Compiler.TypedCore as TypedCore
+import Test.Dawn.Compiler.TypedCore.Declare as Declare
 import Test.Dawn.Compiler.TypedCore.Kinding as Kinding
 import Test.Dawn.Compiler.TypedCore.Row as Row
 import Test.Dawn.Compiler.Elaborate.Unify as Unify
@@ -16,5 +17,6 @@ main = runSpecAndExitProcess [ consoleReporter ] do
   TypedCore.spec
   Row.spec
   Kinding.spec
+  Declare.spec
   RowProperties.spec
   Unify.spec

@@ -10,10 +10,18 @@
 -- | the identity of a declaration recorded here.
 module Dawn.Compiler.TypedCore.Signature
   ( Signature
+  , TyConInfo(..)
+  , CanonicalClass(..)
+  , CtorInfo
   , EffectInfo
+  , ValueInfo
   , emptySignature
+  , tyConKind
   , lookupTyCon
+  , lookupCtor
   , lookupEffect
+  , lookupOperation
+  , lookupValue
   , effectParamKinds
   ) where
 
@@ -23,15 +31,53 @@ import Prim as P
 
 import Dawn.Compiler.TypedCore.Decl (OpDecl)
 import Dawn.Compiler.TypedCore.Kind (Kind, KindScheme)
-import Dawn.Compiler.TypedCore.Name (EffName, OpName, Qualified, TyName)
-import Dawn.Compiler.TypedCore.Type (TyBinder)
+import Dawn.Compiler.TypedCore.Name (EffName, Ident, OpName, Qualified, TyName)
+import Dawn.Compiler.TypedCore.Type (TyBinder, Type, TypeScheme)
+import Data.Generic.Rep (class Generic)
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe)
+import Data.Maybe (Maybe(..))
+import Data.Show.Generic (genericShow)
 
 type Signature =
-  { types :: Map (Qualified TyName) KindScheme
+  { types :: Map (Qualified TyName) TyConInfo
+  , ctors :: Map (Qualified Ident) CtorInfo
   , effects :: Map (Qualified EffName) EffectInfo
+  , values :: Map (Qualified Ident) ValueInfo
+  }
+
+-- | A type constructor entry, which is a data entry or an intrinsic one.
+-- |
+-- | The distinction is load-bearing rather than descriptive: `switchCtor` takes
+-- | a data value apart, and a type with no constructors would exhaust
+-- | vacuously, so a `switchCtor` over an intrinsic type must be ill-formed
+-- | rather than trivially total.
+data TyConInfo
+  -- | The constructors the declaration gives it, as it lists them. Nothing
+  -- | reads an order from this: what a rule asks of it is which constructors
+  -- | there are, and a tag is carried by the entry of each.
+  = DataTyCon KindScheme (P.Array (Qualified Ident))
+  -- | No data constructors whatever. No declaration produces one of these: an
+  -- | intrinsic reaches `Σ` with `Prim` or through the manifest of the
+  -- | primitive surface.
+  | IntrinsicTyCon KindScheme CanonicalClass
+
+-- | How a value of an intrinsic type is built, and what may examine one.
+data CanonicalClass
+  = CanonicalLiteral
+  | CanonicalFunction
+  | CanonicalRecord
+  | CanonicalVariant
+  -- | Core has no rule that compares or decomposes one. It travels from the
+  -- | `foreign` that produced it to the `foreign` that consumes it.
+  | CanonicalOpaque
+
+-- | A data constructor as `Σ` records it. The arity is the number of fields.
+type CtorInfo =
+  { owner :: Qualified TyName
+  , tag :: P.Int
+  , fields :: P.Array Type
+  , scheme :: TypeScheme
   }
 
 -- | An effect declaration as the rules read it.
@@ -44,16 +90,60 @@ type EffectInfo =
   , operations :: Map OpName OpDecl
   }
 
-emptySignature :: Signature
-emptySignature = { types: Map.empty, effects: Map.empty }
+-- | A top-level value or a foreign. Typing treats the two alike; which one it
+-- | is decides whether evaluation unfolds a definition or calls an
+-- | implementation.
+type ValueInfo =
+  { scheme :: TypeScheme
+  , isForeign :: P.Boolean
+  }
 
-lookupTyCon :: Signature -> Qualified TyName -> Maybe KindScheme
+emptySignature :: Signature
+emptySignature =
+  { types: Map.empty
+  , ctors: Map.empty
+  , effects: Map.empty
+  , values: Map.empty
+  }
+
+tyConKind :: TyConInfo -> KindScheme
+tyConKind = case _ of
+  DataTyCon kind _ -> kind
+  IntrinsicTyCon kind _ -> kind
+
+lookupTyCon :: Signature -> Qualified TyName -> Maybe TyConInfo
 lookupTyCon sig name = Map.lookup name sig.types
+
+lookupCtor :: Signature -> Qualified Ident -> Maybe CtorInfo
+lookupCtor sig name = Map.lookup name sig.ctors
 
 lookupEffect :: Signature -> Qualified EffName -> Maybe EffectInfo
 lookupEffect sig name = Map.lookup name sig.effects
+
+-- | The signature a `perform` reads its operation from. The key of the row
+-- | element leads to the effect; the effect leads here.
+lookupOperation :: Signature -> Qualified EffName -> OpName -> Maybe OpDecl
+lookupOperation sig name op = case lookupEffect sig name of
+  Nothing -> Nothing
+  Just info -> Map.lookup op info.operations
+
+lookupValue :: Signature -> Qualified Ident -> Maybe ValueInfo
+lookupValue sig name = Map.lookup name sig.values
 
 -- | `κ̄` of `E : κ̄ -> Effect`, which is what an element's payload is checked
 -- | against.
 effectParamKinds :: EffectInfo -> P.Array Kind
 effectParamKinds info = map _.kind info.params
+
+derive instance Eq CanonicalClass
+derive instance Ord CanonicalClass
+derive instance Generic CanonicalClass _
+
+instance Show CanonicalClass where
+  show = genericShow
+
+derive instance Eq TyConInfo
+derive instance Generic TyConInfo _
+
+instance Show TyConInfo where
+  show x = genericShow x

@@ -12,6 +12,7 @@ module Dawn.Compiler.TypedCore.Kinding
   , wellFormedKind
   , quantifiableKind
   , wellFormedKey
+  , producesType
   , wellFormedConstraint
   , kindOf
   , checkKind
@@ -26,7 +27,7 @@ import Dawn.Compiler.TypedCore.Context (Context, assume, bindTyVar, kindVarInSco
 import Dawn.Compiler.TypedCore.Entailment (DecomposeError, entails)
 import Dawn.Compiler.TypedCore.Kind (Kind(..), RowElemKind(..), resultKind, substituteKind)
 import Dawn.Compiler.TypedCore.Name (EffName, KindVar, Qualified, TyName, TyVar)
-import Dawn.Compiler.TypedCore.Signature (Signature, effectParamKinds, lookupEffect, lookupTyCon)
+import Dawn.Compiler.TypedCore.Signature (Signature, effectParamKinds, lookupEffect, lookupTyCon, tyConKind)
 import Dawn.Compiler.TypedCore.Type (Constraint(..), RowEntry(..), RowKey(..), Type(..), rowEntryKey)
 import Data.Array as Array
 import Data.Either (Either(..))
@@ -162,7 +163,7 @@ kindOf sig ctx = case _ of
 
   -- Instantiation is explicit, so this is substitution alone: the kinds are
   -- written in the type, and the rule verifies their number and their layer.
-  TCon name args -> case lookupTyCon sig name of
+  TCon name args -> case map tyConKind (lookupTyCon sig name) of
     Nothing -> Left (UndeclaredTyCon name)
     Just scheme -> do
       let expected = Array.length scheme.kindVars
@@ -291,6 +292,10 @@ require ctx constraint failure = case entails ctx.facts constraint of
   Right true -> Right unit
   Right false -> Left failure
 
+-- | The result of a kind is `Type`.
+-- |
+-- | This holds of the kind of every type constructor and of every arrow inside
+-- | a quantifiable kind, and it is what confines a row to row syntax.
 producesType :: Kind -> Either KindError Unit
 producesType kind = case resultKind kind of
   KType -> Right unit

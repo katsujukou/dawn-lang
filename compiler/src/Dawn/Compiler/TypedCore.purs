@@ -19,10 +19,12 @@ module Dawn.Compiler.TypedCore
   , module Dawn.Compiler.TypedCore.Type
   , module Dawn.Compiler.TypedCore.Term
   , module Dawn.Compiler.TypedCore.Decl
+  , module Dawn.Compiler.TypedCore.Prim
   , module Dawn.Compiler.TypedCore.Signature
   , module Dawn.Compiler.TypedCore.Context
   , module Dawn.Compiler.TypedCore.Row
   , module Dawn.Compiler.TypedCore.Kinding
+  , module Dawn.Compiler.TypedCore.Declare
   , module Dawn.Compiler.TypedCore.Equality
   , module Dawn.Compiler.TypedCore.Entailment
   ) where
@@ -32,13 +34,15 @@ module Dawn.Compiler.TypedCore
 import Prim as P
 
 import Dawn.Compiler.TypedCore.Context (Context, assume, bindKindVars, bindTyVar, emptyContext, kindVarInScope, lookupTyVar)
+import Dawn.Compiler.TypedCore.Declare (DeclError(..), DeclFailure, checkTyConEntries, collectTypes, declare, initialSignature)
 import Dawn.Compiler.TypedCore.Decl (AttrField, AttrValue(..), Attribute, CtorDecl, DataDecl, Decl(..), declAnnotation, EffectDecl, Export(..), ForeignDecl, Module, OpDecl, ValueBinding)
 import Dawn.Compiler.TypedCore.Entailment (AtomicFacts, DecomposeError(..), addAssumption, decompose, entails, noFacts)
 import Dawn.Compiler.TypedCore.Equality (constraintEquiv, rowEquiv, typeEquiv)
 import Dawn.Compiler.TypedCore.Kind (Kind(..), KindScheme, RowElemKind(..), Scheme, kindVarsOf, monoScheme, substituteKind)
-import Dawn.Compiler.TypedCore.Kinding (KindError(..), Synthesized(..), checkKind, kindOf, quantifiableKind, rowElemKindOf, wellFormedConstraint, wellFormedKey, wellFormedKind)
+import Dawn.Compiler.TypedCore.Kinding (KindError(..), Synthesized(..), checkKind, kindOf, producesType, quantifiableKind, rowElemKindOf, wellFormedConstraint, wellFormedKey, wellFormedKind)
 import Dawn.Compiler.TypedCore.Name (EffName(..), Ident(..), JoinName(..), KindVar(..), ModuleName(..), OpName(..), Qualified(..), Symbol(..), Tag(..), TyName(..), TyVar(..), qualifier, unqualified)
+import Dawn.Compiler.TypedCore.Prim (asFunction, booleanTy, charTy, fn, functionTy, intTy, ioTy, litType, numberTy, primModule, primSignature, pureFn, recordTy, stringTy, unitCtor, unitTy, variantTy)
 import Dawn.Compiler.TypedCore.Row (RowError(..), RowNormalForm, emptyNormalForm, nf)
-import Dawn.Compiler.TypedCore.Signature (EffectInfo, Signature, effectParamKinds, emptySignature, lookupEffect, lookupTyCon)
+import Dawn.Compiler.TypedCore.Signature (CanonicalClass(..), CtorInfo, EffectInfo, Signature, TyConInfo(..), ValueInfo, effectParamKinds, emptySignature, lookupCtor, lookupEffect, lookupOperation, lookupTyCon, lookupValue, tyConKind)
 import Dawn.Compiler.TypedCore.Term (Binding, CtorBranch, DecisionTree(..), Expr(..), Handler, KeyBranch, LitBranch, Literal(..), OpClause, Occurrence(..), Param, ReturnClause, exprAnnotation)
 import Dawn.Compiler.TypedCore.Type (Constraint(..), RowEntry(..), RowKey(..), RowPayload(..), TyBinder, Type(..), TypeScheme, rowEntryKey, rowEntryPayload)

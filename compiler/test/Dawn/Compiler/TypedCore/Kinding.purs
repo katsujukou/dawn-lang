@@ -9,10 +9,11 @@ import Prelude
 
 import Prim as P
 
-import Dawn.Compiler.TypedCore (Constraint(..), DecomposeError(..), EffName(..), Kind(..), KindVar(..), ModuleName(..), Qualified(..), RowElemKind(..), RowEntry(..), RowKey(..), Symbol(..), Tag(..), TyName(..), TyVar(..), Type(..), monoScheme)
+import Dawn.Compiler.TypedCore (Constraint(..), DecomposeError(..), EffName(..), Ident(..), Kind(..), KindVar(..), ModuleName(..), Qualified(..), RowElemKind(..), RowEntry(..), RowKey(..), Symbol(..), Tag(..), TyName(..), TyVar(..), Type(..), monoScheme)
 import Dawn.Compiler.TypedCore.Context (Context, assume, bindKindVars, bindTyVar, emptyContext)
 import Dawn.Compiler.TypedCore.Kinding (KindError(..), Synthesized(..), checkKind, kindOf, wellFormedConstraint)
-import Dawn.Compiler.TypedCore.Signature (Signature, emptySignature)
+import Dawn.Compiler.TypedCore.Prim (intTy, ioTy, primSignature, recordTy, stringTy, variantTy)
+import Dawn.Compiler.TypedCore.Signature (Signature, TyConInfo(..))
 import Data.Either (Either(..))
 import Data.Map as Map
 import Data.Tuple (Tuple(..))
@@ -42,19 +43,19 @@ kindVar :: KindVar
 kindVar = KindVar "k"
 
 int :: Type
-int = TCon (tyCon "Int") []
+int = TCon intTy []
 
 string :: Type
-string = TCon (tyCon "String") []
+string = TCon stringTy []
 
 record :: Type -> Type
-record row = TApp (TCon (tyCon "Record") []) row
+record row = TApp (TCon recordTy []) row
 
 variant :: Type -> Type
-variant row = TApp (TCon (tyCon "Variant") []) row
+variant row = TApp (TCon variantTy []) row
 
-list :: Type -> Type
-list ty = TApp (TCon (tyCon "List") []) ty
+io :: Type -> Type
+io ty = TApp (TCon ioTy []) ty
 
 proxy :: P.Array Kind -> Type
 proxy kinds = TCon (tyCon "Proxy") kinds
@@ -71,17 +72,15 @@ effectElem name args rest = TRowExtend (RowEffectEntry name args) rest
 labelled :: Symbol -> Qualified EffName -> P.Array Type -> Type -> Type
 labelled s name args rest = TRowExtend (RowLabelledEffectEntry s name args) rest
 
--- | `Σ`, holding what these cases look up.
+-- | `Σ_Prim` together with what these cases add: a kind-polymorphic data type
+-- | and two effects.
 sig :: Signature
-sig = emptySignature
-  { types = Map.fromFoldable
-      [ Tuple (tyCon "Int") (monoScheme KType)
-      , Tuple (tyCon "String") (monoScheme KType)
-      , Tuple (tyCon "List") (monoScheme (KFun KType KType))
-      , Tuple (tyCon "Record") (monoScheme (KFun (KRow RowType) KType))
-      , Tuple (tyCon "Variant") (monoScheme (KFun (KRow RowType) KType))
-      , Tuple (tyCon "Proxy") { kindVars: [ kindVar ], body: KFun (KVar kindVar) KType }
-      ]
+sig = primSignature
+  { types = Map.insert (tyCon "Proxy")
+      ( DataTyCon { kindVars: [ kindVar ], body: KFun (KVar kindVar) KType }
+          [ Qualified prim (Ident "Proxy") ]
+      )
+      primSignature.types
   , effects = Map.fromFoldable
       [ Tuple stateEff { params: [ { name: TyVar "a", kind: KType } ], operations: Map.empty }
       , Tuple consoleEff { params: [], operations: Map.empty }
@@ -92,7 +91,11 @@ sig = emptySignature
 -- | at the occurrence rather than trusting the table.
 rowProducingSig :: Signature
 rowProducingSig =
-  sig { types = Map.insert (tyCon "MkRow") (monoScheme (KFun KType (KRow RowType))) sig.types }
+  sig
+    { types = Map.insert (tyCon "MkRow")
+        (DataTyCon (monoScheme (KFun KType (KRow RowType))) [])
+        sig.types
+    }
 
 -- | `r` and `s` at `Row Type`, `e` at `Row Effect`.
 rowVar :: TyVar
@@ -202,7 +205,7 @@ spec = describe "TypedCore.Kinding" do
       checkKind sig emptyContext (record TRowEmpty) KType `shouldEqual` Right unit
 
     it "does not stand where a type is required" do
-      kindOf sig emptyContext (list TRowEmpty)
+      kindOf sig emptyContext (io TRowEmpty)
         `shouldEqual` Left (ExpectedKind TRowEmpty KType AnyRow)
 
   describe "keys" do

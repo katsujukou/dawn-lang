@@ -149,11 +149,18 @@ The heading of each group names the step of the plan that the group belongs to.
 | `foreign log : String -{( Console )}-> Unit` | Rejected. An effectful result arrow would let the effect bypass a handler |
 | `foreign mapImpl : ( a -{e}-> b ) -> …` | Rejected. An effectful argument arrow would leak the calling convention across the boundary |
 | `foreign primLog : String -> IO Unit` | Accepted. This is the shape every real-world leaf takes |
+| `foreign use : Record ( cb : Int -{( Console )}-> Int ) -> Unit` | Rejected. An arrow reaches the boundary through the payload of a row as readily as through an argument |
+| A `foreign` whose only effectful arrow stands inside a constraint | Accepted. A constraint is an erased proposition and carries no value across the boundary |
 | An effect with an operation `liftIO : forall a. IO a ->* a` | Rejected by policy. The signature says nothing, and admitting it restores an effect with no operation signature |
 | `newtype` on a type with two constructors, or with one constructor of two fields | Rejected. The backend erases the representation on the strength of this flag |
 | A `nonrec` whose right-hand side refers to a `foreign` declared later in the text | Initializes. Constructors and foreign implementations enter the environment before any value declaration is evaluated |
 | A `nonrec` referring to a later `nonrec` | Rejected. Value declarations are in dependency order |
 | A top-level `rec` group whose members have different kind schemes | Accepted. Every scheme is registered before any right-hand side is checked |
+| A `Σ` entry `T : forall k. k` | Rejected where the signature is built. Every use site instantiating it at `Type` would pass, so an occurrence check alone lets it in |
+| A `Σ` entry `T : k -> Type` with nothing binding `k`, or `T : Effect -> Type` | Rejected there too. The whole scheme is checked under the kind variables it binds, not only its result |
+| One entry reaching a name through two import paths | Accepted. A name belongs to the module that declares it, so the two are one entry |
+| Two different entries under one name | Rejected where the parts are merged, rather than resolved by preferring either |
+| A data constructor and a value of one name | Rejected. A constructor is an ordinary global name, so the two share a namespace |
 
 ### Reduction (step 4, once an evaluator exists)
 
