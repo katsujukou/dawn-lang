@@ -62,7 +62,7 @@ q ::= k                              quantifiable kinds, a subset of κ
     | Type
     | Row Type
     | Row Effect
-    | q1 -> q2
+    | q1 -> q2                       where q2 produces Type
 ```
 
 Kind equality is syntactic, up to α-equivalence. There is no computation at the kind level.
@@ -91,12 +91,23 @@ Two judgements decide the grammar above. `Γ ⊢ κ kind` holds of a kind the ch
   ──────────────       ──────────────────       ────────────────────
   Γ ⊢ k qkind          Γ ⊢ Type qkind           Γ ⊢ Row Type qkind
 
-  ────────────────────       Γ ⊢ q1 qkind    Γ ⊢ q2 qkind
-  Γ ⊢ Row Effect qkind       ────────────────────────────
+  ────────────────────       Γ ⊢ q1 qkind    Γ ⊢ q2 qkind    result(q2) = Type
+  Γ ⊢ Row Effect qkind       ─────────────────────────────────────────────────
                              Γ ⊢ q1 -> q2 qkind
 ```
 
 `Effect` has no `qkind` rule, and that absence is D24. Every quantifiable kind is a kind, so `Γ ⊢ κ qkind` implies `Γ ⊢ κ kind`.
+
+`result` is what a kind produces once it is fully applied.
+
+```text
+result( κ1 -> κ2 )  = result( κ2 )
+result( κ )         = κ                 otherwise
+```
+
+**Only row syntax produces a row.** The side condition confines a row kind to the argument side of an arrow: `Row Type -> Type` is quantifiable and `Row Type -> Row Type` is not, and a kind variable is excluded from the result position as well, since it may be instantiated with a row kind. The same condition holds of the kind of every type constructor in `Σ`.
+
+What this buys is the domain of `nf`. A type of kind `Row ε` is then a row variable, `()`, a row extension, or a union and nothing else, which is exactly what normalization is defined on, so **every well-kinded row has a normal form** ([Rows](04-Rows.md)). Row equality, entailment, and unification all rest on that. A type-level function producing a row would have to arrive together with normalization rules of its own.
 
 A kind variable is quantifiable, and every `[[κ̄]]` requires `qkind` of what it supplies, so a kind variable stands only for a quantifiable kind.
 
@@ -136,6 +147,9 @@ The same condition applies at every site that introduces a type variable: `foral
 | `forall (f : Type -> Type). …` | yes | higher-kinded types are retained |
 | `forall (e : Effect). …` | **no** | `Effect ∉ q`. Abstracting over a single effect is done with a `Row Effect` variable |
 | `forall (f : Type -> Effect). …` | **no** | `Effect ∉ q` |
+| `forall (f : Row Type -> Type). …` | yes | a row may be consumed |
+| `forall (f : Row Type -> Row Type). …` | **no** | only row syntax produces a row |
+| `forall (f : Type -> k). …` | **no** | `k` may be instantiated with a row kind |
 | `Proxy [[Effect]]` | **no** | instantiation also requires `qkind` |
 | `State : Type -> Effect` | yes | the kind of a declared constructor is a `κ`, not a `q` |
 
@@ -156,6 +170,8 @@ Kind schemes appear **only on declarations**. The global signature `Σ` carries 
 | Type constructor | `T : forall k̄. κ` |
 | Data constructor | `Ctor : forall k̄. σ` |
 | Top-level value or foreign | `M.x : forall k̄. σ` |
+
+The kind of a type constructor produces `Type`, that is `result(κ) = Type`. `Record : Row Type -> Type` is admitted; a constructor producing a row is not, for the reason above.
 
 **An effect constructor is not among them.** Its kind is `κ̄ -> Effect`, binding no kind variable, so an element of a `Row Effect` is written `E τ̄` and carries no `[[κ̄]]` ([Open Questions](14-Open-Questions.md)).
 
@@ -233,8 +249,8 @@ The judgement is `Γ ⊢ τ : κ`. Contexts are defined in [Typing Rules](07-Typ
   ────────────────────────────────
   Γ ⊢ τ1 τ2 : κ2
 
-  Γ ⊢ κ qkind    Γ, a : κ ⊢ τ : Type     Γ ⊢ C ok    Γ ⊢ τ : Type
-  ──────────────────────────────────     ───────────────────────────
+  Γ ⊢ κ qkind    Γ, a : κ ⊢ τ : Type     Γ ⊢ C ok    Γ, C ⊢ τ : Type
+  ──────────────────────────────────     ──────────────────────────────
   Γ ⊢ forall (a : κ). τ : Type           Γ ⊢ C => τ : Type
 
   ─────────────────
@@ -248,6 +264,8 @@ The judgement is `Γ ⊢ τ : κ`. Contexts are defined in [Typing Rules](07-Typ
   ────────────────────────────────────────────────  ← disjointness
   Γ ⊢ ρ1 ⊎ ρ2 : Row ε
 ```
+
+**A constraint is assumed while its body is kinded.** A row that is sharp only under `k ∉ r` — `(k ∉ r) => Record ( k : τ | r )`, the shape every row-polymorphic function has — is well-kinded for that reason and for no other. Writing `Γ, C` also requires `C` to be satisfiable ([Typing Rules](07-Typing-Rules.md)).
 
 That row extension and row union require **entailment from the context** is the centre of the design. PureScript admits `RCons` unconditionally and performs no elimination of duplicate labels; in Dawn a well-kinded row is sharp by construction.
 

@@ -106,6 +106,12 @@ The heading of each group names the step of the plan that the group belongs to.
 | `#Ok ∉ ( Console )` | Rejected. A tag is not a key of a `Row Effect`; a `SymbolKey` would be admitted, since it may key a labelled instance |
 | `ρ1 # ρ2` with `ρ1 : Row Type` and `ρ2 : Row Effect` | Rejected. Both sides share one row element kind |
 | `Proxy [[Type]] [Int]` and `Proxy [[Row Type]] [( x : Int )]` | Both accepted. Type and data constructors carry independent kind schemes |
+| `forall (f : Row Type -> Type). …` | Accepted. A row may be consumed |
+| `forall (f : Row Type -> Row Type). …` | Rejected. Only row syntax produces a row, which is what keeps `nf` total on well-kinded rows |
+| `forall (f : Type -> k). …` | Rejected. `k` may be instantiated with a row kind |
+| A `Σ` entry `MkRow : Type -> Row Type`, used as `Record (MkRow Int)` | Rejected at the occurrence. Kinding does not trust the table for this |
+| `(name ∉ r) => Record ( name : String \| r )` | **Accepted.** The constraint is assumed while the body is kinded; without it the row is not sharp |
+| `(name ∉ ( name : String )) => Int` | Rejected. `Γ, C` requires `C` to be satisfiable |
 
 ### Row keys (step 3)
 

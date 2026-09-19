@@ -39,6 +39,8 @@ The distinction between `Σ` and `Γ` is the most basic.
 
 `Γ` is a sequence of local bindings. It grows on entering `λ`, `Λ`, or `let` and shrinks on leaving. It is ordered, and later entries may refer to earlier ones: `Γ, a : Type, x : a` is meaningful while the reverse order is not.
 
+**`Γ, C` requires `C` to be satisfiable.** Writing it is a check and not only an extension: a constraint that contradicts itself, such as `k ∉ ( k : τ )`, forms no context, and no rule may assume one. Entailment reads `Γ` as a set of atomic facts about row variables and has no rule for an inconsistent context ([Rows](04-Rows.md)), so a context admitting one would let a term be typed from a premise nothing discharges.
+
 The distinction is also the unit of **separate compilation**. `Σ` is what a module's interface publishes for other modules; `Γ` never crosses a module boundary. That only `Σ` carries kind schemes follows from instantiation occurring only when a declaration is referenced.
 
 `Ω` is separate because an occurrence is not a variable. It is a path from a scrutinee, derived structurally as the tree is descended rather than introduced by a binder. It becomes a variable only by passing through `bind x = o`, at which point it enters `Γ`.

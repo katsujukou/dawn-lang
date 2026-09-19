@@ -105,7 +105,7 @@ The Core type checker **re-derives** `Γ ⊨ C` for each `e [•]`. No proof ter
 
 ## Normal form
 
-Every well-kinded row has a normal form.
+Every well-kinded row has a normal form. The four equations below cover every type of kind `Row ε`, because a row kind is produced by row syntax alone and never by a type constructor ([Kinds and Types](03-Kinds-and-Types.md)).
 
 ```text
 RNF ::= ⟨ F ; T ⟩

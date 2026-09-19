@@ -13,6 +13,7 @@ module Dawn.Compiler.TypedCore.Entailment
   , DecomposeError(..)
   , noFacts
   , decompose
+  , addAssumption
   , entails
   ) where
 
@@ -61,6 +62,7 @@ noFacts = { lacks: Map.empty, disjoint: Set.empty }
 decompose :: P.Array Constraint -> Either DecomposeError AtomicFacts
 decompose = foldM addAssumption noFacts
 
+-- | Decompose one assumption over its normal form and add what it yields.
 addAssumption :: AtomicFacts -> Constraint -> Either DecomposeError AtomicFacts
 addAssumption facts = case _ of
   Lacks key row -> do

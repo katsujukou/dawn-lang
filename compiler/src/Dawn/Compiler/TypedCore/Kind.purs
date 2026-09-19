@@ -10,11 +10,16 @@ module Dawn.Compiler.TypedCore.Kind
   , KindScheme
   , monoScheme
   , kindVarsOf
+  , resultKind
+  , substituteKind
   ) where
 
 import Prelude
 
 import Dawn.Compiler.TypedCore.Name (KindVar)
+import Data.Map (Map)
+import Data.Map as Map
+import Data.Maybe (fromMaybe)
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Generic.Rep (class Generic)
@@ -64,6 +69,29 @@ kindVarsOf = case _ of
   KEffect -> Set.empty
   KRow _ -> Set.empty
   KFun a b -> kindVarsOf a <> kindVarsOf b
+
+-- | What a kind produces once it is fully applied.
+-- |
+-- | Only row syntax may produce a row, so this is `Type` for every type
+-- | constructor and for every arrow inside a quantifiable kind, and `Effect`
+-- | for an effect constructor.
+resultKind :: Kind -> Kind
+resultKind = case _ of
+  KFun _ b -> resultKind b
+  k -> k
+
+-- | Instantiate kind variables. Kind schemes are prenex and instantiation is
+-- | explicit, so this is a substitution over a kind and nothing more: there is
+-- | no binder to avoid capturing.
+substituteKind :: Map KindVar Kind -> Kind -> Kind
+substituteKind sub = go
+  where
+  go = case _ of
+    KVar k -> fromMaybe (KVar k) (Map.lookup k sub)
+    KType -> KType
+    KEffect -> KEffect
+    KRow e -> KRow e
+    KFun a b -> KFun (go a) (go b)
 
 derive instance Eq RowElemKind
 derive instance Ord RowElemKind

@@ -7,8 +7,8 @@
 -- | checker validates every term elaboration produces.
 -- |
 -- | This module re-exports the syntax together with the decisions the trusted
--- | core makes over it — row normalization, type equality, and entailment —
--- | which the specification lists as one trusted set.
+-- | core makes over it — row normalization, kinding, type equality, and
+-- | entailment — which the specification lists as one trusted set.
 -- |
 -- | The forms that arise only during reduction — `match θ dt`, `openEffC`, and
 -- | `rec_i` — belong to the evaluator and are not produced by elaboration, so
@@ -19,7 +19,10 @@ module Dawn.Compiler.TypedCore
   , module Dawn.Compiler.TypedCore.Type
   , module Dawn.Compiler.TypedCore.Term
   , module Dawn.Compiler.TypedCore.Decl
+  , module Dawn.Compiler.TypedCore.Signature
+  , module Dawn.Compiler.TypedCore.Context
   , module Dawn.Compiler.TypedCore.Row
+  , module Dawn.Compiler.TypedCore.Kinding
   , module Dawn.Compiler.TypedCore.Equality
   , module Dawn.Compiler.TypedCore.Entailment
   ) where
@@ -28,11 +31,14 @@ module Dawn.Compiler.TypedCore
 -- spellings, so `Prim` is imported qualified here as well.
 import Prim as P
 
+import Dawn.Compiler.TypedCore.Context (Context, assume, bindKindVars, bindTyVar, emptyContext, kindVarInScope, lookupTyVar)
 import Dawn.Compiler.TypedCore.Decl (AttrField, AttrValue(..), Attribute, CtorDecl, DataDecl, Decl(..), declAnnotation, EffectDecl, Export(..), ForeignDecl, Module, OpDecl, ValueBinding)
-import Dawn.Compiler.TypedCore.Entailment (AtomicFacts, DecomposeError(..), decompose, entails, noFacts)
+import Dawn.Compiler.TypedCore.Entailment (AtomicFacts, DecomposeError(..), addAssumption, decompose, entails, noFacts)
 import Dawn.Compiler.TypedCore.Equality (constraintEquiv, rowEquiv, typeEquiv)
-import Dawn.Compiler.TypedCore.Kind (Kind(..), KindScheme, RowElemKind(..), Scheme, kindVarsOf, monoScheme)
+import Dawn.Compiler.TypedCore.Kind (Kind(..), KindScheme, RowElemKind(..), Scheme, kindVarsOf, monoScheme, substituteKind)
+import Dawn.Compiler.TypedCore.Kinding (KindError(..), Synthesized(..), checkKind, kindOf, quantifiableKind, rowElemKindOf, wellFormedConstraint, wellFormedKey, wellFormedKind)
 import Dawn.Compiler.TypedCore.Name (EffName(..), Ident(..), JoinName(..), KindVar(..), ModuleName(..), OpName(..), Qualified(..), Symbol(..), Tag(..), TyName(..), TyVar(..), qualifier, unqualified)
 import Dawn.Compiler.TypedCore.Row (RowError(..), RowNormalForm, emptyNormalForm, nf)
+import Dawn.Compiler.TypedCore.Signature (EffectInfo, Signature, effectParamKinds, emptySignature, lookupEffect, lookupTyCon)
 import Dawn.Compiler.TypedCore.Term (Binding, CtorBranch, DecisionTree(..), Expr(..), Handler, KeyBranch, LitBranch, Literal(..), OpClause, Occurrence(..), Param, ReturnClause, exprAnnotation)
 import Dawn.Compiler.TypedCore.Type (Constraint(..), RowEntry(..), RowKey(..), RowPayload(..), TyBinder, Type(..), TypeScheme, rowEntryKey, rowEntryPayload)
