@@ -39,6 +39,24 @@
             "spec-node"
           ]
         }
+      },
+      "dawn-fmt": {
+        "path": "dawn-fmt",
+        "core": {
+          "dependencies": []
+        },
+        "test": {
+          "dependencies": []
+        }
+      },
+      "dawn-lsp": {
+        "path": "dawn-lsp",
+        "core": {
+          "dependencies": []
+        },
+        "test": {
+          "dependencies": []
+        }
       }
     },
     "package_set": {
