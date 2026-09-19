@@ -13,6 +13,7 @@ module Dawn.Compiler.TypedCore.Row
   , RowError(..)
   , emptyNormalForm
   , nf
+  , fromNormalForm
   ) where
 
 import Prelude
@@ -20,8 +21,10 @@ import Prelude
 import Prim as P
 
 import Dawn.Compiler.TypedCore.Name (TyVar)
-import Dawn.Compiler.TypedCore.Type (RowKey, RowPayload, Type(..), rowEntryKey, rowEntryPayload)
+import Dawn.Compiler.TypedCore.Type (RowEntry(..), RowKey(..), RowPayload(..), Type(..), rowEntryKey, rowEntryPayload)
+import Data.Array as Array
 import Data.Either (Either(..))
+import Data.Foldable (foldl, foldr)
 import Data.Generic.Rep (class Generic)
 import Data.Map (Map)
 import Data.Map as Map
@@ -29,6 +32,8 @@ import Data.Maybe (Maybe(..))
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Show.Generic (genericShow)
+import Data.Traversable (traverse)
+import Data.Tuple (Tuple(..))
 
 -- | `⟨ F ; T ⟩`.
 -- |
@@ -87,6 +92,31 @@ nf = case _ of
 
   ty ->
     Left (NotARow ty)
+
+-- | A row whose normal form is the one given.
+-- |
+-- | `nf` of the result is the input again, so the two stand for one row under
+-- | `≡`. What is rebuilt is a row in normal order rather than the row that was
+-- | normalized; the two differ in how they are written and in nothing else.
+-- |
+-- | `Nothing` is a pairing no element has: the payload of a declared effect
+-- | under a key that is neither its own nor a `Symbol`.
+fromNormalForm :: RowNormalForm -> Maybe Type
+fromNormalForm n = do
+  entries <- traverse entryOf (Map.toUnfoldable n.known :: P.Array (Tuple RowKey RowPayload))
+  Just (foldr TRowExtend tailType entries)
+  where
+  tailType = case Array.uncons (Set.toUnfoldable n.tail :: P.Array TyVar) of
+    Nothing -> TRowEmpty
+    Just { head, tail } -> foldl (\acc t -> TRowUnion acc (TVar t)) (TVar head) tail
+
+entryOf :: Tuple RowKey RowPayload -> Maybe RowEntry
+entryOf (Tuple key payload) = case payload of
+  TypePayload ty -> Just (RowTypeEntry key ty)
+  EffectPayload name args -> case key of
+    EffectKey e | e == name -> Just (RowEffectEntry name args)
+    SymbolKey s -> Just (RowLabelledEffectEntry s name args)
+    _ -> Nothing
 
 union :: RowNormalForm -> RowNormalForm -> Either RowError RowNormalForm
 union l r =

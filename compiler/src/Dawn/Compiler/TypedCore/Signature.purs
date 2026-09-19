@@ -73,9 +73,14 @@ data CanonicalClass
   | CanonicalOpaque
 
 -- | A data constructor as `Σ` records it. The arity is the number of fields.
+-- |
+-- | `params` are the type parameters of the owning declaration, which
+-- | `fields` are written in terms of: taking a constructor's value apart
+-- | instantiates them from the type of the occurrence.
 type CtorInfo =
   { owner :: Qualified TyName
   , tag :: P.Int
+  , params :: P.Array TyBinder
   , fields :: P.Array Type
   , scheme :: TypeScheme
   }

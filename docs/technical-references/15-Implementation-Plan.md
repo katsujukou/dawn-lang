@@ -125,7 +125,8 @@ The heading of each group names the step of the plan that the group belongs to.
 | `( EffectKey State : Int )` | Rejected. `Γ ⊢ k key Type` admits the structural keys only |
 | A handler keyed `cache` enclosing `perform counter.get` | The `perform` passes through. `Ev_k` matches on the key, and `counter` is not `cache` |
 | `perform cache.get` where the row has `cache ↦ State Int` | The operation's type comes from `Σ(State)`, not from `cache`. A checker that looked the key up in `Σ` would fail here and pass on the unlabelled form |
-| Two handlers of one key, nested | The innermost is chosen. Sharpness governs rows, not the handler stack |
+| `handle (handle e with h) with h` at one key | Rejected. The inner one would stand at `( k \| ( k \| ρ ) )`, which is not sharp |
+| A pure function handling `E` within itself, called through `openEff [( E )]` under an outer handler of `E` | **Accepted.** No row carries `E` twice; the two handlers meet only in the run-time stack |
 
 ### Decision trees and handlers (step 3)
 
@@ -142,6 +143,13 @@ The heading of each group names the step of the plan that the group belongs to.
 | An interpreter sequencing a native action before resuming a continuation, the residual row not being closed | Rejected. That continuation is `a -{ρ}-> IO r`, which the pure arrow of `IO.bind` does not take. Abandoning the continuation, or resuming it first, is admitted |
 | `handle (perform E.op v) with h` at ambient row `()` | **Accepted.** Effect safety is not "no operation is performed" |
 | A `λ` whose body jumps to a join point bound outside it | Rejected. The join point context is discarded at a lambda |
+| A `letjoin` in argument position whose definition jumps to itself | Accepted. The root of a definition is in tail position wherever the `letjoin` stands |
+| `switchCtor` whose first branch reaches no leaf and whose second does | Accepted, at the type the second gives. The written order of branches carries no meaning |
+| `bind x = o . k` with no dispatch having established `o . k` | Accepted. A record has an element at every key of its row |
+| A handler clause whose continuation is typed at the inner row | Rejected. It is `τ' -{ρ}-> β`, the row outside the handle and the result of it (D15) |
+| A clause binding `forall b` where the operation declares `forall a` | Accepted. The binders are aligned, a handler respecting the polymorphism rather than the spelling |
+| A clause binding a different number of them, or one at another kind | Rejected |
+| `guard` whose consequent reaches no leaf and whose alternative does | Accepted, at the type the alternative gives |
 
 ### FFI and declarations (step 3)
 
@@ -172,10 +180,11 @@ The heading of each group names the step of the plan that the group belongs to.
 | `foreign clock : IO Time`, an arity-zero foreign | Steps to `δ_clock()`. The spine is saturated as soon as it is formed |
 | `M.f v` for a unary foreign | Steps. The final value argument must fire the implementation |
 | `IO.pure [Int]` | Steps. A polymorphic foreign accumulates the type argument on its spine |
-| `letjoin j (x) = e1 in let y = (λz.z) 1 in jump j y` | The body reduces before the jump fires |
+| `letjoin j (x : Int) : Int = e1 in let y = (λz.z) 1 in jump j y` | The body reduces before the jump fires |
 | `letrec { f = λx. … } in e` | Unfolds only in elimination position. No term steps to itself |
 | `switchKey` on a value wrapped in `weaken` | Dispatches on the key actually injected. `weaken` is a value form and is looked through |
 | `bind x = o in guard (p x) …` | The substitution happens before descending, so the guard's condition has no free `x` |
+| That call, once it is evaluated | The innermost handler of the key is chosen: `Ev_k` lets no `handle` of that key stand between it and the hole |
 | A saturated foreign whose `δ_f` faults | Steps to `fault φ`, which propagates out of every context including `handle`. It is not caught by a handler and is not the `Partial` effect |
 | A term at ambient row `()` reaching a `perform` with no enclosing handler | Does not arise. This is what effect safety asserts |
 

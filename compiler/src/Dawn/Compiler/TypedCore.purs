@@ -24,6 +24,7 @@ module Dawn.Compiler.TypedCore
   , module Dawn.Compiler.TypedCore.Context
   , module Dawn.Compiler.TypedCore.Row
   , module Dawn.Compiler.TypedCore.Kinding
+  , module Dawn.Compiler.TypedCore.Check
   , module Dawn.Compiler.TypedCore.Declare
   , module Dawn.Compiler.TypedCore.Equality
   , module Dawn.Compiler.TypedCore.Entailment
@@ -33,6 +34,7 @@ module Dawn.Compiler.TypedCore
 -- spellings, so `Prim` is imported qualified here as well.
 import Prim as P
 
+import Dawn.Compiler.TypedCore.Check (CheckError(..), CheckFailure, Env, JoinInfo, check, envOf, infer, isFunVal, isValueForm)
 import Dawn.Compiler.TypedCore.Context (Context, assume, bindKindVars, bindTyVar, emptyContext, kindVarInScope, lookupTyVar)
 import Dawn.Compiler.TypedCore.Declare (DeclError(..), DeclFailure, checkTyConEntries, collectTypes, declare, initialSignature)
 import Dawn.Compiler.TypedCore.Decl (AttrField, AttrValue(..), Attribute, CtorDecl, DataDecl, Decl(..), declAnnotation, EffectDecl, Export(..), ForeignDecl, Module, OpDecl, ValueBinding)

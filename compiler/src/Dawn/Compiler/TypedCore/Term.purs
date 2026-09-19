@@ -25,7 +25,7 @@ import Prim as P
 
 import Dawn.Compiler.TypedCore.Kind (Kind)
 import Dawn.Compiler.TypedCore.Name (Ident, JoinName, OpName, Qualified, TyVar)
-import Dawn.Compiler.TypedCore.Type (Constraint, RowKey, TyBinder, Type)
+import Dawn.Compiler.TypedCore.Type (Constraint, RowEntry, RowKey, TyBinder, Type)
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe)
 import Data.Show.Generic (genericShow)
@@ -68,7 +68,10 @@ data Expr a
   | LetRec a (P.Array (Binding a)) (Expr a)
   -- | A match over a scrutinee vector, dispatching through a decision tree (D9).
   | Case a (P.Array (Expr a)) (DecisionTree a)
-  | LetJoin a JoinName (P.Array Param) (Expr a) (Expr a)
+  -- | `letjoin j (x̄ : τ̄) : τ = e1 in e2`. The result type is written: it is
+  -- | the type of the whole expression and of every `jump` to `j`, and nothing
+  -- | in the two bodies determines it ahead of the other.
+  | LetJoin a JoinName (P.Array Param) Type (Expr a) (Expr a)
   -- | A jump to a join point, which occurs in tail position only.
   | Jump a JoinName (P.Array (Expr a))
   | RecordEmpty a
@@ -103,12 +106,15 @@ type Binding a =
 
 -- | A handler of one element of the effect row.
 -- |
--- | `key` selects the element; the effect whose operations the clauses must
--- | exhaust is the one the payload at that key names. The clauses exhaust them
--- | because `handle` removes the key from the row, leaving an operation without
--- | a clause nowhere to go.
+-- | The element is written whole. Its key selects which element of the row the
+-- | `handle` removes, and its payload names the effect whose operations the
+-- | clauses must exhaust — the row being handled is not written anywhere else,
+-- | so neither is recoverable from the other.
+-- |
+-- | The clauses exhaust the operations because `handle` removes the element,
+-- | leaving an operation without a clause nowhere to go.
 type Handler a =
-  { key :: RowKey
+  { element :: RowEntry
   , returnClause :: ReturnClause a
   , opClauses :: P.Array (OpClause a)
   }
@@ -194,7 +200,7 @@ exprAnnotation = case _ of
   Let a _ _ _ _ -> a
   LetRec a _ _ -> a
   Case a _ _ -> a
-  LetJoin a _ _ _ _ -> a
+  LetJoin a _ _ _ _ _ -> a
   Jump a _ _ -> a
   RecordEmpty a -> a
   RecordExtend a _ _ _ -> a

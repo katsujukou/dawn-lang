@@ -177,9 +177,10 @@ merge : forall (r : Row Type). forall (s : Row Type).
   ────────────────────────────────────────────────────
   Γ;Δ ⊢ perform k.op [σ̄] e : τ[ā := τ̄][b̄ := σ̄] ! ρ
 
-  h = { key k ; return (x : α) -> e_r ; op_i [b̄_i] (x_i : σ_i', k_i : τ_i' -{ρ}-> β) -> e_i }
+  h = { handles ent ; return (x : α) -> e_r ; op_i [b̄_i] (x_i : σ_i', k_i : τ_i' -{ρ}-> β) -> e_i }
+  Γ ⊢ ( ent | ρ ) : Row Effect                      ← the element the handle removes
   Γ;· ⊢ e : α ! ( ent | ρ )                         ← inside handle the row grows
-  key(ent) = k     payload(ent) = E τ̄               ← one element, chosen by the key
+  payload(ent) = E τ̄                                ← the key selects it, the payload names E
   Γ, x : α; · ⊢ e_r : β ! ρ
   each i:  Σ(E).op_i = forall (b̄_i : κ̄_i). σ_i ->* τ_i
            σ_i' = σ_i[ā := τ̄]    τ_i' = τ_i[ā := τ̄]
@@ -209,10 +210,11 @@ The explicitness is the price of D8. The elaborator inserts it, so an author doe
 ## Join points and decision trees
 
 ```text
-  Γ, x̄ : τ̄; Δ, j : (τ̄) -> τ ! ρ ⊢ e1 : τ ! ρ
+  Γ ⊢ τ : Type    Γ ⊢ τ̄ : Type
+  Γ, x̄ : τ̄; Δ, j : (τ̄) -> τ ! ρ ⊢ e1 : τ ! ρ      ← the root of e1 is in tail position
   Γ;      Δ, j : (τ̄) -> τ ! ρ ⊢ e2 : τ ! ρ
-  ───────────────────────────────────────────────
-  Γ;Δ ⊢ letjoin j (x̄ : τ̄) = e1 in e2 : τ ! ρ
+  ───────────────────────────────────────────────────
+  Γ;Δ ⊢ letjoin j (x̄ : τ̄) : τ = e1 in e2 : τ ! ρ
 
   ( j : (τ̄) -> τ ! ρ ) ∈ Δ    each i: Γ;Δ ⊢ e_i : τ_i ! ρ    jump is in tail position
   ──────────────────────────────────────────────────────────────────────────────────
@@ -259,6 +261,26 @@ The explicitness is the price of D8. The elaborator inserts it, so an author doe
   ──────────────────────────────────────────────────  (derived; see 05-Effects)
   Γ;Δ;Ω ⊢ fail : τ ! ρ
 ```
+
+**A handler writes the element it removes, not only its key.** The row being handled appears nowhere else in the term, so neither half of the element is recoverable from the other: a key does not name an effect, and the arguments `τ̄` are not determined by the clauses without first-order matching. What `Ω` and `Σ` give the rules is then a lookup rather than a search. Only `key(ent)` has meaning at run time; the payload is an annotation and erases.
+
+### Occurrence typing
+
+```text
+  ( s_i ↦ τ ) ∈ Ω
+  ───────────────
+  Ω ⊢ s_i : τ
+
+  ( o ↦ τ ) ∈ Ω                    ← a dispatch records what it takes apart
+  ─────────────
+  Ω ⊢ o : τ
+
+  Ω ⊢ o : Record r    nf(r) = ⟨F ; T⟩    F(k) = τ
+  ───────────────────────────────────────────────
+  Ω ⊢ o . k : τ
+```
+
+`o ! Ctor . j` and `o ? k` are typed by the branch that established them and by nothing else: what a constructor or a variant carries is known only under the dispatch that selected it, so those paths reach `Ω` through `switchCtor` and `switchKey`. A record needs no such branch, having one element at every key of its row, so `o . k` is read off the type of what it projects from.
 
 In the default branch of `switchCtor` and `switchLit` the occurrence context `Ω` is unchanged, because Core does not track the refinement "not one of the enumerated cases". Refinement happens only in the default branch of `switchKey`, where the occurrence takes the residual type `Variant r'`.
 

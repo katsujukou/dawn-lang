@@ -13,6 +13,8 @@ module Dawn.Compiler.TypedCore.Context
   , bindKindVars
   , bindTyVar
   , lookupTyVar
+  , bindVar
+  , lookupVar
   , kindVarInScope
   , assume
   ) where
@@ -23,8 +25,8 @@ import Prim as P
 
 import Dawn.Compiler.TypedCore.Entailment (AtomicFacts, DecomposeError, addAssumption, noFacts)
 import Dawn.Compiler.TypedCore.Kind (Kind)
-import Dawn.Compiler.TypedCore.Name (KindVar, TyVar)
-import Dawn.Compiler.TypedCore.Type (Constraint)
+import Dawn.Compiler.TypedCore.Name (Ident, KindVar, TyVar)
+import Dawn.Compiler.TypedCore.Type (Constraint, Type)
 import Data.Either (Either)
 import Data.Foldable (foldr)
 import Data.Map (Map)
@@ -36,11 +38,12 @@ import Data.Set as Set
 type Context =
   { kindVars :: Set KindVar
   , tyVars :: Map TyVar Kind
+  , vars :: Map Ident Type
   , facts :: AtomicFacts
   }
 
 emptyContext :: Context
-emptyContext = { kindVars: Set.empty, tyVars: Map.empty, facts: noFacts }
+emptyContext = { kindVars: Set.empty, tyVars: Map.empty, vars: Map.empty, facts: noFacts }
 
 -- | Bind the kind variables of a declaration's scheme. A kind variable enters
 -- | `Γ` here and nowhere else: neither grammar has a kind quantifier (D3).
@@ -54,6 +57,13 @@ bindTyVar ctx name kind =
 
 lookupTyVar :: Context -> TyVar -> Maybe Kind
 lookupTyVar ctx name = Map.lookup name ctx.tyVars
+
+bindVar :: Context -> Ident -> Type -> Context
+bindVar ctx name ty =
+  ctx { vars = Map.insert name ty ctx.vars }
+
+lookupVar :: Context -> Ident -> Maybe Type
+lookupVar ctx name = Map.lookup name ctx.vars
 
 kindVarInScope :: Context -> KindVar -> P.Boolean
 kindVarInScope ctx name = Set.member name ctx.kindVars

@@ -167,7 +167,7 @@ nonrec Example.toMaybe
   = Λ (e : Row Effect). Λ (_ : Partial ∉ e). Λ (a : Type).
       λ (thunk : Unit -{ ( Partial | e ) }-> a).
         handle ( thunk Prim.Unit ) with
-          { key Partial
+          { handles Partial
           ; return (x : a) -> Example.Just [a] x
           ; abort [b] (_ : Unit, k : b -{e}-> Maybe a) ->
               Example.Nothing [a]

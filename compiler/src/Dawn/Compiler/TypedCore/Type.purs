@@ -13,6 +13,9 @@ module Dawn.Compiler.TypedCore.Type
   , TypeScheme
   , rowEntryKey
   , rowEntryPayload
+  , substituteType
+  , substituteConstraint
+  , substituteKindsInType
   ) where
 
 import Prelude
@@ -22,9 +25,12 @@ import Prelude
 -- spellings.
 import Prim as P
 
-import Dawn.Compiler.TypedCore.Kind (Kind, Scheme)
-import Dawn.Compiler.TypedCore.Name (EffName, Qualified, Symbol, Tag, TyName, TyVar)
+import Dawn.Compiler.TypedCore.Kind (Kind, Scheme, substituteKind)
+import Dawn.Compiler.TypedCore.Name (EffName, KindVar, Qualified, Symbol, Tag, TyName, TyVar)
 import Data.Generic.Rep (class Generic)
+import Data.Map (Map)
+import Data.Map as Map
+import Data.Maybe (fromMaybe)
 import Data.Show.Generic (genericShow)
 
 -- | A type, written `τ`, `σ`, or `ρ`.
@@ -102,6 +108,59 @@ rowEntryPayload = case _ of
   RowTypeEntry _ ty -> TypePayload ty
   RowEffectEntry e args -> EffectPayload e args
   RowLabelledEffectEntry _ e args -> EffectPayload e args
+
+-- | Instantiate type variables.
+-- |
+-- | Every bound variable of a Core term is unique within its context, so a
+-- | substitution passes under a binder without renaming it: no binder it meets
+-- | can capture a variable of what is substituted in.
+substituteType :: Map TyVar Type -> Type -> Type
+substituteType sub = go
+  where
+  go = case _ of
+    TVar a -> fromMaybe (TVar a) (Map.lookup a sub)
+    TCon name kinds -> TCon name kinds
+    TApp f x -> TApp (go f) (go x)
+    TForall a kind body -> TForall a kind (go body)
+    TConstrained constraint body -> TConstrained (substituteConstraint sub constraint) (go body)
+    TRowEmpty -> TRowEmpty
+    TRowExtend entry rest -> TRowExtend (goEntry entry) (go rest)
+    TRowUnion left right -> TRowUnion (go left) (go right)
+
+  goEntry = case _ of
+    RowTypeEntry key ty -> RowTypeEntry key (go ty)
+    RowEffectEntry name args -> RowEffectEntry name (map go args)
+    RowLabelledEffectEntry s name args -> RowLabelledEffectEntry s name (map go args)
+
+substituteConstraint :: Map TyVar Type -> Constraint -> Constraint
+substituteConstraint sub = case _ of
+  Lacks key row -> Lacks key (substituteType sub row)
+  Disjoint left right -> Disjoint (substituteType sub left) (substituteType sub right)
+
+-- | Instantiate the kind variables a declaration's scheme binds, which is what
+-- | `M.x [[κ̄]]` asks for. Kinds reach a type through the arguments of a
+-- | constructor and through the binder of a `forall`.
+substituteKindsInType :: Map KindVar Kind -> Type -> Type
+substituteKindsInType sub = go
+  where
+  go = case _ of
+    TVar a -> TVar a
+    TCon name kinds -> TCon name (map (substituteKind sub) kinds)
+    TApp f x -> TApp (go f) (go x)
+    TForall a kind body -> TForall a (substituteKind sub kind) (go body)
+    TConstrained constraint body -> TConstrained (goConstraint constraint) (go body)
+    TRowEmpty -> TRowEmpty
+    TRowExtend entry rest -> TRowExtend (goEntry entry) (go rest)
+    TRowUnion left right -> TRowUnion (go left) (go right)
+
+  goConstraint = case _ of
+    Lacks key row -> Lacks key (go row)
+    Disjoint left right -> Disjoint (go left) (go right)
+
+  goEntry = case _ of
+    RowTypeEntry key ty -> RowTypeEntry key (go ty)
+    RowEffectEntry name args -> RowEffectEntry name (map go args)
+    RowLabelledEffectEntry s name args -> RowLabelledEffectEntry s name (map go args)
 
 -- | A row constraint. Core has exactly two, and neither carries run-time
 -- | content: the checker re-derives entailment rather than accepting a proof

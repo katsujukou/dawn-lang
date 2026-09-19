@@ -130,7 +130,7 @@ toMaybe =
     $ Lam 4 (Ident "thunk") thunkTy
     $
       Handle 5 (App 6 (Var 7 (Ident "thunk")) (Global 8 primUnit []))
-        { key: EffectKey partialEff
+        { element: RowEffectEntry partialEff []
         , returnClause:
             { binder: Ident "x"
             , ty: TVar (TyVar "a")

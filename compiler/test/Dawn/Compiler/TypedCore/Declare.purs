@@ -99,6 +99,9 @@ nonrec name scheme expr = DeclNonRec unit
 globalRef :: P.String -> Expr Unit
 globalRef name = Global unit (value name) []
 
+lam :: P.String -> Type -> Expr Unit -> Expr Unit
+lam name ty body = Lam unit (Ident name) ty body
+
 -- | A kind variable no scheme binds.
 ghost :: KindVar
 ghost = KindVar "ghost"
@@ -156,7 +159,7 @@ spec = describe "TypedCore.Declare" do
       let
         ctorPart = emptySignature
           { ctors = Map.singleton (value "T")
-              { owner: tyCon "T", tag: 0, fields: [], scheme: monoScheme int }
+              { owner: tyCon "T", tag: 0, params: [], fields: [], scheme: monoScheme int }
           }
         valuePart = emptySignature
           { values = Map.singleton (value "T") { scheme: monoScheme int, isForeign: false } }
@@ -345,9 +348,10 @@ spec = describe "TypedCore.Declare" do
 
   describe "value declarations" do
     it "accepts a reference to a foreign declared later" do
+      -- foreigns are collected before any value declaration is checked
       let
         m = moduleOf
-          [ nonrec "x" (monoScheme (io unitTy')) (globalRef "primLog")
+          [ nonrec "x" (monoScheme (pureFn string (io unitTy'))) (globalRef "primLog")
           , foreignDecl "primLog" (monoScheme (pureFn string (io unitTy')))
           ]
       verdict m `shouldEqual` Right unit
@@ -368,11 +372,28 @@ spec = describe "TypedCore.Declare" do
       let
         m = moduleOf
           [ DeclRec unit
-              [ { name: Ident "f", scheme: monoScheme int, value: globalRef "g", attributes: [] }
-              , { name: Ident "g", scheme: monoScheme int, value: globalRef "f", attributes: [] }
+              [ { name: Ident "f"
+                , scheme: monoScheme (pureFn int int)
+                , value: lam "n" int (App unit (globalRef "g") (Var unit (Ident "n")))
+                , attributes: []
+                }
+              , { name: Ident "g"
+                , scheme: monoScheme (pureFn int int)
+                , value: lam "n" int (Var unit (Ident "n"))
+                , attributes: []
+                }
               ]
           ]
       verdict m `shouldEqual` Right unit
+
+    it "refuses a recursive right-hand side that is not a function value" do
+      -- under strict evaluation such a binding has no meaning
+      let
+        m = moduleOf
+          [ DeclRec unit
+              [ { name: Ident "f", scheme: monoScheme int, value: Lit unit (LitInt 1), attributes: [] } ]
+          ]
+      verdict m `shouldEqual` Left (RecursiveNotFunctionValue (value "f"))
 
     it "accepts a rec group whose members have different kind schemes" do
       -- every scheme is registered before any right-hand side is checked
@@ -381,11 +402,23 @@ spec = describe "TypedCore.Declare" do
         m = moduleOf
           [ DeclRec unit
               [ { name: Ident "f"
-                , scheme: { kindVars: [ k ], body: TForall (TyVar "a") (KVar k) int }
-                , value: globalRef "g"
+                , scheme:
+                    { kindVars: [ k ]
+                    , body: TForall (TyVar "a") (KVar k) (pureFn int int)
+                    }
+                , value: TyLam unit (TyVar "a") (KVar k) (lam "n" int (Var unit (Ident "n")))
                 , attributes: []
                 }
-              , { name: Ident "g", scheme: monoScheme int, value: globalRef "f", attributes: [] }
+              , { name: Ident "g"
+                , scheme: monoScheme (pureFn int int)
+                , value:
+                    lam "n" int
+                      ( App unit
+                          (TyApp unit (Global unit (value "f") [ KType ]) int)
+                          (Var unit (Ident "n"))
+                      )
+                , attributes: []
+                }
               ]
           ]
       verdict m `shouldEqual` Right unit

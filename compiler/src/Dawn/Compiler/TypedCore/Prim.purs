@@ -133,6 +133,7 @@ primSignature = emptySignature
   , ctors = Map.singleton unitCtor
       { owner: unitTy
       , tag: 0
+      , params: []
       , fields: []
       , scheme: monoScheme (TCon unitTy [])
       }

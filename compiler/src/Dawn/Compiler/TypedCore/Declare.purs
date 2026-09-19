@@ -6,8 +6,9 @@
 -- | declarations are then folded leftwards, which their dependency order makes
 -- | possible in one pass.
 -- |
--- | The right-hand side of a value declaration is checked by term typing, not
--- | here. What is decided here is everything a declaration says about itself.
+-- | A top-level right-hand side is checked at ambient effect row `()`: defining
+-- | a value performs no effects, and effects occur when the value, being a
+-- | function, is applied.
 module Dawn.Compiler.TypedCore.Declare
   ( DeclError(..)
   , DeclFailure
@@ -21,6 +22,7 @@ import Prelude
 
 import Prim as P
 
+import Dawn.Compiler.TypedCore.Check (CheckError, check, envOf, isFunVal)
 import Dawn.Compiler.TypedCore.Context (Context, bindKindVars, bindTyVar, emptyContext)
 import Dawn.Compiler.TypedCore.Decl (CtorDecl, DataDecl, Decl(..), EffectDecl, Export(..), Module, OpDecl, ValueBinding)
 import Dawn.Compiler.TypedCore.Kind (Kind(..))
@@ -72,6 +74,10 @@ data DeclError
   -- | declaration, naming what it refers to.
   | ForwardReference (Qualified Ident)
   | MissingExport Export
+  -- | The right-hand side of a recursive declaration that is not a function
+  -- | value (D14).
+  | RecursiveNotFunctionValue (Qualified Ident)
+  | IllTyped CheckError
   -- | A malformed type constructor entry, which no declaration produces.
   | TyConEntryError (Qualified TyName) KindError
   -- | Two parts of an assembled signature carry different entries under one
@@ -195,12 +201,17 @@ declare imported m = do
   when (m.name == primModule)
     (Left { at: m.annotation, error: ReservedModuleName m.name })
   sigTy <- collectTypes imported m
-  sigDecl <- foldM (addDecl m sigTy) sigTy m.decls
   checkOrder m
-  checkExports m sigDecl
-  pure sigDecl
+  sigDecl <- foldM (addDecl m sigTy) sigTy m.decls
+  sigAll <- foldM (addValue' m sigTy) sigDecl m.decls
+  checkExports m sigAll
+  pure sigAll
 
--- | The interior of one declaration, checked under `Σ_ty`.
+-- | `Σ_decl`: what a data, effect, or foreign declaration contributes, checked
+-- | under `Σ_ty`.
+-- |
+-- | Constructors and foreigns are collected before any value declaration is
+-- | checked, so a value may refer to one the text declares later.
 addDecl :: forall a. Module a -> Signature -> Signature -> Decl a -> Either (DeclFailure a) Signature
 addDecl m sigTy acc = case _ of
   DeclData at decl -> do
@@ -220,9 +231,31 @@ addDecl m sigTy acc = case _ of
     checkPurity at (Qualified m.name decl.name) decl.scheme
     addValue at m.name decl.name { scheme: decl.scheme, isForeign: true } acc
 
-  DeclNonRec at binding -> addBinding at m.name sigTy binding acc
+  DeclNonRec _ _ -> pure acc
 
-  DeclRec at bindings -> foldM (flip (addBinding at m.name sigTy)) acc bindings
+  DeclRec _ _ -> pure acc
+
+-- | The value declarations, folded leftwards from `Σ_decl`.
+-- |
+-- | A right-hand side is checked under the signature as it stands. Their
+-- | dependency order is what makes that complete for each in turn, and what lets
+-- | the fold close in one pass.
+addValue' :: forall a. Module a -> Signature -> Signature -> Decl a -> Either (DeclFailure a) Signature
+addValue' m sigTy acc = case _ of
+  DeclNonRec at binding -> do
+    checkScheme at sigTy binding.scheme
+    checkBody acc binding
+    addValue at m.name binding.name { scheme: binding.scheme, isForeign: false } acc
+
+  -- Every scheme of the group is registered before any right-hand side is
+  -- checked, which is what lets its members carry different kind schemes.
+  DeclRec at bindings -> do
+    registered <- foldM (flip (addBinding at m.name sigTy)) acc bindings
+    traverse_ (guarded at m.name) bindings
+    traverse_ (checkBody registered) bindings
+    pure registered
+
+  _ -> pure acc
 
 addBinding
   :: forall a
@@ -235,6 +268,20 @@ addBinding
 addBinding at moduleName sigTy binding acc = do
   checkScheme at sigTy binding.scheme
   addValue at moduleName binding.name { scheme: binding.scheme, isForeign: false } acc
+
+-- | `Σ ; ·, k̄ ; · ⊢ e : σ ! ()`.
+checkBody :: forall a. Signature -> ValueBinding a -> Either (DeclFailure a) Unit
+checkBody sig binding =
+  case check (envOf sig ctx) TRowEmpty binding.scheme.body binding.value of
+    Left failure -> Left { at: failure.at, error: IllTyped failure.error }
+    Right value -> Right value
+  where
+  ctx = bindKindVars emptyContext binding.scheme.kindVars
+
+guarded :: forall a. a -> ModuleName -> ValueBinding a -> Either (DeclFailure a) Unit
+guarded at moduleName binding =
+  when (not (isFunVal binding.value))
+    (Left { at, error: RecursiveNotFunctionValue (Qualified moduleName binding.name) })
 
 -- | `Ctor : forall k̄. forall (ā : κ̄). τ1 -> … -> τn -> T [[k̄]] ā`, with pure
 -- | arrows throughout.
@@ -259,6 +306,7 @@ ctorInfo :: Qualified TyName -> DataDecl -> CtorDecl -> CtorInfo
 ctorInfo owner decl ctor =
   { owner
   , tag: ctor.tag
+  , params: decl.params
   , fields: ctor.fields
   , scheme:
       { kindVars: decl.kindVars
@@ -422,7 +470,7 @@ globalsOf = case _ of
   Let _ _ _ value body -> globalsOf value <> globalsOf body
   LetRec _ bindings body -> foldMap (globalsOf <<< _.value) bindings <> globalsOf body
   Case _ scrutinees tree -> foldMap globalsOf scrutinees <> treeGlobals tree
-  LetJoin _ _ _ value body -> globalsOf value <> globalsOf body
+  LetJoin _ _ _ _ value body -> globalsOf value <> globalsOf body
   Jump _ _ args -> foldMap globalsOf args
   RecordEmpty _ -> Set.empty
   RecordExtend _ _ value rest -> globalsOf value <> globalsOf rest

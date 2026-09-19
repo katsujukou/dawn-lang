@@ -133,7 +133,7 @@ e ::= ...
     | handle e with h                 apply a handler
     | openEff [ρ'] e                  effect widening, erased
 
-h ::= { key k
+h ::= { handles ent
       ; return (x : τ) -> e_r
       ; op1 [b̄1] (x1 : σ1, k1 : τ1 -{ρ}-> β) -> e1
       ; ...
@@ -141,14 +141,16 @@ h ::= { key k
 ```
 
 - `perform k.op [τ̄] e` invokes operation `op` of the element the ambient row keys with `k`. It requires that row to contain such an element, and the operation is looked up in the effect at the head of that element's **payload**, not in `k`.
-- `handle e with h` removes the element keyed `h.key` from `e`'s effect row and processes it with the clauses of `h`. Handlers are **deep** (D15): after a resumption, control is under the same handler.
+- `handle e with h` removes the element `ent` that `h` writes from `e`'s effect row and processes it with the clauses of `h`. The key of `ent` says which element; the effect at the head of its payload says which operations the clauses must exhaust. Handlers are **deep** (D15): after a resumption, control is under the same handler.
 - `openEff [ρ'] e` turns `e : τ1 -{ρ}-> τ2` into `τ1 -{ρ ⊎ ρ'}-> τ2`. Effect containment is an explicit term rather than subtyping (D8). At run time it is the identity and disappears during lowering.
 
-**A handler names one key, and a `perform` names one key.** Where the key is an `EffectKey` the two read as they always have — `perform Console.log`, a handler with `key Console` — and where it is a `SymbolKey` they name the instance instead.
+**A handler writes one element, and a `perform` names one key.** Where the key is an `EffectKey` the two read as they always have — `perform Console.log`, a handler that `handles Console` — and where it is a `SymbolKey` they name the instance instead.
+
+The handler writes the element whole because the row it is removing appears nowhere else in the term: a key does not name an effect, and the arguments of the payload are not recoverable from the clauses ([Typing Rules](07-Typing-Rules.md)). Only the key is consulted at run time.
 
 ```text
 perform cache.get [] Prim.Unit        -- the element keyed `cache`
-handle e with { key cache ; … }       -- removes that element, leaves `counter`
+handle e with { handles cache : State Int ; … }   -- removes it, leaves `counter`
 ```
 
 A handler for `cache` and a handler for `counter` have the same clauses, `get` and `put`, because both elements carry a `State` payload. They are nonetheless different handlers removing different elements.
@@ -412,7 +414,7 @@ foreign primLog :: String -> IO Unit
 runConsoleIO :: forall a. (Unit -> a / {| Console |}) -> IO a
 runConsoleIO thunk =
   handle (thunk ()) with
-    { key Console
+    { handles Console
     ; return x        -> IO.pure x
     ; log (s, k)      -> IO.bind (primLog s) (\_ -> k ())
     }
@@ -446,7 +448,7 @@ program = liftIO (primLog "Hello")           -- builds an IO value; writes nothi
 main :: IO Unit
 main =
   handle program with
-    { key LiftIO
+    { handles LiftIO
     ; return x        -> IO.pure x
     ; liftIO (act, k) -> IO.bind act k
     }

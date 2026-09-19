@@ -14,7 +14,7 @@ e ::= x | M.x [[κ̄]]                    variable; `M.x` when κ̄ is empty
     | let x : τ = e1 in e2             non-recursive binding
     | letrec { x̄ : σ̄ = v̄ } in e        recursive binding group
     | case (ē) of dt                   pattern match
-    | letjoin j (x̄ : τ̄) = e1 in e2     join point
+    | letjoin j (x̄ : τ̄) : τ = e1 in e2  join point
     | jump j (ē)                       jump to a join point; tail position only
     | fail τ                           non-exhaustive; derived notation
     -- records
@@ -69,6 +69,8 @@ FunVal ::= λ (x : τ) . e
 Under strict evaluation a binding such as `letrec x = f x` has no meaning. PureScript leaves this to an uninitialized reference at run time; Dawn rejects it syntactically in the type checker.
 
 ## Join points
+
+**A join point writes its result type.** It is the type of the whole `letjoin` and of every `jump` to `j`, and neither of the two bodies settles it ahead of the other: a definition may jump to itself and a body may be nothing but a jump. Writing it keeps the rule free of any order of checking.
 
 `letjoin` and `jump` follow the standard join point discipline.
 
@@ -148,7 +150,7 @@ dt ::= leaf e
 Sharing an alternative's body between several leaves is done by lifting it into a `letjoin` and placing `leaf (jump j ē)`, so that building a decision tree never duplicates code.
 
 ```text
-letjoin alt0 (x : Int) = … in
+letjoin alt0 (x : Int) : Int = … in
 case (xs) of
   switchCtor s0 {
     Nil  -> leaf 0

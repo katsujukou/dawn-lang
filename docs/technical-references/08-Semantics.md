@@ -426,7 +426,7 @@ Ev ::= []
      | let x : τ = Ev in e
      | case (v̄, Ev, ē) of dt
      | match θ (guard Ev dt1 dt2)
-     | letjoin j (x̄ : τ̄) = e1 in Ev
+     | letjoin j (x̄ : τ̄) : τ = e1 in Ev
      | jump j (v̄, Ev, ē)
      | perform k.op [τ̄] Ev
      | handle Ev with h
@@ -450,7 +450,7 @@ Ev_k ::= an evaluation context in which every `handle _ with h'` on the path
 A `jump` appears only in tail position, so the position it may occupy is narrower than a general context.
 
 ```text
-Tl ::= []  |  letjoin j' (x̄ : τ̄) = e' in Tl
+Tl ::= []  |  letjoin j' (x̄ : τ̄) : τ = e' in Tl
 ```
 
 ### Ordinary reduction
@@ -540,10 +540,10 @@ Local totality ([Terms and Matching](06-Terms-and-Matching.md)) guarantees that 
 ### Join points
 
 ```text
-  letjoin j (x̄ : τ̄) = e1 in Tl[jump j (v̄)]
-      →  letjoin j (x̄ : τ̄) = e1 in Tl[ e1[x̄ := v̄] ]
+  letjoin j (x̄ : τ̄) : τ = e1 in Tl[jump j (v̄)]
+      →  letjoin j (x̄ : τ̄) : τ = e1 in Tl[ e1[x̄ := v̄] ]
 
-  letjoin j (x̄ : τ̄) = e1 in v        →  v
+  letjoin j (x̄ : τ̄) : τ = e1 in v    →  v
 ```
 
 `Tl` is a tail context, and a join point is out of scope under `λ`, `Λ`, and `handle`, so the position of the `jump` lies within the same function activation as the `letjoin`. That is what allows a backend to compile a jump as a transfer of control rather than as a continuation.
@@ -557,13 +557,16 @@ The second rule discards a binding whose join point is no longer reachable.
 
   handle Ev_k[ perform k.op [σ̄] v ] with h    →  e_i[ b̄_i := σ̄,  x_i := v,
                                                      k_i := λ(y : τ_i'). handle Ev_k[y] with h ]
-                                                 where h has key k and its clause for op is
+                                                 where h = { handles ent ; … }, key(ent) = k,
+                                                   and its clause for op is
                                                    op [b̄_i] (x_i, k_i) -> e_i
 ```
 
 Two things are visible in the second rule.
 
 **The handler is reinstalled.** The continuation `k_i` rebuilds `handle Ev_k[y] with h`, so resuming returns under the same handler. This is what makes handlers deep (D15).
+
+**Only the key of the handled element is consulted.** A handler writes the element whole, `handles ent`, because typing needs its payload; reduction reads `key(ent)` and nothing else, so an erased handler keeps the key alone.
 
 **The innermost handler of the key is the target.** `Ev_k` lets no `handle` of key `k` stand between the chosen one and the hole, which is what makes it innermost; handlers of one key may nest, and this is how one is picked. No offset is needed to say which element of the row is meant, since sharpness leaves only one of that key. Two instances of one effect do not interfere either: a handler keyed `cache` is not a handler for `counter`, and a `perform counter.get` passes straight through it.
 
@@ -604,9 +607,18 @@ Erasure `⌊·⌋` removes the forms that carry no run-time content.
 ⌊T [[κ̄]]⌋         = ⌊T⌋        ⌊M.x [[κ̄]]⌋       = ⌊M.x⌋
 ⌊openEff [ρ] e⌋   = ⌊e⌋        ⌊openEffC [ρ] e⌋  = ⌊e⌋
 ⌊weaken k [τ] e⌋  = ⌊e⌋
+
+⌊letjoin j (x̄ : τ̄) : τ = e1 in e2⌋  = letjoin j (x̄) = ⌊e1⌋ in ⌊e2⌋
+
+⌊{ handles ent ; return (x : τ) -> e_r ; op_i [b̄_i] (x_i : σ_i, k_i : τ_i) -> e_i }⌋
+    = { key key(ent) ; return x -> ⌊e_r⌋ ; op_i (x_i, k_i) -> ⌊e_i⌋ }
+
+⌊handle e with h⌋ = handle ⌊e⌋ with ⌊h⌋
 ```
 
 This is **not** a reduction relation. `openEff`, `openEffC`, `weaken`, and `[[κ̄]]` change a term's type or its ambient row, and `[[κ̄]]` additionally discards an instantiation that the typed rules require. A backend erases first and then evaluates; the typed relation above evaluates without erasing.
+
+An erased handler carries the key alone: the payload of the element is what says which operations the clauses must exhaust, and that is settled before evaluation begins. The result type of a join point goes the same way, being written for the checker rather than for reduction.
 
 A variant value loses its `weaken` wrappers, so an erased `switchKey` dispatches on the key the value carries directly. Recursive closures survive erasure, since `rec_i(x̄. v̄)` carries computational content.
 
