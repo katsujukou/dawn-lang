@@ -61,7 +61,7 @@ Points to observe.
 
 ## Rows
 
-A row-polymorphic merge. `merge` is a term constructor, so this is the shape of its rule rather than a declaration ([Prim and Base](16-Prim.md)):
+A row-polymorphic merge. `merge` is a term constructor, so this is the shape of its rule rather than a declaration ([Prim and Base](../06-Modules/02-Prim-and-Base.md)):
 
 ```text
 merge : forall (r : Row Type). forall (s : Row Type).
@@ -163,7 +163,7 @@ arrows while the ambient row here is `( State Int | e )`, and an application
 requires the two to agree; containment is never inserted (D8). Currying is what
 makes it two `openEff`s rather than one, since each argument consumes an arrow
 of its own. An author writes none of this, the elaborator inserting it ([Typing
-Rules](07-Typing-Rules.md)).
+Rules](05-Typing-Rules.md)).
 
 A handler for `Partial`, interpreting abortion into `Maybe`:
 

@@ -88,7 +88,7 @@ either, since what elaboration emits is already fully qualified.
 Writing the import is what keeps D22 intact, and it keeps `Prim` the one thing a
 header omits. `Prelude` is an ordinary module in every other respect: the
 surface header names it, and the Core header records it as it records any import
-([Modules](09-Modules.md)). `Prelude.Partial` reaches `Σ` by the ordinary route rather than
+([Modules](01-Modules.md)). `Prelude.Partial` reaches `Σ` by the ordinary route rather than
 being conjured by the elaborator; without the import an emitted `EffectKey`
 would name an effect no `Σ` holds, and the `perform` would not typecheck. A
 non-exhaustive match in a module that does not import `Prelude` is reported at
@@ -129,7 +129,7 @@ Neither implies the other.
 
 ## What `Prim` holds
 
-`Prim` holds the vocabulary the rules of [Typing Rules](07-Typing-Rules.md) and [Modules](09-Modules.md) name, and nothing else. Every kind scheme is empty, so no use site writes `[[κ̄]]`.
+`Prim` holds the vocabulary the rules of [Typing Rules](../03-Typed-Core/05-Typing-Rules.md) and [Modules](01-Modules.md) name, and nothing else. Every kind scheme is empty, so no use site writes `[[κ̄]]`.
 
 ```text
 Prim.Function : Type -> Row Effect -> Type -> Type
@@ -162,7 +162,7 @@ data Unit = Unit
   -- Prim.Unit : Unit        tag 0, arity 0
 ```
 
-`Unit` is a data declaration rather than a literal, so a `switchCtor` exhausts it with one branch. As a literal it would fall under `switchLit`, where a default is mandatory because literals cannot be exhausted ([Typing Rules](07-Typing-Rules.md)).
+`Unit` is a data declaration rather than a literal, so a `switchCtor` exhausts it with one branch. As a literal it would fall under `switchLit`, where a default is mandatory because literals cannot be exhausted ([Typing Rules](../03-Typed-Core/05-Typing-Rules.md)).
 
 **`Array` and the uncurried families are not here.** Core names neither, and neither needs to be reachable without an import; they are intrinsic all the same, and they belong to `Base.*`, which the section below places.
 
@@ -179,7 +179,7 @@ T : forall k̄. κ   intrinsic C        where C is the canonical-value class bel
 T : forall k̄. κ   data { Ctor … }    the constructors the declaration gives it
 ```
 
-**The class is part of the entry, not a comment on it.** Rules consult it: the typing of an opaque value requires `Σ(T) = intrinsic opaque` ([Semantics](08-Semantics.md)), and the canonical-forms lemma progress rests on is stated class by class.
+**The class is part of the entry, not a comment on it.** Rules consult it: the typing of an opaque value requires `Σ(T) = intrinsic opaque` ([Semantics](../03-Typed-Core/06-Semantics.md)), and the canonical-forms lemma progress rests on is stated class by class.
 
 ### Where an intrinsic comes from
 
@@ -249,7 +249,7 @@ A manifest intrinsic reaches `Σ` the same way, through the ABI manifest, and is
        ∪ { Unit : Type  data { Prim.Unit } }  with Prim.Unit's tag, arity, and field types
 ```
 
-[Modules](09-Modules.md) collects type-level declarations into `Σ_ty` before checking any interior. That collection starts from `Σ_Prim` rather than from the imports alone.
+[Modules](01-Modules.md) collects type-level declarations into `Σ_ty` before checking any interior. That collection starts from `Σ_Prim` rather than from the imports alone.
 
 ```text
 Σ_ty = Σ_Prim ∪ Σ_ABI(M) ∪ Σ_imp ∪ { the module's own data and effect declarations }
@@ -265,13 +265,13 @@ Three consequences are worth stating.
 
 `Base` is a reserved prefix, and **ownership of it is verified by package resolution, not by the Core type checker**. The modules of `Base.*` are ordinary source — `foreign` declarations with the manifest supplying what type constructors they need — so nothing in a Core module, or in the `Σ` it is checked against, tells the ABI implementation of `Base.Int` from a forgery of it. What decides is which package a module came from, and only the package implementing the ABI may claim a name under `Base`. A resolver enforces that against the ABI manifest before any module reaches the checker.
 
-Handing the checker a provenance to trust would not improve on this. It would verify nothing, and a trusted unchecked input is what the `newtype` flag is deliberately not ([Modules](09-Modules.md)).
+Handing the checker a provenance to trust would not improve on this. It would verify nothing, and a trusted unchecked input is what the `newtype` flag is deliberately not ([Modules](01-Modules.md)).
 
 Within a module, declaring one name twice in a namespace is ill-formed as it is anywhere.
 
 **Header completeness is unaffected** (D22). A module's header determines its dependencies, and `Prim` is a dependency of every module without exception, so a build system needs no entry to discover it. Nothing has to be written because nothing varies. `Base.*` is different: a module using `Base.Array.Array` imports `Base.Array`, and the header says so.
 
-**Linking includes `Prim`.** The global environment `G` of [Semantics](08-Semantics.md) is built from `G_Prim`, which holds the data constructors of `Prim` — `Prim.Unit` alone — beside the definitions of the imported modules. `Prim` is not among those imports, so without `G_Prim` a `Prim.Unit` in the module would have nothing to unfold to and condition (1) of `Σ ⊨ G` would fail.
+**Linking includes `Prim`.** The global environment `G` of [Semantics](../03-Typed-Core/06-Semantics.md) is built from `G_Prim`, which holds the data constructors of `Prim` — `Prim.Unit` alone — beside the definitions of the imported modules. `Prim` is not among those imports, so without `G_Prim` a `Prim.Unit` in the module would have nothing to unfold to and condition (1) of `Σ ⊨ G` would fail.
 
 ## The Base runtime contract
 
@@ -287,7 +287,7 @@ something a backend implements.
 An ABI entry is an ordinary `foreign` declaration, checked where it is written
 like any other (D23, well-kindedness); what sets it apart is the obligation on
 the other side. A protocol is an ordinary `effect` declaration, and an effect
-declares operations without implementations ([Effects](05-Effects.md)) — there
+declares operations without implementations ([Effects](../03-Typed-Core/03-Effects.md)) — there
 is nothing for a backend to supply, and what interprets one is ordinary Dawn
 code.
 
@@ -359,12 +359,12 @@ Js.Effect.Console.lowerConsole
 arrives at `( Console | e )`, so `openEff [( LiftIO )]` is what makes the two
 agree. And `Js.Console.log` has pure arrows while the clause is typed at
 `( LiftIO | e )`, so it is widened for the same reason arithmetic is in
-[Examples](13-Examples.md).
+[Examples](../03-Typed-Core/08-Examples.md).
 
 **An adapter stays effect-polymorphic.** It performs another operation rather
 than executing anything, so no native action is sequenced there and no closed
 row is called for. Only the terminal stage, interpreting `LiftIO` into `IO`,
-builds with `Base.IO.bind` and is therefore closed ([Effects](05-Effects.md)).
+builds with `Base.IO.bind` and is therefore closed ([Effects](../03-Typed-Core/03-Effects.md)).
 
 ```text
 { Console, FileSystem, … }        capabilities a program names
@@ -478,7 +478,7 @@ Three stages then divide the work, and none of them duplicates another.
 | --- | --- |
 | type checking | the declared type is well-kinded and every arrow is pure (D23) |
 | target validation | the backend manifest records every entry the program uses — each `Base` ABI entry, through a profile it claims or beyond them, and each target ABI entry — and every target root the program imports is the selected target's |
-| linking | `Σ ⊨ G` condition (3): each `δ_f` returns what it claims, performs nothing observable to Core, and terminates ([Semantics](08-Semantics.md)) |
+| linking | `Σ ⊨ G` condition (3): each `δ_f` returns what it claims, performs nothing observable to Core, and terminates ([Semantics](../03-Typed-Core/06-Semantics.md)) |
 
 **An unsupported entry is rejected at target validation, not at run time.** A
 program naming an ABI entry the chosen backend does not implement fails to
@@ -490,7 +490,7 @@ implements is a separate question, settled at the same stage.
 ### What the ABI specification must fix per ABI entry
 
 - **Observable meaning**, in terms that name no backend
-- **Whether it may fault**, and on which inputs ([Semantics](08-Semantics.md))
+- **Whether it may fault**, and on which inputs ([Semantics](../03-Typed-Core/06-Semantics.md))
 - **Whether it returns `IO`.** An entry whose effect is observable from outside
   returns `IO`, mutable allocation included: a `Base.Array.unsafeNew` creating a
   mutable array returns one. An allocation whose mutation no one can observe may
@@ -501,7 +501,7 @@ library type such as `Maybe` standing in one would fix that type's
 representation for every backend, and would make the ABI surface depend on the
 layer built over it. A leaf that can fail therefore faults or returns a sentinel,
 and a portable library is where a total wrapper is written. What mechanism, if
-any, should enforce this is open ([Open Questions](14-Open-Questions.md)).
+any, should enforce this is open ([Open Questions](../07-Open-Questions/01-Open-Questions.md)).
 
 ### `Base.IO.pure` and `Base.IO.bind`
 
@@ -515,13 +515,13 @@ are typed with. **`Base.IO` is imported like any other module**, so a module
 using them names it in its header and header completeness is untouched (D22).
 
 The value a saturated `Base.IO.pure` returns is opaque, `IO` having neither
-literals nor constructors to be built from ([Semantics](08-Semantics.md)).
+literals nor constructors to be built from ([Semantics](../03-Typed-Core/06-Semantics.md)).
 
 **The continuation of `Base.IO.bind` is a pure arrow.** Every arrow in a
 `foreign` type has an empty effect row (D23), so `( a -{f}-> IO b )` cannot be
 declared; and the semantics would not hold either, since deferring `k` until the
 `IO` is executed would run the residual effect `f` outside the dynamic context
-of the handler that installed it ([Effects](05-Effects.md)).
+of the handler that installed it ([Effects](../03-Typed-Core/03-Effects.md)).
 
 Executing these two is the runtime ABI's obligation (D25), which is why they are
 fixed here rather than left to the surface, and why they alone constitute the
@@ -612,7 +612,7 @@ denotes which Core value belongs to it: `42`, `0x2a`, and `0b101010` are one
 literal, and `"\n"` and `"\u{A}"` are another. `switchLit` compares the value,
 never the spelling.
 
-These are recorded as open ([Open Questions](14-Open-Questions.md)). Until they
+These are recorded as open ([Open Questions](../07-Open-Questions/01-Open-Questions.md)). Until they
 are settled, **the choices an implementation happens to make are not the
 specification** — that the first compiler is written in PureScript does not make
 Dawn's `Int` a 32-bit one.
@@ -642,11 +642,11 @@ module Base.Array (Array, length, unsafeIndex) where
 signature mentions only `Prim` types and portable manifest intrinsics, so a conversion between
 the two is `Data.Array`. Which construction entries `Base.Array` does supply, and
 whether each is pure or returns `IO`, is part of the ABI content that remains
-open ([Open Questions](14-Open-Questions.md)).
+open ([Open Questions](../07-Open-Questions/01-Open-Questions.md)).
 
-Splitting it this way keeps the manifest to what only it can express. A `foreign` is checked wherever it is written — every arrow pure (D23), the type well-kinded — and a manifest entry would either duplicate that or become a trusted input for no reason. It also leaves the module free to hold Dawn code beside its primitives, which a portable library needs: `Data.Array.mapArray` is written in Dawn and uses `unsafeIndex` ([Modules](09-Modules.md)).
+Splitting it this way keeps the manifest to what only it can express. A `foreign` is checked wherever it is written — every arrow pure (D23), the type well-kinded — and a manifest entry would either duplicate that or become a trusted input for no reason. It also leaves the module free to hold Dawn code beside its primitives, which a portable library needs: `Data.Array.mapArray` is written in Dawn and uses `unsafeIndex` ([Modules](01-Modules.md)).
 
-Checking such a module therefore needs its own entries in scope before its declarations are collected. Writing `Σ_ABI(M)` for what the manifest supplies to `M` — empty for every module the manifest does not name — the collection of [Modules](09-Modules.md) reads:
+Checking such a module therefore needs its own entries in scope before its declarations are collected. Writing `Σ_ABI(M)` for what the manifest supplies to `M` — empty for every module the manifest does not name — the collection of [Modules](01-Modules.md) reads:
 
 ```text
 Σ_ty = Σ_Prim ∪ Σ_ABI(M) ∪ Σ_imp ∪ { the module's own data and effect declarations }
@@ -662,13 +662,13 @@ Arithmetic is the same story without an intrinsic type of its own: `Base.Int.add
 
 **`Fn2` and its siblings take no effect row** (D19). Being uncurried and having effects are orthogonal, so `Fn2 a b (IO c)` covers what PureScript needs `EffectFn2` for.
 
-**What may fault, and on which inputs, is unsettled.** An unchecked array index can fail, and no Dawn type describes it; a fault is not an effect and no handler intercepts it ([Semantics](08-Semantics.md)). Enumerating the faulting entries, and the preconditions of each, belongs to the ABI specification.
+**What may fault, and on which inputs, is unsettled.** An unchecked array index can fail, and no Dawn type describes it; a fault is not an effect and no handler intercepts it ([Semantics](../03-Typed-Core/06-Semantics.md)). Enumerating the faulting entries, and the preconditions of each, belongs to the ABI specification.
 
 ## Names that are not `Prim`
 
-`List` belongs to `Prelude`, not to `Prim`; the vertical slice of [Examples](13-Examples.md) declares its own `Main.List` rather than reaching for either.
+`List` belongs to `Prelude`, not to `Prim`; the vertical slice of [Examples](../03-Typed-Core/08-Examples.md) declares its own `Main.List` rather than reaching for either.
 
-`Partial` is not here either. It is an ordinary effect declaration of `Prelude` ([Effects](05-Effects.md)), and `fail` is derived notation for `perform Partial.abort [τ] Prim.Unit` that elaboration expands. The Core type checker never mentions either.
+`Partial` is not here either. It is an ordinary effect declaration of `Prelude` ([Effects](../03-Typed-Core/03-Effects.md)), and `fail` is derived notation for `perform Partial.abort [τ] Prim.Unit` that elaboration expands. The Core type checker never mentions either.
 
 ## What is not a name at all
 

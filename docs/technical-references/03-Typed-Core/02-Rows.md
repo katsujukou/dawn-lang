@@ -17,7 +17,7 @@ Row theory concerns **keyed, unordered, duplicate-free collections**. Where a ke
 
 Six structures, one theory (D16). What changes between them is which key constructor the elements carry and what a payload is; normalization, equality, and entailment run the same algorithm over all of them and branch on none of it.
 
-**The table reads as the conventional interpretations, not as a restriction.** Kinding admits any structural key in a `Row Type`, so `Record ( #Ok : Int )` is well-kinded; which keys a structure uses is settled by surface syntax and the elaborator ([Kinds](03-Kinds-and-Types.md)).
+**The table reads as the conventional interpretations, not as a restriction.** Kinding admits any structural key in a `Row Type`, so `Record ( #Ok : Int )` is well-kinded; which keys a structure uses is settled by surface syntax and the elaborator ([Kinds](01-Kinds-and-Types.md)).
 
 **A key is always present, even where nothing is written.** A tuple's components are keyed by position because their types cannot tell them apart — `(Int, Int)` has two elements and no way to name either — and an effect's key is its constructor because the payload already carries it. "Unlabelled" means no symbol is written, never that no key exists.
 
@@ -105,7 +105,7 @@ The Core type checker **re-derives** `Γ ⊨ C` for each `e [•]`. No proof ter
 
 ## Normal form
 
-Every well-kinded row has a normal form. The four equations below cover every type of kind `Row ε`, because a row kind is produced by row syntax alone and never by a type constructor ([Kinds and Types](03-Kinds-and-Types.md)).
+Every well-kinded row has a normal form. The four equations below cover every type of kind `Row ε`, because a row kind is produced by row syntax alone and never by a type constructor ([Kinds and Types](01-Kinds-and-Types.md)).
 
 ```text
 RNF ::= ⟨ F ; T ⟩
@@ -170,7 +170,7 @@ The symbol `≡` serves two roles that should not be conflated.
 | | Where | Subject | Character |
 | --- | --- | --- | --- |
 | Equality | Core type checker | rigid row variables only, since Core has no metavariables | a decision procedure; it identifies nothing |
-| Constraint | elaboration | may contain metavariables | [unification](10-Elaboration.md) constructs a substitution |
+| Constraint | elaboration | may contain metavariables | [unification](../02-Surface-Language/01-Elaboration.md) constructs a substitution |
 
 `( name : String | ?r ) ≡ ( name : String | ?s )` is a constraint, not a question of equality, and unification solves it with a fresh `?t`, setting `?r := ?t` and `?s := ?t`. Unification produces a substitution that makes the rows equal; equality itself identifies nothing.
 
@@ -237,7 +237,7 @@ It does not appear as an instance resolution error. A failure that is a row prob
 
 **`Difference ρ K`.** For an open row, `ρ - {k}` has no determinate meaning unless membership of `k` is known. Where `k` is a known field, the term-level `restrict` already covers it, with type `Record (k : τ | ρ) -> Record ρ`. A type-level `Difference` would be needed only to name the remainder of `ρ` while assuming `k ∈ ρ`, and that is an **equality constraint**, `ρ ≡ (k : τ | ρ')`. A `HasField k τ r` predicate is therefore not a new constraint in Core but the equation `r ≡ ( k : τ | r' )` for a fresh `r'`. The solver solves an equation, not a predicate.
 
-**`Map f ρ`.** This requires type-level functions, whose introduction and termination are unsettled. Admitting computation of unknown termination into the trusted core is not compatible with the checker's self-contained character. Uses such as `Record (Map Maybe r)` are expressed for now with term-level residual evidence ([Elaboration](10-Elaboration.md)).
+**`Map f ρ`.** This requires type-level functions, whose introduction and termination are unsettled. Admitting computation of unknown termination into the trusted core is not compatible with the checker's self-contained character. Uses such as `Record (Map Maybe r)` are expressed for now with term-level residual evidence ([Elaboration](../02-Surface-Language/01-Elaboration.md)).
 
 Both can be added later as type-level functions over `Row ε`. Adding them now would make row equality undecidable.
 
@@ -266,7 +266,7 @@ ent ::= element                 written per kind
 | effect | `{\|` `\|}` | `E τ̄` | `EffectKey E`, derived | `{\| Console, State Int \|}` |
 | labelled effect | `{\|` `\|}` | `s :: E τ̄` | `SymbolKey s` | — |
 
-The brackets of a tuple and of a variant, and the spelling a labelled effect takes, are open ([Open Questions](14-Open-Questions.md)). What is fixed is the element form and the key each produces.
+The brackets of a tuple and of a variant, and the spelling a labelled effect takes, are open ([Open Questions](../07-Open-Questions/01-Open-Questions.md)). What is fixed is the element form and the key each produces.
 
 Desugaring is `⊎` at every kind.
 

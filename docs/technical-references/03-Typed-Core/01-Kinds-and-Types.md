@@ -37,7 +37,7 @@ RowKey ::= SymbolKey Symbol        a written field or instance name
 
 `Nat` is a non-negative integer, written in the key and nowhere else; it is not a type, and the kind grammar gains nothing from it.
 
-**The first three are structural and the last is nominal.** A `SymbolKey` and a `TagKey` are what they are by virtue of being written, a `PositionKey` by where the component it keys stands; nothing declares any of them, and two occurrences of `#Ok` in unrelated modules are the same key. An `EffectKey` is the identity of a declaration in `Σ`, so `Console.Log` and `Audit.Log` are different keys however alike they read ([Rows](04-Rows.md)).
+**The first three are structural and the last is nominal.** A `SymbolKey` and a `TagKey` are what they are by virtue of being written, a `PositionKey` by where the component it keys stands; nothing declares any of them, and two occurrences of `#Ok` in unrelated modules are the same key. An `EffectKey` is the identity of a declaration in `Σ`, so `Console.Log` and `Audit.Log` are different keys however alike they read ([Rows](02-Rows.md)).
 
 Neither the row theory nor the solver distinguishes them: to those, all four are rigid keys that compare for equality. What distinguishes them is well-formedness, since only an `EffectKey` sends the checker to `Σ`.
 
@@ -107,7 +107,7 @@ result( κ )         = κ                 otherwise
 
 **Only row syntax produces a row.** The side condition confines a row kind to the argument side of an arrow: `Row Type -> Type` is quantifiable and `Row Type -> Row Type` is not, and a kind variable is excluded from the result position as well, since it may be instantiated with a row kind. The same condition holds of the kind of every type constructor in `Σ`.
 
-What this buys is the domain of `nf`. A type of kind `Row ε` is then a row variable, `()`, a row extension, or a union and nothing else, which is exactly what normalization is defined on, so **every well-kinded row has a normal form** ([Rows](04-Rows.md)). Row equality, entailment, and unification all rest on that. A type-level function producing a row would have to arrive together with normalization rules of its own.
+What this buys is the domain of `nf`. A type of kind `Row ε` is then a row variable, `()`, a row extension, or a union and nothing else, which is exactly what normalization is defined on, so **every well-kinded row has a normal form** ([Rows](02-Rows.md)). Row equality, entailment, and unification all rest on that. A type-level function producing a row would have to arrive together with normalization rules of its own.
 
 A kind variable is quantifiable, and every `[[κ̄]]` requires `qkind` of what it supplies, so a kind variable stands only for a quantifiable kind.
 
@@ -123,9 +123,9 @@ Function   : Type -> Row Effect -> Type -> Type
 State      : Type -> Effect
 ```
 
-These illustrate the shapes a kind takes; which of them `Prim` declares is settled in [Prim and Base](16-Prim.md).
+These illustrate the shapes a kind takes; which of them `Prim` declares is settled in [Prim and Base](../06-Modules/02-Prim-and-Base.md).
 
-`Row Type` is the row kind of records and variants; `Row Effect` is that of effect rows. Both share the row theory of [Rows](04-Rows.md).
+`Row Type` is the row kind of records and variants; `Row Effect` is that of effect rows. Both share the row theory of [Rows](02-Rows.md).
 
 ### Why the three layers
 
@@ -173,7 +173,7 @@ Kind schemes appear **only on declarations**. The global signature `Σ` carries 
 
 The kind of a type constructor produces `Type`, that is `result(κ) = Type`. `Record : Row Type -> Type` is admitted; a constructor producing a row is not, for the reason above.
 
-**An effect constructor is not among them.** Its kind is `κ̄ -> Effect`, binding no kind variable, so an element of a `Row Effect` is written `E τ̄` and carries no `[[κ̄]]` ([Open Questions](14-Open-Questions.md)).
+**An effect constructor is not among them.** Its kind is `κ̄ -> Effect`, binding no kind variable, so an element of a `Row Effect` is written `E τ̄` and carries no `[[κ̄]]` ([Open Questions](../07-Open-Questions/01-Open-Questions.md)).
 
 Neither the type grammar nor the term grammar has a kind **quantifier**: there is no `forall (k : Kind). τ` and no `Λ (k : Kind). e`. Quantification happens only in declarations. A kind variable enters the local context `Γ` only while checking a declaration whose scheme binds it.
 
@@ -238,7 +238,7 @@ A function type is an application of the type constructor `Function`; Core has n
 
 ## Kinding
 
-The judgement is `Γ ⊢ τ : κ`. Contexts are defined in [Typing Rules](07-Typing-Rules.md).
+The judgement is `Γ ⊢ τ : κ`. Contexts are defined in [Typing Rules](05-Typing-Rules.md).
 
 ```text
   (a : κ) ∈ Γ                (T : forall k̄. κ) ∈ Σ   Γ ⊢ κ̄' qkind   |κ̄'| = |k̄|
@@ -265,7 +265,7 @@ The judgement is `Γ ⊢ τ : κ`. Contexts are defined in [Typing Rules](07-Typ
   Γ ⊢ ρ1 ⊎ ρ2 : Row ε
 ```
 
-**A constraint is assumed while its body is kinded.** A row that is sharp only under `k ∉ r` — `(k ∉ r) => Record ( k : τ | r )`, the shape every row-polymorphic function has — is well-kinded for that reason and for no other. Writing `Γ, C` also requires `C` to be satisfiable ([Typing Rules](07-Typing-Rules.md)).
+**A constraint is assumed while its body is kinded.** A row that is sharp only under `k ∉ r` — `(k ∉ r) => Record ( k : τ | r )`, the shape every row-polymorphic function has — is well-kinded for that reason and for no other. Writing `Γ, C` also requires `C` to be satisfiable ([Typing Rules](05-Typing-Rules.md)).
 
 That row extension and row union require **entailment from the context** is the centre of the design. PureScript admits `RCons` unconditionally and performs no elimination of duplicate labels; in Dawn a well-kinded row is sharp by construction.
 
@@ -295,7 +295,7 @@ key( E τ̄ )                  = EffectKey E   payload( E τ̄ )                
 key( SymbolKey s : E τ̄ )    = SymbolKey s   payload( SymbolKey s : E τ̄ )    = E τ̄
 ```
 
-Normalization pairs them — `nf` maps `ent` to `key(ent) ↦ payload(ent)` ([Rows](04-Rows.md)) — and the rule for `handle` uses both, one to find the element and the other to find its operations ([Typing Rules](07-Typing-Rules.md)).
+Normalization pairs them — `nf` maps `ent` to `key(ent) ↦ payload(ent)` ([Rows](02-Rows.md)) — and the rule for `handle` uses both, one to find the element and the other to find its operations ([Typing Rules](05-Typing-Rules.md)).
 
 At `Row Type` the key is written and the payload is the type. At `Row Effect` there are two forms, and they differ only in where the key comes from: **the unlabelled form derives it from the effect at the head, and the labelled form writes one**. Either way the payload is an application of a declared effect constructor, which is what the operations of a `perform` are looked up through.
 
@@ -312,7 +312,7 @@ The labelled form is what lets one effect appear twice.
 
 Without it the row would be ill-kinded, both elements having the key `EffectKey State`.
 
-An element of a `Row Effect` **must have a declared effect constructor at the head of its payload**; a payload headed by a type variable is not admitted. Keys are therefore rigid whatever their kind — a `SymbolKey`, a `TagKey`, and a `PositionKey` are structural constants, independent of how metavariables are solved, and an `EffectKey` is a declaration identity — which is what makes row equality decidable ([Rows](04-Rows.md)). The `qkind` condition of D24 reinforces this: since `Effect` is not quantifiable, `forall (e : Effect). …` cannot be written, so a type variable can never reach the head of a payload.
+An element of a `Row Effect` **must have a declared effect constructor at the head of its payload**; a payload headed by a type variable is not admitted. Keys are therefore rigid whatever their kind — a `SymbolKey`, a `TagKey`, and a `PositionKey` are structural constants, independent of how metavariables are solved, and an `EffectKey` is a declaration identity — which is what makes row equality decidable ([Rows](02-Rows.md)). The `qkind` condition of D24 reinforces this: since `Effect` is not quantifiable, `forall (e : Effect). …` cannot be written, so a type variable can never reach the head of a payload.
 
 ### Constraint well-formedness
 
@@ -347,7 +347,7 @@ Both sides of `#` must share the same `ε`; a Disjoint constraint spanning `Row 
 
 ## Type equality
 
-`Γ ⊢ τ1 ≡ τ2` holds when the types are α-equivalent, their rows agree by the normal form of [Rows](04-Rows.md), and they are otherwise structurally identical.
+`Γ ⊢ τ1 ≡ τ2` holds when the types are α-equivalent, their rows agree by the normal form of [Rows](02-Rows.md), and they are otherwise structurally identical.
 
 There is no β-reduction and no δ-reduction, because there are no type-level functions. Apart from row normalization, deciding equality is syntactic.
 

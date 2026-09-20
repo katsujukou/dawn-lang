@@ -2,7 +2,7 @@
 
 ## Effect rows
 
-An effect row has kind `Row Effect` and shares the row theory of [Rows](04-Rows.md).
+An effect row has kind `Row Effect` and shares the row theory of [Rows](02-Rows.md).
 
 ```text
 Console : Effect
@@ -146,7 +146,7 @@ h ::= { handles ent
 
 **A handler writes one element, and a `perform` names one key.** Where the key is an `EffectKey` the two read as they always have — `perform Console.log`, a handler that `handles Console` — and where it is a `SymbolKey` they name the instance instead.
 
-The handler writes the element whole because the row it is removing appears nowhere else in the term: a key does not name an effect, and the arguments of the payload are not recoverable from the clauses ([Typing Rules](07-Typing-Rules.md)). Only the key is consulted at run time.
+The handler writes the element whole because the row it is removing appears nowhere else in the term: a key does not name an effect, and the arguments of the payload are not recoverable from the clauses ([Typing Rules](05-Typing-Rules.md)). Only the key is consulted at run time.
 
 ```text
 perform cache.get [] Prim.Unit        -- the element keyed `cache`
@@ -155,9 +155,9 @@ handle e with { handles cache : State Int ; … }   -- removes it, leaves `count
 
 A handler for `cache` and a handler for `counter` have the same clauses, `get` and `put`, because both elements carry a `State` payload. They are nonetheless different handlers removing different elements.
 
-**A handler must cover every operation of the effect its element carries.** Since `handle` removes that element from the row, an operation without a clause would leave its `perform` with nowhere to go. Which operations those are is read from the payload: a handler keyed `cache` over a payload `State Int` owes clauses for `get` and `put`. This is the same requirement as local totality of a decision tree ([Terms and Matching](06-Terms-and-Matching.md)).
+**A handler must cover every operation of the effect its element carries.** Since `handle` removes that element from the row, an operation without a clause would leave its `perform` with nowhere to go. Which operations those are is read from the payload: a handler keyed `cache` over a payload `State Int` owes clauses for `get` and `put`. This is the same requirement as local totality of a decision tree ([Terms and Matching](04-Terms-and-Matching.md)).
 
-Every clause therefore gives its operation a meaning of its own: it resumes the continuation, abandons it, or translates the operation into another effect. **Passing an operation on to an outer handler of the same key is not expressible.** The row `( ent | ρ )` is sharp, so `key(ent) ∉ ρ`, while a clause body is typed at the ambient row `ρ`; a `perform` on that key there would require it to be in `ρ`. Two instances of one effect are a different matter: `cache` and `counter` are different keys, so a handler for one may perform on the other. Forwarding of that kind, and a partial handler that leaves the handled element in the row, each require a construct that v0.1 does not have; the candidates are recorded in [Open Questions](14-Open-Questions.md).
+Every clause therefore gives its operation a meaning of its own: it resumes the continuation, abandons it, or translates the operation into another effect. **Passing an operation on to an outer handler of the same key is not expressible.** The row `( ent | ρ )` is sharp, so `key(ent) ∉ ρ`, while a clause body is typed at the ambient row `ρ`; a `perform` on that key there would require it to be in `ρ`. Two instances of one effect are a different matter: `cache` and `counter` are different keys, so a handler for one may perform on the other. Forwarding of that kind, and a partial handler that leaves the handled element in the row, each require a construct that v0.1 does not have; the candidates are recorded in [Open Questions](../07-Open-Questions/01-Open-Questions.md).
 
 ### `perform` does not require a handler to exist
 
@@ -177,9 +177,9 @@ A type error arises exactly where the obligation **cannot propagate further**. T
 
 | Boundary | Rule |
 | --- | --- |
-| Function application: the arrow's row must equal the ambient row | [Typing Rules](07-Typing-Rules.md) |
-| A top-level declaration's right-hand side, checked at ambient `()` | [Modules](09-Modules.md) |
-| The entry point `main : IO Unit`, which admits no effect row | [Modules](09-Modules.md) |
+| Function application: the arrow's row must equal the ambient row | [Typing Rules](05-Typing-Rules.md) |
+| A top-level declaration's right-hand side, checked at ambient `()` | [Modules](../06-Modules/01-Modules.md) |
+| The entry point `main : IO Unit`, which admits no effect row | [Modules](../06-Modules/01-Modules.md) |
 
 Along a call chain reachable from `main`, the effect row propagates upward through types. Since `main` has type `IO Unit`, a `handle` must have removed the effect somewhere along the chain, or one of the boundaries rejects the program. This is a consequence of types propagating, not of reachability analysis.
 
@@ -189,7 +189,7 @@ D8 contributes here: because rows do not widen automatically, an obligation cann
 
 A non-exhaustive pattern match produces a `Partial` effect (D10).
 
-`Partial` is an ordinary effect declaration of `Prelude`, not a builtin ([Prim and Base](16-Prim.md)).
+`Partial` is an ordinary effect declaration of `Prelude`, not a builtin ([Prim and Base](../06-Modules/02-Prim-and-Base.md)).
 
 ```text
 effect Partial where
@@ -208,7 +208,7 @@ A partial function therefore carries `( Partial | e )` in its type. The effect o
 
 ### Set notation
 
-The common spread rules are in [Rows](04-Rows.md); this section covers what is specific to effect rows.
+The common spread rules are in [Rows](02-Rows.md); this section covers what is specific to effect rows.
 
 **The brackets are `{|` and `|}`.** What follows covers the **unlabelled form**, where an element is an effect type alone and its key is derived.
 
@@ -224,7 +224,7 @@ log :: String -> Unit / {| Console |}
 {| Console, State Int, ...e |} ⟹  ( Console, State Int ) ⊎ e
 ```
 
-**The surface spelling of a labelled instance is not settled here.** Core has the form — `( cache : State Int )`, keyed `SymbolKey cache` — and what remains is how a signature writes one and how ordinary code says which of `cache` and `counter` it means, given that `perform` never appears in surface syntax (D17). Both belong with the rest of the surface design ([Rows](04-Rows.md)).
+**The surface spelling of a labelled instance is not settled here.** Core has the form — `( cache : State Int )`, keyed `SymbolKey cache` — and what remains is how a signature writes one and how ordinary code says which of `cache` and `counter` it means, given that `perform` never appears in surface syntax (D17). Both belong with the rest of the surface design ([Rows](02-Rows.md)).
 
 **`/` attaches to the last arrow, not to the function type as a whole.**
 
@@ -258,7 +258,7 @@ tick _ =
 
 Requiring `do` and `bind` for effects would restore at the level of syntax exactly the division that D7 removed from types: whether one passes a pure function or a `do` block to `map` would become a visible distinction, and D7's benefit would be lost.
 
-Because any subexpression may perform an effect, the evaluation order fixed in [Semantics](08-Semantics.md) is **observable from surface syntax**, not merely an internal convention of Core. Strict evaluation together with effect rows on arrows already implies this, independently of the choice of sequencing syntax.
+Because any subexpression may perform an effect, the evaluation order fixed in [Semantics](06-Semantics.md) is **observable from surface syntax**, not merely an internal convention of Core. Strict evaluation together with effect rows on arrows already implies this, independently of the choice of sequencing syntax.
 
 ### `handle` does appear in surface syntax
 
@@ -319,7 +319,7 @@ Removing `IO` from the effect world dissolves the question. Effects are mutually
 IO : Type -> Type
 ```
 
-`IO a` is a **value** denoting a computation that returns an `a` when executed. It is an opaque primitive type: `Prim` supplies the type constructor and `Base.IO` the two operations over it ([Prim and Base](16-Prim.md)).
+`IO a` is a **value** denoting a computation that returns an `a` when executed. It is an opaque primitive type: `Prim` supplies the type constructor and `Base.IO` the two operations over it ([Prim and Base](../06-Modules/02-Prim-and-Base.md)).
 
 ```text
 foreign Base.IO.pure : forall a. a -> IO a
@@ -428,7 +428,7 @@ The clause's result type is already `IO a`, so `Base.IO.bind` composes there nat
 
 The type of `Js.Console.log`, `String -> IO Unit`, says only that some IO occurs. That it performs only console IO is not guaranteed by the type; an implementation that deleted files would still type check.
 
-This is a trust boundary that **should be accepted**. That is what FFI is, and [Modules](09-Modules.md) already declares it.
+This is a trust boundary that **should be accepted**. That is what FFI is, and [Modules](../06-Modules/01-Modules.md) already declares it.
 
 What matters is its **location**: at the `foreign` declaration, and nowhere else. An interpreter such as `runConsoleIO` is ordinary safe Dawn code and is not a trust boundary. The boundaries do not multiply.
 
@@ -477,7 +477,7 @@ effect Lift where
   lift :: forall a. Action a ->* a
 ```
 
-A rule rejecting the occurrence of `Prim.IO` in an operation signature would reject the first and admit the second, which makes it a lint rather than a condition on soundness. The Core type checker imposes none ([Modules](09-Modules.md)).
+A rule rejecting the occurrence of `Prim.IO` in an operation signature would reject the first and admit the second, which makes it a lint rather than a condition on soundness. The Core type checker imposes none ([Modules](../06-Modules/01-Modules.md)).
 
 What a lift costs is **the granularity of what a type says**. Code carrying `LiftIO` asks for "some runtime action" rather than for a capability, so the row no longer tells `Console` from `FileSystem`. That is a real loss and it is the argument for keeping a lift out of ordinary code — a matter of what a library offers rather than of what the checker admits. What is not lost: the row still names `LiftIO`, and passing between the two is an explicit handler.
 
@@ -488,11 +488,11 @@ effect LiftIO where liftIO :: forall a. IO a ->* a      -- one key, every a
 effect LiftIO (a : Type) where liftIO :: IO a ->* a     -- one a per instance, all sharing one key
 ```
 
-Rows are sharp, and two unlabelled instances of the second form share the key `EffectKey LiftIO`, so a computation lifting an `IO String` and an `IO Unit` has no well-kinded row. Writing keys for them recovers one — `( stringLift : LiftIO String, unitLift : LiftIO Unit )` is well-kinded ([Rows](04-Rows.md)) — at the price of a key and a handler for every type lifted. Operation polymorphism needs neither.
+Rows are sharp, and two unlabelled instances of the second form share the key `EffectKey LiftIO`, so a computation lifting an `IO String` and an `IO Unit` has no well-kinded row. Writing keys for them recovers one — `( stringLift : LiftIO String, unitLift : LiftIO Unit )` is well-kinded ([Rows](02-Rows.md)) — at the price of a key and a handler for every type lifted. Operation polymorphism needs neither.
 
 A standard library providing one puts it in a module named for what it is — `Unsafe` or `Runtime` — so that importing it records the choice.
 
-A pure elimination is a different matter. `foreign unsafePerformIO : forall a. IO a -> a` satisfies D23 and the checker admits the declaration, but **no conforming `δ_f` implements it**: the implementation would have to execute the action, and D25 places execution outside Core ([Semantics](08-Semantics.md)). It is unimplementable rather than ill-typed, which is why Dawn does not provide one.
+A pure elimination is a different matter. `foreign unsafePerformIO : forall a. IO a -> a` satisfies D23 and the checker admits the declaration, but **no conforming `δ_f` implements it**: the implementation would have to execute the action, and D25 places execution outside Core ([Semantics](06-Semantics.md)). It is unimplementable rather than ill-typed, which is why Dawn does not provide one.
 
 ### Confining `IO` is a discipline
 

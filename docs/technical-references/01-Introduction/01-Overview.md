@@ -32,7 +32,7 @@ Surface language features elaborate into a small typed Core.
 
 Syntax macros and elaborators can fail, diverge, or produce malformed syntax. They must never cause the compiler to accept an ill-typed Core term. An independent Core type checker validates every Core term that elaboration produces.
 
-This separation is what allows type classes, derive mechanisms, and row-directed metaprograms to grow without enlarging the set of programs whose correctness the compiler vouches for. See [Core Type Checker](11-Core-Type-Checker.md).
+This separation is what allows type classes, derive mechanisms, and row-directed metaprograms to grow without enlarging the set of programs whose correctness the compiler vouches for. See [Core Type Checker](../03-Typed-Core/07-Core-Type-Checker.md).
 
 ## Compile-time computation is separated by concern
 
@@ -79,7 +79,7 @@ The JavaScript backend is the reference backend. Delegating garbage collection, 
 
 The Wasm backend prioritizes Wasm GC. A backend using linear memory and a custom collector can be added later as a separate lowering.
 
-Effect handlers are the one place where backends differ in what they can implement. See [Semantics](08-Semantics.md).
+Effect handlers are the one place where backends differ in what they can implement. See [Semantics](../03-Typed-Core/06-Semantics.md).
 
 ## Roadmap
 
@@ -108,21 +108,19 @@ These serve as architecture tests as well as demonstrations.
 
 | Document | Content |
 | --- | --- |
-| [00-Notation](00-Notation.md) | Metavariables, sequences, symbols |
-| [02-Design-Decisions](02-Design-Decisions.md) | The numbered decisions D1–D27 |
-| [03-Kinds-and-Types](03-Kinds-and-Types.md) | Names, kinds, types, kinding rules |
-| [04-Rows](04-Rows.md) | Row theory, normal form, entailment, surface syntax |
-| [05-Effects](05-Effects.md) | Effect rows, operations, handlers, `IO` |
-| [06-Terms-and-Matching](06-Terms-and-Matching.md) | Core terms, value forms, join points, decision trees |
-| [07-Typing-Rules](07-Typing-Rules.md) | Contexts and the typing rules |
-| [08-Semantics](08-Semantics.md) | Evaluation order, erasure, handlers and continuations |
-| [09-Modules](09-Modules.md) | Modules, declarations, FFI, entry point |
-| [10-Elaboration](10-Elaboration.md) | Core⁺, metavariables, unification, synthesis |
-| [11-Core-Type-Checker](11-Core-Type-Checker.md) | What the checker verifies, and what it does not |
-| [12-PureScript-CoreFn](12-PureScript-CoreFn.md) | Correspondence with PureScript's CoreFn |
-| [13-Examples](13-Examples.md) | Worked examples in Core |
-| [14-Open-Questions](14-Open-Questions.md) | Questions deferred beyond v0.1 |
-| [15-Implementation-Plan](15-Implementation-Plan.md) | Order of implementation work |
-| [16-Prim](16-Prim.md) | The four layers: what `Prim` holds, and what the `Base` ABI surface does |
-
-The numbers record the order the documents were written in rather than the order to read them in. [16-Prim](16-Prim.md) belongs beside [Modules](09-Modules.md).
+| [§1.2 Notation](02-Notation.md) | Metavariables, sequences, symbols |
+| [§1.3 Design Decisions](03-Design-Decisions.md) | The numbered decisions D1–D27 |
+| [§1.4 Implementation Plan](04-Implementation-Plan.md) | Order of implementation work |
+| [§2.1 Elaboration](../02-Surface-Language/01-Elaboration.md) | Core⁺, metavariables, unification, synthesis |
+| [§3.1 Kinds and Types](../03-Typed-Core/01-Kinds-and-Types.md) | Names, kinds, types, kinding rules |
+| [§3.2 Rows](../03-Typed-Core/02-Rows.md) | Row theory, normal form, entailment, surface syntax |
+| [§3.3 Effects](../03-Typed-Core/03-Effects.md) | Effect rows, operations, handlers, `IO` |
+| [§3.4 Terms and Matching](../03-Typed-Core/04-Terms-and-Matching.md) | Core terms, value forms, join points, decision trees |
+| [§3.5 Typing Rules](../03-Typed-Core/05-Typing-Rules.md) | Contexts and the typing rules |
+| [§3.6 Semantics](../03-Typed-Core/06-Semantics.md) | Evaluation order, erasure, handlers and continuations |
+| [§3.7 Core Type Checker](../03-Typed-Core/07-Core-Type-Checker.md) | What the checker verifies, and what it does not |
+| [§3.8 Examples](../03-Typed-Core/08-Examples.md) | Worked examples in Core |
+| [§3.9 PureScript CoreFn](../03-Typed-Core/09-PureScript-CoreFn.md) | Correspondence with PureScript's CoreFn |
+| [§6.1 Modules](../06-Modules/01-Modules.md) | Modules, declarations, FFI, entry point |
+| [§6.2 Prim and Base](../06-Modules/02-Prim-and-Base.md) | The four layers: what `Prim` holds, and what the `Base` ABI surface does |
+| [§7.1 Open Questions](../07-Open-Questions/01-Open-Questions.md) | Questions deferred beyond v0.1 |

@@ -2,11 +2,11 @@
 
 Once this specification is settled, the target of Phase A is determined.
 
-1. **Define the Core AST** ([Kinds and Types](03-Kinds-and-Types.md), [Terms and Matching](06-Terms-and-Matching.md), [Modules](09-Modules.md))
-2. **Row normalization `nf`, the entailment decision `Γ ⊨ C`, and row unification** ([Rows](04-Rows.md), [Elaboration](10-Elaboration.md)) — the first target for unit tests and property tests
-3. **The Core type checker** ([Core Type Checker](11-Core-Type-Checker.md))
-4. **Hand-write the Core module of the vertical slice** ([Examples](13-Examples.md)) and run it through step 3 — the type checker's first end-to-end test
-5. **Lowering to Mid IR**: the erasures of [Semantics](08-Semantics.md), and the mapping of decision trees and join points
+1. **Define the Core AST** ([Kinds and Types](../03-Typed-Core/01-Kinds-and-Types.md), [Terms and Matching](../03-Typed-Core/04-Terms-and-Matching.md), [Modules](../06-Modules/01-Modules.md))
+2. **Row normalization `nf`, the entailment decision `Γ ⊨ C`, and row unification** ([Rows](../03-Typed-Core/02-Rows.md), [Elaboration](../02-Surface-Language/01-Elaboration.md)) — the first target for unit tests and property tests
+3. **The Core type checker** ([Core Type Checker](../03-Typed-Core/07-Core-Type-Checker.md))
+4. **Hand-write the Core module of the vertical slice** ([Examples](../03-Typed-Core/08-Examples.md)) and run it through step 3 — the type checker's first end-to-end test
+5. **Lowering to Mid IR**: the erasures of [Semantics](../03-Typed-Core/06-Semantics.md), and the mapping of decision trees and join points
 6. **The JavaScript backend**
 7. **Parser, name resolution, type inference, and elaboration**, built on top of steps 1 through 4
 
@@ -24,17 +24,17 @@ Row unification is where subtle errors concentrate, and two properties deserve e
 
 Two constraints must be respected even though the constructs they concern belong to Phase E.
 
-**Do not assume one-shot continuations** in Mid IR's representation ([Semantics](08-Semantics.md)). Mid IR is designed in Phase A while effect lowering belongs to Phase E, so the assumption would be baked in before the decision is made.
+**Do not assume one-shot continuations** in Mid IR's representation ([Semantics](../03-Typed-Core/06-Semantics.md)). Mid IR is designed in Phase A while effect lowering belongs to Phase E, so the assumption would be baked in before the decision is made.
 
-**Represent partially applied constructors** ([Semantics](08-Semantics.md)). A constructor application with fewer arguments than its arity is a value and may be passed around. Mid IR should retain constructor application in a form that lowers either to curried functions or to a partial-application object.
+**Represent partially applied constructors** ([Semantics](../03-Typed-Core/06-Semantics.md)). A constructor application with fewer arguments than its arity is a value and may be passed around. Mid IR should retain constructor application in a form that lowers either to curried functions or to a partial-application object.
 
 ## Notes on step 6
 
-The set of FFI the backend must implement is `dawn-base-0.1`, the first version of the `Base` ABI surface ([Open Questions](14-Open-Questions.md)). The longer it is deferred, the more the standard library settles into a shape that depends on FFI, so it should be fixed while writing this backend.
+The set of FFI the backend must implement is `dawn-base-0.1`, the first version of the `Base` ABI surface ([Open Questions](../07-Open-Questions/01-Open-Questions.md)). The longer it is deferred, the more the standard library settles into a shape that depends on FFI, so it should be fixed while writing this backend.
 
 ## Testing the properties instead of proving them
 
-[Semantics](08-Semantics.md) states progress, preservation, effect safety, and erasure without proof. Proving them for a calculus with rows, effect rows, and handlers is a substantial undertaking, and most of the confidence it would buy is available more cheaply: **each property can be turned into a property test.**
+[Semantics](../03-Typed-Core/06-Semantics.md) states progress, preservation, effect safety, and erasure without proof. Proving them for a calculus with rows, effect rows, and handlers is a substantial undertaking, and most of the confidence it would buy is available more cheaply: **each property can be turned into a property test.**
 
 This requires a Core evaluator, which step 4 needs regardless. Type checking a hand-written module confirms that it is well typed; running it is what confirms that it computes.
 

@@ -4,7 +4,7 @@ Questions that v0.1 leaves open, with what is already known about each.
 
 ## Required for v1.0
 
-**Close the soundness gap for multi-shot continuations.** The v0.1 JavaScript and Wasm backends do not satisfy the reference semantics; a second resumption raises a run-time error ([Semantics](08-Semantics.md)). This is a soundness gap that v0.1 accepts deliberately and that v1.0 must close.
+**Close the soundness gap for multi-shot continuations.** The v0.1 JavaScript and Wasm backends do not satisfy the reference semantics; a second resumption raises a run-time error ([Semantics](../03-Typed-Core/06-Semantics.md)). This is a soundness gap that v0.1 accepts deliberately and that v1.0 must close.
 
 Three routes are available. Implement full CPS conversion on JavaScript. Wait for a cloning primitive to enter the Wasm stack-switching proposal. Or make the reference semantics target-parameterized, which conflicts with the backend independence of Mid IR.
 
@@ -28,11 +28,11 @@ Kind-polymorphic **data types** such as `Proxy` are expressible; a kind-polymorp
 
 It arises when `Map` or label polymorphism is introduced in Phase D, and should be judged together with reconsidering D2. Withdrawing D2 and unifying kinds with types, as PureScript 0.14+ does, would dissolve this question and the duplication of the rank question at once.
 
-**Kind-polymorphic effect constructors.** An effect constructor carries no kind scheme ([Kinds](03-Kinds-and-Types.md)), so `effect E forall k. (a : k)` cannot be declared and a `Row Effect` element needs no instantiation.
+**Kind-polymorphic effect constructors.** An effect constructor carries no kind scheme ([Kinds](../03-Typed-Core/01-Kinds-and-Types.md)), so `effect E forall k. (a : k)` cannot be declared and a `Row Effect` element needs no instantiation.
 
 Restoring it costs more than adding a row to that table. The element becomes `E [[κ̄]] τ̄`, and a row's normal form then carries a kind vector beside its argument vector. Row equality and unification compare payloads, so both would compare kinds as well. Entailment is unaffected: it decides by the keys of a normal form and the atomic facts of `Γ*`, and never examines a payload, however rich the payload becomes. Whether an effect parameterized over a kind other than `Type` is ever wanted is the question; no use has arisen. The addition is backward compatible, since an empty scheme writes nothing.
 
-**The value domains of `Int` and `Number`.** [Prim and Base](16-Prim.md) fixes the type of each literal, and fixes what `String` and `Char` range over; what `Int` and `Number` range over is open.
+**The value domains of `Int` and `Number`.** [Prim and Base](../06-Modules/02-Prim-and-Base.md) fixes the type of each literal, and fixes what `String` and `Char` range over; what `Int` and `Number` range over is open.
 
 What Core requires is only that literal identity be decidable, since `switchLit` demands distinct literals. What is unsettled is the range of `Int`, and the representation of `Number` together with how NaN and signed zero behave under that identity.
 
@@ -42,7 +42,7 @@ These belong in Core rather than in the runtime ABI, because two backends disagr
 
 **Label polymorphism and a `Symbol` kind.** D13 restricts labels to literals, so the kind grammar has nothing corresponding to `Symbol` and labels are not types.
 
-**The principal use of `Symbol` is already served.** Reflecting type-level labels to run-time strings — PureScript's `IsSymbol` and `reflectSymbol` — is the work of a metaprogram using `normalizeRow` ([Elaboration](10-Elaboration.md)), so a JSON encoder derived from a closed record row is unaffected.
+**The principal use of `Symbol` is already served.** Reflecting type-level labels to run-time strings — PureScript's `IsSymbol` and `reflectSymbol` — is the work of a metaprogram using `normalizeRow` ([Elaboration](../02-Surface-Language/01-Elaboration.md)), so a JSON encoder derived from a closed record row is unaffected.
 
 What remains missing is **label-polymorphic functions**: a library function that takes which field to operate on as an argument.
 
@@ -62,7 +62,7 @@ The condition is the one already imposed on effect row elements: **keep label va
 
 D17 has increased the weight of this item: under direct style the right-hand side of a surface `let` may perform effects, so the value restriction continuously underwrites the fact that let-generalization does not generalize a non-value right-hand side. Any relaxation should be evaluated against that frequency.
 
-**The operational cost of D8.** Should explicit insertion of `openEff` make elaboration unduly complex, the fallback is a decidable effect subsumption judgement `ρ ≤ ρ'`, decidable by inclusion of normal forms, which would keep type equality syntactic. Note that retreating would lose the diagnostic precision D8 provides ([Effects](05-Effects.md)).
+**The operational cost of D8.** Should explicit insertion of `openEff` make elaboration unduly complex, the fallback is a decidable effect subsumption judgement `ρ ≤ ρ'`, decidable by inclusion of normal forms, which would keep type equality syntactic. Note that retreating would lose the diagnostic precision D8 provides ([Effects](../03-Typed-Core/03-Effects.md)).
 
 **Whether `split` is needed.** The inverse of `merge`, `Record (r ⊎ s) -> Tuple (Record r) (Record s)`, cannot be executed unless the labels of `r` are known. Whether it is needed should be validated in Phase D.
 
@@ -74,9 +74,9 @@ One question is **how to declare and check the extent of non-conformance**. Dete
 
 That requires a per-clause opt-in comparable to Koka's `ctl`, which adds a flag to each clause of Core's `handle`. There is no need to add it now, but it is where Core's syntax may change; the addition is backward compatible, since existing clauses read as unrestricted.
 
-The other is **confirming the Wasm stack-switching proposal**. The tables in [Semantics](08-Semantics.md) assume that its continuations are one-shot and linear and that no cloning primitive is in the MVP. This is secondhand and should be verified against primary sources before Phase E.
+The other is **confirming the Wasm stack-switching proposal**. The tables in [Semantics](../03-Typed-Core/06-Semantics.md) assume that its continuations are one-shot and linear and that no cloning primitive is in the MVP. This is secondhand and should be verified against primary sources before Phase E.
 
-**Effect-polymorphism of handlers that sequence native actions.** By D23 and the purity of `Base.IO.bind`, a handler that sequences a native action **before the continuation** must take a closed row ([Effects](05-Effects.md)). This is not true of `IO`-returning handlers in general: one that merely resumes synchronously, or merely abandons the continuation, may remain effect-polymorphic.
+**Effect-polymorphism of handlers that sequence native actions.** By D23 and the purity of `Base.IO.bind`, a handler that sequences a native action **before the continuation** must take a closed row ([Effects](../03-Typed-Core/03-Effects.md)). This is not true of `IO`-returning handlers in general: one that merely resumes synchronously, or merely abandons the continuation, may remain effect-polymorphic.
 
 In the standard library this constraint falls on terminal interpreters, producing a non-uniformity in which only the terminal stage has a different shape.
 
@@ -84,48 +84,48 @@ Making it uniform requires either indexing `IO` by an effect row, or giving `Bas
 
 **Masking and scoped labels for effect rows.** Effect rows are sharp (D4), so Koka's `mask<exn>` is not expressible. Named instances, below, cover many of the uses, but temporarily hiding one occurrence of an effect may still require something separate.
 
-Forwarding belongs to the same gap, and what it cannot cross is a **key**, not an effect. A clause cannot pass its operation on to an outer handler of the same key, since `handle` removes that element from the row and the clause body is typed without it ([Effects](05-Effects.md)). Two instances of one effect are unaffected: a handler keyed `cache` may perform on `counter` freely, those being different keys. What is needed is a semantics that distinguishes the current handler for `k` from an outer handler of `k`, and a second occurrence of the key in the row is only one way to obtain it. Three candidates are available.
+Forwarding belongs to the same gap, and what it cannot cross is a **key**, not an effect. A clause cannot pass its operation on to an outer handler of the same key, since `handle` removes that element from the row and the clause body is typed without it ([Effects](../03-Typed-Core/03-Effects.md)). Two instances of one effect are unaffected: a handler keyed `cache` may perform on `counter` freely, those being different keys. What is needed is a semantics that distinguishes the current handler for `k` from an outer handler of `k`, and a second occurrence of the key in the row is only one way to obtain it. Three candidates are available.
 
 - **Masking, or scoped duplicates.** The distinction is carried by the row, as in Koka
 - **An explicit `forward`.** The distinction is carried by a term that skips the current handler
 - **A partial handler that keeps the element.** Its rule takes `( ent | ρ )` to `( ent | ρ )`, so the keyed element remains in the row and the operations the clauses do not name travel outwards. A single key suffices
 
-**Multiple instances of one effect constructor — settled.** An effect element may carry a written `SymbolKey`, so `( cache : State Int, counter : State Int )` is well-kinded and two instances of one effect are distinguished by their keys (D16, [Effects](05-Effects.md)).
+**Multiple instances of one effect constructor — settled.** An effect element may carry a written `SymbolKey`, so `( cache : State Int, counter : State Int )` is well-kinded and two instances of one effect are distinguished by their keys (D16, [Effects](../03-Typed-Core/03-Effects.md)).
 
 Making the key the whole element type would have removed the limitation too, and remains unavailable: whether `( State ?a, State Int )` has one element or two would depend on solving `?a`, so the point at which sharpness can be decided would depend on the progress of inference — the very property D4 exists to eliminate. A written key is rigid, and decides nothing later than it decides now.
 
-What the surface writes for such an instance, and how ordinary code names one, is not settled ([Effects](05-Effects.md)).
+What the surface writes for such an instance, and how ordinary code names one, is not settled ([Effects](../03-Typed-Core/03-Effects.md)).
 
 ## FFI and backends
 
-**Writing the `Base` ABI specification.** The shape is settled: `Base.*` is the versioned runtime contract, its ABI entries are graded by profile while its protocols are not, and `Σ` records neither the grading nor what a backend implements ([Prim and Base](16-Prim.md)). What remains is the content.
+**Writing the `Base` ABI specification.** The shape is settled: `Base.*` is the versioned runtime contract, its ABI entries are graded by profile while its protocols are not, and `Σ` records neither the grading nor what a backend implements ([Prim and Base](../06-Modules/02-Prim-and-Base.md)). What remains is the content.
 
 - **Which entries each `Base` module holds**, and the observable meaning of each, stated in terms that name no backend
 - **Which manifest intrinsic type constructors the ABI manifest supplies, portable and target alike.** `Base.Array.Array` and the uncurried families are intrinsic without being part of Core, so no declaration in any module can produce them. Each needs its opaque representation and its `foreign` operations fixed together
 - **Which profiles exist beyond `core-runtime` and `standard`**, and what a backend states to claim one
-- **Which entries may fault, and on which inputs.** A pure entry such as an unchecked array index can fail, and no Dawn type describes it. A fault is not an effect and no handler intercepts it ([Semantics](08-Semantics.md)); Core records only that applying a `foreign` may produce one. Enumerating them and their preconditions belongs here
+- **Which entries may fault, and on which inputs.** A pure entry such as an unchecked array index can fail, and no Dawn type describes it. A fault is not an effect and no handler intercepts it ([Semantics](../03-Typed-Core/06-Semantics.md)); Core records only that applying a `foreign` may produce one. Enumerating them and their preconditions belongs here
 - How to restrict the types that may appear in a `foreign` declaration. `Int`, `String`, and opaque handles are safe, but passing a `Record r` or a user-defined ADT raw fixes its representation for every backend. Whether to introduce a mechanism restricting this to types with a declared ABI, or to leave it as convention
 - How to associate a `foreign` declaration with its per-backend implementations. PureScript uses the implicit convention of a `.js` file beside the module, and alternative backends place parallel files. Adding a backend should not require editing modules
 
 These lie outside Core, but the longer they are deferred the more the standard library settles into a shape that depends on FFI. The first version, `dawn-base-0.1`, should be fixed while writing the Phase A JavaScript backend.
 
-**A fast path for pure cases.** `mapArray` runs the Dawn loop even when the effect row is empty, rather than falling through to `Array.prototype.map`. An elaboration macro that inspects the effect row can resolve this ([Modules](09-Modules.md)); it needs only the Phase B foundation and need not wait for Phase E.
+**A fast path for pure cases.** `mapArray` runs the Dawn loop even when the effect row is empty, rather than falling through to `Array.prototype.map`. An elaboration macro that inspects the effect row can resolve this ([Modules](../06-Modules/01-Modules.md)); it needs only the Phase B foundation and need not wait for Phase E.
 
 **Runtime representations shared between the JavaScript and Wasm backends.** How far these can coincide.
 
 ## Modules and surface syntax
 
-**Anonymous `...` at `Row Type`.** The rule is that anonymous spreads in one signature denote one variable per kind ([Rows](04-Rows.md)). This is right for effect rows, but at `Row Type` the wish for two independent open rows arises more often.
+**Anonymous `...` at `Row Type`.** The rule is that anonymous spreads in one signature denote one variable per kind ([Rows](../03-Typed-Core/02-Rows.md)). This is right for effect rows, but at `Row Type` the wish for two independent open rows arises more often.
 
 Should that frequency prove high, the option is to **limit anonymous `...` at `Row Type` to one per signature**, making two or more an error that demands names. No incorrect program is admitted either way, since an over-strong signature fails at the call site, so the decision can wait for evidence about how much is written.
 
 Neither rule is backward compatible with the other. Code that writes names works under both, so making multiple anonymous spreads a warning is a way to defer the decision.
 
-**Brackets for variant rows.** Records use `{ … }` and effects use `{| … |}`, so variants need brackets of their own. A variant element is keyed by a `TagKey` written `#Ok`, or by a `SymbolKey` where a name is wanted, and the spread `...ρ` is shared; only the brackets remain to be chosen ([Rows](04-Rows.md)).
+**Brackets for variant rows.** Records use `{ … }` and effects use `{| … |}`, so variants need brackets of their own. A variant element is keyed by a `TagKey` written `#Ok`, or by a `SymbolKey` where a name is wanted, and the spread `...ρ` is shared; only the brackets remain to be chosen ([Rows](../03-Typed-Core/02-Rows.md)).
 
 **Classical monads and `do` syntax.** D17 settles effect sequencing as direct style but leaves open whether monads as data structures, such as `Maybe` or a parser, should be writable with something like `<-`. **The direction is coexistence**; the syntax is not fixed.
 
-The condition for coexistence is known: `bind` must be effect-polymorphic ([Effects](05-Effects.md)).
+The condition for coexistence is known: `bind` must be effect-polymorphic ([Effects](../03-Typed-Core/03-Effects.md)).
 
 ```text
 bind : forall m. … => forall a b. forall (e : Row Effect).
@@ -158,7 +158,7 @@ Should a design without the header entry be adopted later, it must be stated in 
 
 **Caching and loading compiled metaprograms.**
 
-**Coherence and termination guarantees for the standard type class resolver.** These are library policy, and Core imposes nothing ([Elaboration](10-Elaboration.md)).
+**Coherence and termination guarantees for the standard type class resolver.** These are library policy, and Core imposes nothing ([Elaboration](../02-Surface-Language/01-Elaboration.md)).
 
 **A serialization format for Core**, corresponding to CoreFn's JSON. What a module's interface carries — types, attributes, effect declarations, constructor tags, bodies eligible for inlining — is directly tied to the unit of separate compilation.
 

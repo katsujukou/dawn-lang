@@ -18,7 +18,7 @@ decl ::= data    T forall k̄. (ā : κ̄) = Ctor_1 τ̄1 | … | Ctor_n τ̄n  
 σκ ::= forall k1 .. kn . σ                (empty for most declarations)
 ```
 
-`forall k̄.` may be omitted from any declaration that admits one, and an `effect` declaration admits none ([Kinds](03-Kinds-and-Types.md)). A declaration that binds kind variables is instantiated at each use site by `[[κ̄]]`.
+`forall k̄.` may be omitted from any declaration that admits one, and an `effect` declaration admits none ([Kinds](../03-Typed-Core/01-Kinds-and-Types.md)). A declaration that binds kind variables is instantiated at each use site by `[[κ̄]]`.
 
 **The order of value declarations is a dependency order.** A `nonrec` does not refer backwards, and every cycle is contained in a `rec` group.
 
@@ -127,7 +127,7 @@ handle (log "x") with { handles Console ; … log (s,k) -> … }
 -- the type removes Console, yet the output never reaches the clause
 ```
 
-Returning `IO` closes this. `Js.Console.log s` merely **constructs a value** of type `IO Unit`; the effect occurs when the runtime executes the `IO` (D20). Note that D23 constrains the declared type, not the implementation: that the implementation actually does nothing when applied is a conformance obligation on the backend ([Semantics](08-Semantics.md)). Handleable effects travel only through `perform`, and native effects only through `IO`.
+Returning `IO` closes this. `Js.Console.log s` merely **constructs a value** of type `IO Unit`; the effect occurs when the runtime executes the `IO` (D20). Note that D23 constrains the declared type, not the implementation: that the implementation actually does nothing when applied is a conformance obligation on the backend ([Semantics](../03-Typed-Core/06-Semantics.md)). Handleable effects travel only through `perform`, and native effects only through `IO`.
 
 The same rule forbids effectful arrows on the argument side, for a different reason.
 
@@ -142,11 +142,11 @@ D23 therefore closes two holes with one rule: the result side prevents handler b
 
 The rule is syntactically checkable.
 
-**Currying is still required.** `foreign writeAt : Int -> String -> IO Unit` demands a two-argument curried function, so a JavaScript `function writeAt(n, s)` must be bound as `(n) => (s) => …`. Under D23 this is a question of arity rather than of when effects occur. That neither `writeAt 0` nor `writeAt 0 "x"` does anything follows from the implementation conforming to condition (3) of `Σ ⊨ G` ([Semantics](08-Semantics.md)); D23 constrains the declared type, not the implementation.
+**Currying is still required.** `foreign writeAt : Int -> String -> IO Unit` demands a two-argument curried function, so a JavaScript `function writeAt(n, s)` must be bound as `(n) => (s) => …`. Under D23 this is a question of arity rather than of when effects occur. That neither `writeAt 0` nor `writeAt 0 "x"` does anything follows from the implementation conforming to condition (3) of `Σ ⊨ G` ([Semantics](../03-Typed-Core/06-Semantics.md)); D23 constrains the declared type, not the implementation.
 
 ### Uncurried FFI
 
-To avoid a chain of closures, PureScript uses `Fn2` through `Fn10`. The equivalent in Dawn is a family of n-argument function types, which are manifest intrinsics of `Base.Function.Uncurried` rather than part of `Prim` ([Prim and Base](16-Prim.md)).
+To avoid a chain of closures, PureScript uses `Fn2` through `Fn10`. The equivalent in Dawn is a family of n-argument function types, which are manifest intrinsics of `Base.Function.Uncurried` rather than part of `Prim` ([Prim and Base](02-Prim-and-Base.md)).
 
 **The family takes no effect row.** Since `runFn2`'s result arrow must also be pure, admitting `Fn2 a b ρ c` would make `runFn2 : Fn2 a b ρ c -> a -> b -{ρ}-> c` undeclarable.
 
@@ -180,7 +180,7 @@ foreign Base.Array.length      : forall a. Array a -> Int
 foreign Base.Array.unsafeIndex : forall a. Array a -> Int -> a
 ```
 
-A `Base` signature mentions only `Prim` types and portable manifest intrinsics, so no leaf here takes a `List`: `List` belongs to `Prelude`, and converting between the two is `Data.Array` ([Prim and Base](16-Prim.md)).
+A `Base` signature mentions only `Prim` types and portable manifest intrinsics, so no leaf here takes a `List`: `List` belongs to `Prelude`, and converting between the two is `Data.Array` ([Prim and Base](02-Prim-and-Base.md)).
 
 On top of these leaves, `mapArray` is Dawn code, written in `Data.Array`.
 
@@ -219,7 +219,7 @@ Authors of alternative backends are consequently forced to reimplement FFI and t
 Dawn's policy:
 
 1. **Leaf operations only.** Control structures are written in the language.
-2. **Keep the ABI surface small, explicit, and versioned.** The ABI entries of `Base.*` are the FFI a backend implements, versioned and graded by profile ([Prim and Base](16-Prim.md)); everything else is Dawn code.
+2. **Keep the ABI surface small, explicit, and versioned.** The ABI entries of `Base.*` are the FFI a backend implements, versioned and graded by profile ([Prim and Base](02-Prim-and-Base.md)); everything else is Dawn code.
 3. **Do not depend on representation.** Types appearing in `foreign` declarations should be restricted to those with a declared ABI. Passing a `Record r` or a user-defined ADT raw fixes its representation for every backend.
 4. **Separate per-backend implementations.** A `foreign` declaration — a name and a type — lives in the module; implementations are per-backend artifacts. Adding a backend must not require editing modules.
 
@@ -236,7 +236,7 @@ nonrec eqInt : Record ( eq : Int -> Int -> Boolean ) = …
 
 An attribute **has no meaning for the Core type checker**, which ignores attributes entirely.
 
-Attributes exist so that a resolver can search for declarations carrying one. They must therefore be persisted in a compiled module's interface and be queryable from elaborators in other modules ([Elaboration](10-Elaboration.md)).
+Attributes exist so that a resolver can search for declarations carrying one. They must therefore be persisted in a compiled module's interface and be queryable from elaborators in other modules ([Elaboration](../02-Surface-Language/01-Elaboration.md)).
 
 The namespace of attributes and the syntax of their values are decided by libraries. The compiler carries a string key and a structured value, nothing more.
 
@@ -297,17 +297,17 @@ The join point context is empty. Join points do not cross a function boundary, a
   Σ_ty = Σ_Prim ∪ Σ_ABI(M) ∪ Σ_imp ∪ { all of the above }
 ```
 
-`Σ_Prim` is the signature of `Prim` ([Prim and Base](16-Prim.md)), which no module imports and every module may name. `Σ_ABI(M)` is what the ABI manifest supplies to `M` itself, empty for every module it does not name, and the manifest names `Base.*` modules and the target namespaces it describes, and no others; a module holding a manifest intrinsic needs its own entries in scope before its declarations are collected.
+`Σ_Prim` is the signature of `Prim` ([Prim and Base](02-Prim-and-Base.md)), which no module imports and every module may name. `Σ_ABI(M)` is what the ABI manifest supplies to `M` itself, empty for every module it does not name, and the manifest names `Base.*` modules and the target namespaces it describes, and no others; a module holding a manifest intrinsic needs its own entries in scope before its declarations are collected.
 
-Core names are fully qualified, so nothing here can collide the way an unqualified name would: a module declaring `Int` contributes `Main.Int`, which is a different entry from `Prim.Int` and shadows it in no way. What the union does require is that **`Prim` be a reserved module name**, so that no module can supply a second `Prim.Int` — a rival `Base.Int.add` is excluded by package resolution instead, since no property of a Core module distinguishes one ([Prim and Base](16-Prim.md)); that a module declare no name twice within one namespace, as it must anyway; and that an entry arriving through two import paths be the same entry, which it is, since a name belongs to the module that declares it.
+Core names are fully qualified, so nothing here can collide the way an unqualified name would: a module declaring `Int` contributes `Main.Int`, which is a different entry from `Prim.Int` and shadows it in no way. What the union does require is that **`Prim` be a reserved module name**, so that no module can supply a second `Prim.Int` — a rival `Base.Int.add` is excluded by package resolution instead, since no property of a Core module distinguishes one ([Prim and Base](02-Prim-and-Base.md)); that a module declare no name twice within one namespace, as it must anyway; and that an entry arriving through two import paths be the same entry, which it is, since a name belongs to the module that declares it.
 
 Under `Σ_ty` the interiors are checked and the signature extended. This stage does not depend on order.
 
-A type constructor entry is **intrinsic** or **data**. Nothing adds a constructor to an intrinsic entry, and `switchCtor` requires a data one ([Typing Rules](07-Typing-Rules.md)).
+A type constructor entry is **intrinsic** or **data**. Nothing adds a constructor to an intrinsic entry, and `switchCtor` requires a data one ([Typing Rules](../03-Typed-Core/05-Typing-Rules.md)).
 
-An intrinsic entry carries a **canonical-value class** — literal, function, record, variant, or opaque — which says how a value of that type is built and what may examine one. Rules consult it rather than the entry's origin ([Prim and Base](16-Prim.md)).
+An intrinsic entry carries a **canonical-value class** — literal, function, record, variant, or opaque — which says how a value of that type is built and what may examine one. Rules consult it rather than the entry's origin ([Prim and Base](02-Prim-and-Base.md)).
 
-**No declaration produces an intrinsic entry.** `data` and `newtype` produce data entries, `foreign` declares a value and not a type, and the surface has no third form. An intrinsic reaches `Σ` either as part of `Σ_Prim`, which the compiler holds, or through the ABI manifest, which a compiler and its backends implement together; the module it then belongs to is under `Base`, or under a target namespace the manifest names, and is imported like any other ([Prim and Base](16-Prim.md)).
+**No declaration produces an intrinsic entry.** `data` and `newtype` produce data entries, `foreign` declares a value and not a type, and the surface has no third form. An intrinsic reaches `Σ` either as part of `Σ_Prim`, which the compiler holds, or through the ABI manifest, which a compiler and its backends implement together; the module it then belongs to is under `Base`, or under a target namespace the manifest names, and is imported like any other ([Prim and Base](02-Prim-and-Base.md)).
 
 ```text
   Σ_ty ⊢ each constructor type Ctor : forall k̄. forall (ā : κ̄). τ̄ -> T ā  is well formed

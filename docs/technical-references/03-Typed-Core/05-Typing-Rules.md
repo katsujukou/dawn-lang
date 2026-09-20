@@ -3,7 +3,7 @@
 ## Contexts
 
 ```text
-Σ ::= global signature                         (kind schemes: 03-Kinds-and-Types)
+Σ ::= global signature                         (kind schemes: §3.1 Kinds and Types)
         type constructors   T : forall k̄. κ
         data constructors   Ctor : forall k̄. σ   (with owning type, tag, arity, field types)
         effect declarations E (ā : κ̄) { op : σ }
@@ -39,7 +39,7 @@ The distinction between `Σ` and `Γ` is the most basic.
 
 `Γ` is a sequence of local bindings. It grows on entering `λ`, `Λ`, or `let` and shrinks on leaving. It is ordered, and later entries may refer to earlier ones: `Γ, a : Type, x : a` is meaningful while the reverse order is not.
 
-**`Γ, C` requires `C` to be satisfiable.** Writing it is a check and not only an extension: a constraint that contradicts itself, such as `k ∉ ( k : τ )`, forms no context, and no rule may assume one. Entailment reads `Γ` as a set of atomic facts about row variables and has no rule for an inconsistent context ([Rows](04-Rows.md)), so a context admitting one would let a term be typed from a premise nothing discharges.
+**`Γ, C` requires `C` to be satisfiable.** Writing it is a check and not only an extension: a constraint that contradicts itself, such as `k ∉ ( k : τ )`, forms no context, and no rule may assume one. Entailment reads `Γ` as a set of atomic facts about row variables and has no rule for an inconsistent context ([Rows](02-Rows.md)), so a context admitting one would let a term be typed from a premise nothing discharges.
 
 The distinction is also the unit of **separate compilation**. `Σ` is what a module's interface publishes for other modules; `Γ` never crosses a module boundary. That only `Σ` carries kind schemes follows from instantiation occurring only when a declaration is referenced.
 
@@ -163,7 +163,7 @@ merge : forall (r : Row Type). forall (s : Row Type).
         r # s => Record r -> Record s -> Record ( r ⊎ s )
 ```
 
-`merge` is a term constructor and not a global name, so that type describes the rule rather than declaring anything ([Prim and Base](16-Prim.md)).
+`merge` is a term constructor and not a global name, so that type describes the rule rather than declaring anything ([Prim and Base](../06-Modules/02-Prim-and-Base.md)).
 
 `r # s` is a `C => τ`, not a dictionary argument, and disappears at run time.
 
@@ -228,7 +228,7 @@ The explicitness is the price of D8. The elaborator inserts it, so an author doe
   ────────────────────────             ────────────────────────────────────────────
   Γ;Δ;Ω ⊢ leaf e : τ ! ρ               Γ;Δ;Ω ⊢ bind x = o in dt : τ ! ρ
 
-  Ω ⊢ o : T σ̄       T is a data type, not an intrinsic one (16-Prim)
+  Ω ⊢ o : T σ̄       T is a data type, not an intrinsic one (§6.2 Prim and Base)
   each Ctor_i is a constructor of T, Ctor_i : forall ā. τ̄_i -> T ā
   the Ctor_i are distinct
   each i: Γ;Δ; Ω ∪ { o ! Ctor_i . j ↦ τ_ij[ā := σ̄] } ⊢ dt_i : τ ! ρ
@@ -258,7 +258,7 @@ The explicitness is the price of D8. The elaborator inserts it, so an author doe
   Γ;Δ;Ω ⊢ guard e dt_1 dt_2 : τ ! ρ
 
   Γ ⊢ ρ ≡ ( Partial | ρ' )    Γ ⊢ τ : Type
-  ──────────────────────────────────────────────────  (derived; see 05-Effects)
+  ──────────────────────────────────────────────────  (derived; see §3.3 Effects)
   Γ;Δ;Ω ⊢ fail : τ ! ρ
 ```
 

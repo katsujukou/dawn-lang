@@ -222,7 +222,7 @@ warn            : Diagnostic -> Elab Unit
 
 `transact` supports trying candidates transactionally. A rollback restores `Ψ`, the constraint set, the queues, and any terms constructed.
 
-`declsWithAttr` supports finding declarations that carry an attribute. It must work across modules, which is why attributes are persisted in a compiled interface ([Modules](09-Modules.md)).
+`declsWithAttr` supports finding declarations that carry an attribute. It must work across modules, which is why attributes are persisted in a compiled interface ([Modules](../06-Modules/01-Modules.md)).
 
 `localConstraints` exposes row constraints to elaborators, so that a derive mechanism working over rows can consult which Lacks constraints are already assumed.
 

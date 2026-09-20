@@ -90,7 +90,7 @@ v0.1 **accepts this as a known gap**, under three conditions.
 
 1. **Failure is loud and specific.** A second resumption raises a dedicated run-time error, comparable to OCaml 5's `Continuation_already_resumed`. It must not be undefined behaviour and must not silently produce a wrong result.
 2. **A static best-effort check is performed.** Detecting multiple resumption is undecidable in general, since `k` can be stored and called in a loop, but the **syntactically evident** cases are detectable: a clause that mentions `k` more than once, or passes `k` to another function, warns at compile time. Most accidents are caught there, leaving the run-time check as a backstop.
-3. **Closing the gap is a requirement for v1.0**, recorded in [Open Questions](14-Open-Questions.md).
+3. **Closing the gap is a requirement for v1.0**, recorded in [Open Questions](../07-Open-Questions/01-Open-Questions.md).
 
 The routes to closing it appear in the table above: full CPS conversion on JavaScript, or a cloning primitive entering the Wasm stack-switching proposal. Making the reference semantics target-parameterized is a third possibility, but it would mean the same Core has different meanings on different backends, which conflicts with the backend independence of Mid IR.
 
@@ -148,7 +148,7 @@ A constructor spine is already a value, saturated or not, so it needs no unfoldi
 
 `G` holds values, whereas a `nonrec` declaration admits any pure expression. The two are connected by **evaluating right-hand sides at link time**.
 
-The order mirrors the three stages of declaration checking ([Modules](09-Modules.md)). Type checking collects every constructor, operation, and `foreign` into `Σ_decl` before checking any value declaration, so a `nonrec` may legitimately refer to a `foreign` or a constructor that appears later in the text. Initialization must therefore populate those first, or such a module would stall.
+The order mirrors the three stages of declaration checking ([Modules](../06-Modules/01-Modules.md)). Type checking collects every constructor, operation, and `foreign` into `Σ_decl` before checking any value declaration, so a `nonrec` may legitimately refer to a `foreign` or a constructor that appears later in the text. Initialization must therefore populate those first, or such a module would stall.
 
 ```text
   G_Prim = the data constructors of Prim, which is Prim.Unit alone
@@ -167,7 +167,7 @@ The order mirrors the three stages of declaration checking ([Modules](09-Modules
     rec { x̄ : σ̄ = v̄ }     G_{i+1} = G_i, M.x_1 : σκ_1 = v_1, …, M.x_n : σκ_n = v_n
 ```
 
-`G_Prim` mirrors `Σ_Prim` on the value side ([Prim and Base](16-Prim.md)). `Prim` is not imported, so without it a `Prim.Unit` occurring in the module would have nothing to unfold to, and condition (1) of `Σ ⊨ G` would fail. The implementations the runtime ABI is obliged to supply arrive with the imports, since the module that declares them is imported like any other.
+`G_Prim` mirrors `Σ_Prim` on the value side ([Prim and Base](../06-Modules/02-Prim-and-Base.md)). `Prim` is not imported, so without it a `Prim.Unit` occurring in the module would have nothing to unfold to, and condition (1) of `Σ ⊨ G` would fail. The implementations the runtime ABI is obliged to supply arrive with the imports, since the module that declares them is imported like any other.
 
 A `rec` group installs **every entry at once, with the right-hand sides themselves**. Guardedness makes each `v_i` a value already, so nothing is evaluated, and a recursive reference inside `v_i` is `M.x_j [[κ̄]]`, an ordinary global name resolved by the lookup rule. No local recursive closure is involved, and each `v_i` keeps the kind binder `k̄_i` under which it was checked.
 
@@ -183,11 +183,11 @@ A failure of this kind is **not an effect**. It is not intercepted by `handle`, 
 
 Reduction therefore relates a term to a configuration, `G ⊢ e → c`, where `c` is a term or a fault. The rule propagating a fault out of an evaluation context appears with the contexts below.
 
-**Which entries may fault, and on which inputs, belongs to the `Base` ABI specification** ([Open Questions](14-Open-Questions.md)) rather than to Core. Core only records that a fault is a possible outcome of applying a `foreign`.
+**Which entries may fault, and on which inputs, belongs to the `Base` ABI specification** ([Open Questions](../07-Open-Questions/01-Open-Questions.md)) rather than to Core. Core only records that a fault is a possible outcome of applying a `foreign`.
 
 ### Conformance of the global environment
 
-A `foreign` declaration's type is trusted ([Modules](09-Modules.md)), and D23 constrains only the **arrows appearing in that type**. It says nothing about whether the implementation returns what it claims, performs effects behind Core's back, or terminates. Those are obligations on the implementation, and the properties below depend on them, so they are stated rather than assumed.
+A `foreign` declaration's type is trusted ([Modules](../06-Modules/01-Modules.md)), and D23 constrains only the **arrows appearing in that type**. It says nothing about whether the implementation returns what it claims, performs effects behind Core's back, or terminates. Those are obligations on the implementation, and the properties below depend on them, so they are stated rather than assumed.
 
 ```text
 Σ ⊨ G   holds when
@@ -242,7 +242,7 @@ A `foreign` returns a value of its instantiated result type, and what shape that
 | Result type | The value `δ_f` returns |
 | --- | --- |
 | a data type | a constructor spine |
-| an intrinsic type | the canonical form of `Σ(T)`'s class ([Prim and Base](16-Prim.md)) |
+| an intrinsic type | the canonical form of `Σ(T)`'s class ([Prim and Base](../06-Modules/02-Prim-and-Base.md)) |
 
 The second row covers more than one case. A `foreign` whose result is `Int` returns a literal, one whose result is a function type returns a function value — `foreign make : forall a. a` instantiated at `Int -> Int` does exactly that, below — and one whose result is a `Record` returns `{}` or an `extend`. Only the `intrinsic opaque` class is left without a form of its own.
 
@@ -254,7 +254,7 @@ The second row covers more than one case. A `foreign` whose result is `Int` retu
   Γ;Δ ⊢ opaque ω [τ] : τ ! ρ
 ```
 
-The premise names the **canonical-value class** `Σ` records of `T` ([Prim and Base](16-Prim.md)), not merely that `T` is intrinsic. Admitting any intrinsic type here would admit `opaque ω [Boolean]`, and a `guard` would then meet a value that is neither `true` nor `false`; the same argument applies to `Record` against `select` and to `Function` against application. Progress holds class by class, and this is the premise that keeps it so.
+The premise names the **canonical-value class** `Σ` records of `T` ([Prim and Base](../06-Modules/02-Prim-and-Base.md)), not merely that `T` is intrinsic. Admitting any intrinsic type here would admit `opaque ω [Boolean]`, and a `guard` would then meet a value that is neither `true` nor `false`; the same argument applies to `Record` against `select` and to `Function` against application. Progress holds class by class, and this is the premise that keeps it so.
 
 **The payload is what distinguishes one opaque value from another.** Two `IO Unit` values obtained from different foreign applications are different values, and a form carrying only `τ` could not say so.
 
@@ -533,7 +533,7 @@ Substituting in `bind` **before** the recursive step is what allows a later `gua
 
 `θ(o)` follows the projection path of the occurrence, which involves no computation. `switchKey` looks through any `weaken` wrapping the value to find the key actually injected.
 
-Local totality ([Terms and Matching](06-Terms-and-Matching.md)) guarantees that one case always applies, so `match` never gets stuck.
+Local totality ([Terms and Matching](04-Terms-and-Matching.md)) guarantees that one case always applies, so `match` never gets stuck.
 
 `guard` is the only sequential test; every `switch*` is a single dispatch, so the written order of its branches has no influence.
 
@@ -589,13 +589,13 @@ The two sides of the boundary carry different kinds of obligation, and conflatin
 
 | | Established by |
 | --- | --- |
-| A `foreign` type is honest about where effects may appear in its arrows | D23, checked syntactically ([Modules](09-Modules.md)) |
+| A `foreign` type is honest about where effects may appear in its arrows | D23, checked syntactically ([Modules](../06-Modules/01-Modules.md)) |
 | A `foreign` implementation constructs a value and performs nothing | `Σ ⊨ G` condition (3) above, a conformance obligation on the backend |
 | An `IO` value is executed, and executed once per execution of the value containing it | the runtime ABI |
 
 That `Js.Console.log s` defers its effect therefore rests on the second row, not the first. D23 makes the declaration incapable of *claiming* to be effect-free while sitting on an effectful arrow; it cannot make an implementation behave.
 
-Placing execution outside Core keeps the trusted core free of world state and keeps the reduction relation a closed, deterministic system. The cost is that the ABI must be specified separately before a program can be run end to end ([Open Questions](14-Open-Questions.md)).
+Placing execution outside Core keeps the trusted core free of world state and keeps the reduction relation a closed, deterministic system. The cost is that the ABI must be specified separately before a program can be run end to end ([Open Questions](../07-Open-Questions/01-Open-Questions.md)).
 
 ## Erasure
 
@@ -624,7 +624,7 @@ A variant value loses its `weaken` wrappers, so an erased `switchKey` dispatches
 
 ## Properties
 
-The following are stated as the properties the implementation is expected to have. They are not proved here. [Implementation Plan](15-Implementation-Plan.md) describes how each becomes a property test.
+The following are stated as the properties the implementation is expected to have. They are not proved here. [Implementation Plan](../01-Introduction/04-Implementation-Plan.md) describes how each becomes a property test.
 
 Every property assumes `Σ ⊨ G`. Without it the global environment may supply an ill-typed definition or a `δ_f` that returns the wrong thing, and no property of the reduction relation can hold.
 
