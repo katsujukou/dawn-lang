@@ -36,7 +36,7 @@ import Prim as P
 
 import Dawn.Compiler.TypedCore.Check (CheckError(..), CheckFailure, Env, JoinInfo, check, envOf, infer, isFunVal, isValueForm)
 import Dawn.Compiler.TypedCore.Context (Context, assume, bindKindVars, bindTyVar, emptyContext, kindVarInScope, lookupTyVar)
-import Dawn.Compiler.TypedCore.Declare (DeclError(..), DeclFailure, checkTyConEntries, collectTypes, declare, initialSignature)
+import Dawn.Compiler.TypedCore.Declare (DeclError(..), DeclFailure, checkEffectEntries, checkTyConEntries, collectTypes, declare, initialSignature)
 import Dawn.Compiler.TypedCore.Decl (AttrField, AttrValue(..), Attribute, CtorDecl, DataDecl, Decl(..), declAnnotation, EffectDecl, Export(..), ForeignDecl, Module, OpDecl, ValueBinding)
 import Dawn.Compiler.TypedCore.Entailment (AtomicFacts, DecomposeError(..), addAssumption, decompose, entails, noFacts)
 import Dawn.Compiler.TypedCore.Equality (constraintEquiv, rowEquiv, typeEquiv)

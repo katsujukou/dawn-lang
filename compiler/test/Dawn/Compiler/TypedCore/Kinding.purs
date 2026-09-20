@@ -176,6 +176,21 @@ spec = describe "TypedCore.Kinding" do
       kindOf rowProducingSig emptyContext (record (TApp (TCon (tyCon "MkRow") []) int))
         `shouldEqual` Left (ResultNotType (KRow RowType))
 
+  describe "what a type is built from" do
+    it "refuses a constructor the signature does not declare" do
+      kindOf primSignature emptyContext (TCon (tyCon "Ghost") [])
+        `shouldEqual` Left (UndeclaredTyCon (tyCon "Ghost"))
+
+    it "refuses an application whose head takes no argument" do
+      let int' = TCon intTy []
+      kindOf primSignature emptyContext (TApp int' int')
+        `shouldEqual` Left (AppliedNonConstructor int')
+
+    it "refuses a row operator over something that is not a row" do
+      let int' = TCon intTy []
+      kindOf primSignature emptyContext (TRowUnion int' int')
+        `shouldEqual` Left (NotARowKind int' KType)
+
   describe "instantiation" do
     it "substitutes the kind written at the use site" do
       kindOf sig emptyContext (TApp (proxy [ KType ]) int)

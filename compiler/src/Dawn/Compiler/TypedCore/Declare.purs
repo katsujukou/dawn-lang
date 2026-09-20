@@ -14,6 +14,7 @@ module Dawn.Compiler.TypedCore.Declare
   , DeclFailure
   , initialSignature
   , checkTyConEntries
+  , checkEffectEntries
   , collectTypes
   , declare
   ) where
@@ -30,7 +31,7 @@ import Dawn.Compiler.TypedCore.Kinding (KindError, checkKind, producesType, quan
 import Dawn.Compiler.TypedCore.Name (EffName, Ident, KindVar, ModuleName, OpName, Qualified(..), TyName)
 import Dawn.Compiler.TypedCore.Prim (asFunction, primModule, primSignature, pureFn)
 import Dawn.Compiler.TypedCore.Row (nf)
-import Dawn.Compiler.TypedCore.Signature (CtorInfo, Signature, TyConInfo(..), ValueInfo, tyConKind)
+import Dawn.Compiler.TypedCore.Signature (CtorInfo, EffectInfo, Signature, TyConInfo(..), ValueInfo, tyConKind)
 import Dawn.Compiler.TypedCore.Term (DecisionTree(..), Expr(..), Handler)
 import Dawn.Compiler.TypedCore.Type (RowEntry(..), TyBinder, Type(..), TypeScheme)
 import Data.Array as Array
@@ -80,6 +81,12 @@ data DeclError
   | IllTyped CheckError
   -- | A malformed type constructor entry, which no declaration produces.
   | TyConEntryError (Qualified TyName) KindError
+  -- | The same for an effect entry, which no declaration produced either.
+  | EffectEntryError (Qualified EffName) KindError
+  -- | An effect entry keying an operation under a name other than the one its
+  -- | declaration carries, as the key and the declared name. The table is keyed
+  -- | by the declared name, so no declaration produces one.
+  | OperationNameMismatch (Qualified EffName) OpName OpName
   -- | Two parts of an assembled signature carry different entries under one
   -- | name. A name belongs to the module that declares it, so an entry reaching
   -- | one name by several import paths is the same entry; differing ones mean
@@ -102,6 +109,7 @@ initialSignature :: P.Array Signature -> Either DeclError Signature
 initialSignature parts = do
   sig <- foldM merge primSignature parts
   checkTyConEntries sig
+  checkEffectEntries sig
   pure sig
 
 -- | Two parts of a signature, agreeing wherever they meet.
@@ -156,6 +164,43 @@ checkTyConEntries sig =
 
   named name = case _ of
     Left err -> Left (TyConEntryError name err)
+    Right value -> Right value
+
+-- | Every effect entry is what an `effect` declaration would have produced.
+-- |
+-- | The counterpart of `checkTyConEntries`, and it exists for the same reason:
+-- | an entry derived from a declaration is well formed by construction, while
+-- | one arriving through an assembled interface is checked here. What is
+-- | re-checked is what the declaration rules ask of it — the parameters and an
+-- | operation's own binders at a quantifiable kind (D24), the argument and the
+-- | resumption type at `Type`, and every type variable in scope.
+-- |
+-- | An effect constructor binds no kind variable, so the context starts from
+-- | the parameters alone (D3).
+checkEffectEntries :: Signature -> Either DeclError Unit
+checkEffectEntries sig =
+  traverse_ entryOk (Map.toUnfoldable sig.effects :: P.Array (Tuple (Qualified EffName) EffectInfo))
+  where
+  entryOk (Tuple name info) = do
+    named name (traverse_ (\binder -> quantifiableKind emptyContext binder.kind) info.params)
+    traverse_ (operationOk name info)
+      (Map.toUnfoldable info.operations :: P.Array (Tuple OpName OpDecl))
+
+  -- The table is keyed by the name each operation declares, which is what a
+  -- declaration produces and what `Σ(E).op` is looked up by. An entry keying
+  -- one name to a declaration carrying another would answer a lookup with a
+  -- signature belonging to something else.
+  operationOk name info (Tuple key op) = do
+    when (key /= op.name) (Left (OperationNameMismatch name key op.name))
+    named name do
+      let ctx = paramContext [] info.params
+      traverse_ (\binder -> quantifiableKind ctx binder.kind) op.tyBinders
+      let inner = foldl (\acc binder -> bindTyVar acc binder.name binder.kind) ctx op.tyBinders
+      checkKind sig inner op.argument KType
+      checkKind sig inner op.resumesWith KType
+
+  named name = case _ of
+    Left err -> Left (EffectEntryError name err)
     Right value -> Right value
 
 -- | `Σ_ty`, the kinds of the type constructors and effect constructors a module

@@ -234,6 +234,11 @@ spec = describe "TypedCore.Check" do
         `shouldEqual` Right
           (TForall (TyVar "a") KType (pureFn (TVar (TyVar "a")) (maybeOf (TVar (TyVar "a")))))
 
+    it "refuses a global instantiated at a number of kinds its scheme does not bind" do
+      -- `Main.Just` binds none, so `[[Type]]` is an arity error
+      inferAt TRowEmpty (Global unit (value "Just") [ KType ])
+        `shouldEqual` Left (GlobalKindArgCount (value "Just") 0 1)
+
     it "synthesizes a lambda at the ambient row" do
       inferAt consoleRow (lam "n" int (var "n"))
         `shouldEqual` Right (fn int consoleRow int)
@@ -268,6 +273,34 @@ spec = describe "TypedCore.Check" do
       inferAt TRowEmpty
         (ConstraintApp unit (ConstraintLam unit constraint (lam "n" int (var "n"))))
         `shouldEqual` Right (pureFn int int)
+
+    it "refuses a global the signature does not declare" do
+      inferAt TRowEmpty (Global unit (value "ghost") [])
+        `shouldEqual` Left (UndeclaredGlobal (value "ghost"))
+
+    it "refuses an application of something that is not a function" do
+      inferAt TRowEmpty (App unit oneLit oneLit) `shouldEqual` Left (NotAFunction int)
+
+    it "refuses a type application of something that is not a forall" do
+      inferAt TRowEmpty (TyApp unit oneLit int) `shouldEqual` Left (NotAForall int)
+
+    it "refuses a constraint application of something that carries no constraint" do
+      inferAt TRowEmpty (ConstraintApp unit oneLit) `shouldEqual` Left (NotConstrained int)
+
+    it "refuses a selection from something that is not a record" do
+      inferAt TRowEmpty (RecordSelect unit nameKey oneLit) `shouldEqual` Left (NotARecord int)
+
+    it "refuses a weakening of something that is not a variant" do
+      inferAt TRowEmpty (VariantWeaken unit nameKey int oneLit)
+        `shouldEqual` Left (NotAVariant int)
+
+    it "refuses a constraint abstraction checked against another constraint" do
+      let
+        assumed = Lacks nameKey TRowEmpty
+        expected = Lacks cacheKey TRowEmpty
+        abstraction = ConstraintLam unit assumed oneLit
+      checkAt TRowEmpty (TConstrained expected int) abstraction
+        `shouldEqual` Left (ConstraintMismatch expected assumed)
 
   describe "records" do
     it "selects what was extended" do
@@ -336,6 +369,16 @@ spec = describe "TypedCore.Check" do
       -- says the operation resumes with an `Int`
       inferAt cacheRow (Perform unit cacheKey (OpName "get") [] primUnit)
         `shouldEqual` Right int
+
+    it "refuses an operation the effect does not declare" do
+      inferAt consoleRow (Perform unit (EffectKey consoleEff) (OpName "shout") [] primUnit)
+        `shouldEqual` Left (UnknownOperation consoleEff (OpName "shout"))
+
+    it "refuses a number of type arguments the operation does not bind" do
+      -- `Console.log` binds none, so supplying one is an arity error
+      inferAt consoleRow
+        (Perform unit (EffectKey consoleEff) (OpName "log") [ int ] (Lit unit (LitString "x")))
+        `shouldEqual` Left (OperationTypeArgCount (OpName "log") 0 1)
 
   describe "handlers" do
     it "removes the element the handler writes" do
@@ -484,6 +527,50 @@ spec = describe "TypedCore.Check" do
         )
         `shouldEqual` Right int
 
+    it "refuses a jump to a name no letjoin bound" do
+      inferAt TRowEmpty (Jump unit (JoinName "j") [ oneLit ])
+        `shouldEqual` Left (UnboundJoin (JoinName "j"))
+
+    it "refuses a jump supplying the wrong number of arguments" do
+      inferAt TRowEmpty
+        ( LetJoin unit (JoinName "j") [ { name: Ident "n", ty: int } ] int (var "n")
+            (Jump unit (JoinName "j") [ oneLit, oneLit ])
+        )
+        `shouldEqual` Left (JoinArity (JoinName "j") 1 2)
+
+    it "refuses a jump outside tail position" do
+      -- the argument of an application is not a tail position, and a jump is a
+      -- transfer of control rather than something that returns a value
+      inferIn applied TRowEmpty
+        ( LetJoin unit (JoinName "j") [] int oneLit
+            (App unit (var "f") (Jump unit (JoinName "j") []))
+        )
+        `shouldEqual` Left (JumpNotInTail (JoinName "j"))
+
+    it "refuses a jump from under a lambda, the join context being discarded there" do
+      -- a join point is a transfer within one function activation, so it does
+      -- not cross a function boundary
+      inferAt TRowEmpty
+        ( LetJoin unit (JoinName "j") [] int oneLit
+            (App unit (lam "u" unitT (Jump unit (JoinName "j") [])) primUnit)
+        )
+        `shouldEqual` Left (UnboundJoin (JoinName "j"))
+
+  describe "recursive bindings" do
+    it "refuses a right-hand side that is not a function value" do
+      -- under strict evaluation `letrec x = x` has no meaning
+      inferAt TRowEmpty
+        (LetRec unit [ { name: Ident "x", ty: int, value: oneLit } ] (var "x"))
+        `shouldEqual` Left (NotAFunctionValue (Ident "x"))
+
+    it "accepts one that is" do
+      inferAt TRowEmpty
+        ( LetRec unit
+            [ { name: Ident "loop", ty: pureFn int int, value: lam "n" int (var "n") } ]
+            (var "loop")
+        )
+        `shouldEqual` Right (pureFn int int)
+
   describe "decision trees" do
     it "types the element of a record at a key" do
       -- a record carries one at every key of its row, so no branch establishes it
@@ -519,6 +606,57 @@ spec = describe "TypedCore.Check" do
       inferIn (env { context = bindVar emptyContext (Ident "m") (maybeOf int) }) TRowEmpty
         (Case unit [ var "m" ] tree)
         `shouldEqual` Right int
+
+    it "refuses an occurrence no dispatch established" do
+      -- what a constructor carries is known only under the dispatch that
+      -- selected it, so the path reaches `Ω` through `switchCtor` and nowhere
+      -- else
+      let
+        occurrence = OccField (OccScrutinee 0) (value "Just") 0
+        tree = Bind (Ident "y") occurrence (Leaf (var "y"))
+      inferIn (env { context = bindVar emptyContext (Ident "m") (maybeOf int) }) TRowEmpty
+        (Case unit [ var "m" ] tree)
+        `shouldEqual` Left (UnknownOccurrence occurrence)
+
+    it "refuses a branch naming a constructor of another type" do
+      let
+        tree = SwitchCtor (OccScrutinee 0) [ { ctor: value "Plain", tree: Leaf oneLit } ] Nothing
+      inferIn (env { context = bindVar emptyContext (Ident "m") (maybeOf int) }) TRowEmpty
+        (Case unit [ var "m" ] tree)
+        `shouldEqual` Left (NotAConstructorOf maybeTy (value "Plain"))
+
+    it "refuses a dispatch naming one branch twice" do
+      let
+        branch = { ctor: value "Nothing", tree: Leaf oneLit }
+        tree = SwitchCtor (OccScrutinee 0) [ branch, branch ] (Just (Leaf oneLit))
+      inferIn (env { context = bindVar emptyContext (Ident "m") (maybeOf int) }) TRowEmpty
+        (Case unit [ var "m" ] tree)
+        `shouldEqual` Left DuplicateBranch
+
+    it "refuses a literal dispatch over a type whose values are not literals" do
+      let tree = SwitchLit (OccScrutinee 0) [] (Leaf oneLit)
+      inferIn (env { context = bindVar emptyContext (Ident "m") (maybeOf int) }) TRowEmpty
+        (Case unit [ var "m" ] tree)
+        `shouldEqual` Left (NotALiteralType (maybeOf int))
+
+    it "refuses a dispatch over an occurrence with no constructor at its head" do
+      -- a scrutinee at a quantified type variable is the case: nothing says
+      -- which constructors it has
+      let tree = SwitchCtor (OccScrutinee 0) [] (Just (Leaf oneLit))
+      inferIn (env { context = bindVar emptyContext (Ident "z") (TVar (TyVar "a")) }) TRowEmpty
+        (Case unit [ var "z" ] tree)
+        `shouldEqual` Left (UndispatchableOccurrence (OccScrutinee 0) (TVar (TyVar "a")))
+
+    it "refuses a synthesized tree that reaches no leaf" do
+      -- a type with no constructors exhausts vacuously, so the dispatch is
+      -- locally total and has no leaf to take a type from. Checking the same
+      -- tree against a type given from outside would succeed: this is a limit
+      -- of synthesis rather than a rule of the system
+      let tree = SwitchCtor (OccScrutinee 0) [] Nothing
+      inferIn (env { context = bindVar emptyContext (Ident "v") (TCon (Qualified main (TyName "Void")) []) })
+        TRowEmpty
+        (Case unit [ var "v" ] tree)
+        `shouldEqual` Left NoLeaf
 
     it "refuses a dispatch that is not locally total" do
       let

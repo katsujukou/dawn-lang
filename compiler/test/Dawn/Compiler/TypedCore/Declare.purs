@@ -9,14 +9,15 @@ import Prelude
 
 import Prim as P
 
-import Dawn.Compiler.TypedCore (Constraint(..), CtorDecl, Decl(..), EffName(..), Export(..), Expr(..), Ident(..), Kind(..), KindVar(..), Literal(..), Module, ModuleName(..), OpName(..), Qualified(..), RowElemKind(..), RowEntry(..), RowKey(..), Symbol(..), TyName(..), TyVar(..), Type(..), TypeScheme, monoScheme)
-import Dawn.Compiler.TypedCore.Declare (DeclError(..), checkTyConEntries, declare, initialSignature)
+import Dawn.Compiler.TypedCore (Constraint(..), CtorDecl, Decl(..), EffName(..), OpDecl, TyBinder, Export(..), Expr(..), Ident(..), Kind(..), KindVar(..), Literal(..), Module, ModuleName(..), OpName(..), Qualified(..), RowElemKind(..), RowEntry(..), RowKey(..), Symbol(..), TyName(..), TyVar(..), Type(..), TypeScheme, monoScheme)
+import Dawn.Compiler.TypedCore.Declare (DeclError(..), checkEffectEntries, checkTyConEntries, declare, initialSignature)
 import Dawn.Compiler.TypedCore.Kinding (KindError(..), Synthesized(..))
 import Dawn.Compiler.TypedCore.Prim (fn, intTy, ioTy, primSignature, pureFn, recordTy, stringTy, unitTy)
 import Dawn.Compiler.TypedCore.Signature (CanonicalClass(..), Signature, TyConInfo(..), emptySignature, lookupCtor)
 import Data.Either (Either(..))
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
+import Data.Tuple (Tuple(..))
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 
@@ -114,6 +115,31 @@ withEntry :: TyConInfo -> Signature
 withEntry info =
   primSignature { types = Map.insert (tyCon "Weird") info primSignature.types }
 
+-- | `Σ_Prim` with one effect entry of the kind no declaration produces.
+withEffectEntry :: P.Array TyBinder -> P.Array OpDecl -> Signature
+withEffectEntry params operations =
+  primSignature
+    { effects = Map.singleton (Qualified main (EffName "Weird"))
+        { params, operations: Map.fromFoldable (map (\op -> Tuple op.name op) operations) }
+    }
+
+weirdEff :: Qualified EffName
+weirdEff = Qualified main (EffName "Weird")
+
+-- | An effect entry whose operation table keys one name to a declaration
+-- | carrying another, which no declaration produces.
+keyedAs :: OpName -> OpDecl -> Signature -> Signature
+keyedAs key op sig =
+  sig
+    { effects = Map.insert weirdEff
+        { params: [], operations: Map.singleton key op }
+        sig.effects
+    }
+
+-- | `op : Unit ->* Unit`, the shape the entry tests vary one part of.
+plainOp :: OpDecl
+plainOp = { name: OpName "op", tyBinders: [], argument: unitTy', resumesWith: unitTy' }
+
 spec :: Spec Unit
 spec = describe "TypedCore.Declare" do
   describe "the signature a compiler builds" do
@@ -165,6 +191,56 @@ spec = describe "TypedCore.Declare" do
           { values = Map.singleton (value "T") { scheme: monoScheme int, isForeign: false } }
       map (const unit) (initialSignature [ ctorPart, valuePart ])
         `shouldEqual` Left (ConflictingValue (value "T"))
+
+  describe "the effect entries a compiler assembles" do
+    it "accepts an entry a declaration would have produced" do
+      checkEffectEntries (withEffectEntry [] [ plainOp ]) `shouldEqual` Right unit
+
+    it "checks the table where it is assembled" do
+      map (const unit) (initialSignature [ withEffectEntry [ { name: TyVar "a", kind: KEffect } ] [] ])
+        `shouldEqual` Left (EffectEntryError weirdEff (NotQuantifiable KEffect))
+
+    it "refuses an operation keyed under a name other than the one it declares" do
+      -- the table is keyed by the declared name, so a lookup of `foo` would
+      -- otherwise answer with the signature of something else
+      let mismatched = withEffectEntry [] [] # keyedAs (OpName "foo") plainOp
+      checkEffectEntries mismatched
+        `shouldEqual` Left (OperationNameMismatch weirdEff (OpName "foo") (OpName "op"))
+
+    it "refuses a parameter at a kind that cannot be quantified" do
+      checkEffectEntries (withEffectEntry [ { name: TyVar "a", kind: KEffect } ] [])
+        `shouldEqual` Left (EffectEntryError weirdEff (NotQuantifiable KEffect))
+
+    it "refuses an operation binder at a kind that cannot be quantified" do
+      let op = plainOp { tyBinders = [ { name: TyVar "b", kind: KEffect } ] }
+      checkEffectEntries (withEffectEntry [] [ op ])
+        `shouldEqual` Left (EffectEntryError weirdEff (NotQuantifiable KEffect))
+
+    it "refuses an argument that is not a type" do
+      let op = plainOp { argument = TRowEmpty }
+      checkEffectEntries (withEffectEntry [] [ op ])
+        `shouldEqual` Left (EffectEntryError weirdEff (ExpectedKind TRowEmpty KType AnyRow))
+
+    it "refuses a resumption type that is not a type" do
+      let op = plainOp { resumesWith = TRowEmpty }
+      checkEffectEntries (withEffectEntry [] [ op ])
+        `shouldEqual` Left (EffectEntryError weirdEff (ExpectedKind TRowEmpty KType AnyRow))
+
+    it "refuses a type variable the entry does not bind" do
+      let op = plainOp { argument = TVar (TyVar "ghost") }
+      checkEffectEntries (withEffectEntry [] [ op ])
+        `shouldEqual` Left (EffectEntryError weirdEff (UnboundTyVar (TyVar "ghost")))
+
+    it "admits a type variable the parameters bind" do
+      let op = plainOp { argument = TVar (TyVar "a") }
+      checkEffectEntries (withEffectEntry [ { name: TyVar "a", kind: KType } ] [ op ])
+        `shouldEqual` Right unit
+
+    it "admits one the operation binds for itself" do
+      let
+        op = plainOp
+          { tyBinders = [ { name: TyVar "b", kind: KType } ], argument = TVar (TyVar "b") }
+      checkEffectEntries (withEffectEntry [] [ op ]) `shouldEqual` Right unit
 
   describe "data declarations" do
     it "derives the type of a constructor" do
@@ -427,6 +503,19 @@ spec = describe "TypedCore.Declare" do
     it "refuses a module named Prim" do
       let m = (moduleOf []) { name = ModuleName "Prim" }
       verdict m `shouldEqual` Left (ReservedModuleName (ModuleName "Prim"))
+
+    it "refuses one effect name twice" do
+      verdict (moduleOf [ consoleDecl, consoleDecl ])
+        `shouldEqual` Left (DuplicateEffect consoleEff)
+
+    it "refuses two different effect entries under one name" do
+      let
+        parts =
+          [ withEffectEntry [] [ plainOp ]
+          , withEffectEntry [ { name: TyVar "a", kind: KType } ] [ plainOp ]
+          ]
+      map (const unit) (initialSignature parts)
+        `shouldEqual` Left (ConflictingEffect weirdEff)
 
     it "refuses one type name twice" do
       let
