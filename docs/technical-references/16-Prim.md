@@ -7,7 +7,7 @@ drawing.
 | Layer | What it holds | Settled by |
 | --- | --- | --- |
 | `Prim` | the types and constructors the rules of Core name | the Core specification |
-| `Base.*` | the versioned runtime ABI surface a backend implements | the ABI specification and backend conformance profiles |
+| `Base.*` | the versioned runtime contract: portable primitive protocols, and the ABI surface a backend implements | the ABI specification and backend conformance profiles |
 | `Prelude` | the default portable environment: foundational types, classes, ordinary names, and syntax macros | the standard library specification |
 | portable libraries — `Data.*`, `Effect.*`, and the rest | portable API written in Dawn over `Prelude` and, where necessary, `Base.*` | their library packages |
 
@@ -58,6 +58,7 @@ are written. Otherwise `Prelude` and a library downstream of it each need the ot
 | `Maybe` | `Prelude` | `Data.Maybe` |
 | `Array` | `Base.Array`, being a manifest intrinsic | `Data.Array`, with literal syntax from `Prelude` |
 | `Partial` | `Prelude` | handlers, wherever they are written |
+| `Console`, `LiftIO` | `Base.Effect.*`, being standard primitive capabilities | target adapters, and the terminal interpreter |
 | `State`, `Except` | the `Effect.*` library declaring each | the same library |
 
 `Array` is the case where the split does visible work. The `[ … ]` macro belongs
@@ -272,14 +273,26 @@ Within a module, declaring one name twice in a namespace is ill-formed as it is 
 
 **Linking includes `Prim`.** The global environment `G` of [Semantics](08-Semantics.md) is built from `G_Prim`, which holds the data constructors of `Prim` — `Prim.Unit` alone — beside the definitions of the imported modules. `Prim` is not among those imports, so without `G_Prim` a `Prim.Unit` in the module would have nothing to unfold to and condition (1) of `Σ ⊨ G` would fail.
 
-## The Base ABI surface
+## The Base runtime contract
 
-`Base.*` is the versioned runtime ABI surface. Its declarations are ordinary
-`foreign` declarations, checked where they are written like any other (D23,
-well-kindedness); what sets the layer apart is the obligation on the other
-side, that a backend supply a conforming implementation for each.
+`Base.*` is the versioned runtime contract: the portable primitive protocols and
+the common ABI surface. It holds two kinds of thing, and only one of them is
+something a backend implements.
+
+| Kind | What it is | Implemented by a backend |
+| --- | --- | --- |
+| **ABI entry** | a `foreign` whose implementation a backend supplies, `Base.IO.bind` and the arithmetic among them | **yes**, where a profile designates it |
+| **protocol** | a standard primitive capability, declared as an effect and nothing more | no; it names operations and has no implementation to supply |
+
+An ABI entry is an ordinary `foreign` declaration, checked where it is written
+like any other (D23, well-kindedness); what sets it apart is the obligation on
+the other side. A protocol is an ordinary `effect` declaration, and an effect
+declares operations without implementations ([Effects](05-Effects.md)) — there
+is nothing for a backend to supply, and what interprets one is ordinary Dawn
+code.
 
 ```text
+-- ABI entries
 Base.Int.add                 : Int -> Int -> Int
 Base.Int.sub                 : Int -> Int -> Int
 Base.String.length           : String -> Int
@@ -289,11 +302,86 @@ Base.Array.unsafeIndex       : forall a. Array a -> Int -> a
 Base.Function.Uncurried.Fn2  : Type -> Type -> Type -> Type   -- manifest intrinsic
 Base.IO.pure                 : forall a. a -> IO a
 Base.IO.bind                 : forall a b. IO a -> (a -> IO b) -> IO b
+
+-- protocols
+Base.Effect.Console          effect Console where log : String ->* Unit
+Base.Effect.LiftIO           effect LiftIO  where liftIO : forall a. IO a ->* a
 ```
 
 **A public `IO`, `Int`, or `Array` module is ordinary Dawn code over `Base.*`.**
 Nothing obliges `Prelude` or a portable library to expose these names as they
 stand; the layers above are where a portable API is shaped.
+
+### Where a capability meets its target
+
+A protocol says what a capability offers; a target says how the thing is done.
+Three responsibilities fall to three places, and keeping them apart is what lets
+a program name a capability without naming a target.
+
+| | Holds | Written by |
+| --- | --- | --- |
+| `Base.Effect.Console` | the meaning of the capability and the types of its operations | the ABI specification |
+| `Js.Console.log` | a native leaf constructing an `IO` value on one target | that target, as an ABI entry |
+| `Js.Effect.Console` | the adapter joining the two | ordinary Dawn code |
+
+`Js.Console.log` is an ABI entry like any other, and a **target** one: what
+obliges a backend to supply it is its own backend manifest, not a `Base` profile.
+There is no third manifest: a backend manifest names the target it builds for
+and records what it implements on both sides, the `Base` ABI entries and the
+entries of its own target root alike. What differs is only the grading — a
+`Base` entry may arrive through a profile, while a target entry is recorded one
+by one, there being no profile over a target root.
+
+The adapter is an ordinary handler: it removes `Console` from the row and
+performs `LiftIO` in its place, carrying the `IO` value the native leaf built.
+
+```text
+Js.Effect.Console.lowerConsole
+  : forall (e : Row Effect). forall (a : Type).
+    Console ∉ e => LiftIO ∉ e =>
+    ( Unit -{ ( Console | e ) }-> a ) -{ ( LiftIO | e ) }-> a
+  = Λ (e : Row Effect). Λ (a : Type).
+      Λ (_ : Console ∉ e). Λ (_ : LiftIO ∉ e).
+        λ (thunk : Unit -{ ( Console | e ) }-> a).
+          handle ( ( openEff [( LiftIO )] thunk ) Prim.Unit ) with
+            { handles Console
+            ; return (x : a) -> x
+            ; log (msg : String, k : Unit -{ ( LiftIO | e ) }-> a) ->
+                let _ : Unit =
+                      perform LiftIO.liftIO [Unit]
+                        ( ( openEff [( LiftIO | e )] Js.Console.log ) msg ) in
+                k Prim.Unit
+            }
+```
+
+**Two widenings are needed, and neither is optional** (D8). The `handle` removes
+`Console` from a body standing at `( Console, LiftIO | e )`, while the thunk
+arrives at `( Console | e )`, so `openEff [( LiftIO )]` is what makes the two
+agree. And `Js.Console.log` has pure arrows while the clause is typed at
+`( LiftIO | e )`, so it is widened for the same reason arithmetic is in
+[Examples](13-Examples.md).
+
+**An adapter stays effect-polymorphic.** It performs another operation rather
+than executing anything, so no native action is sequenced there and no closed
+row is called for. Only the terminal stage, interpreting `LiftIO` into `IO`,
+builds with `Base.IO.bind` and is therefore closed ([Effects](05-Effects.md)).
+
+```text
+{ Console, FileSystem, … }        capabilities a program names
+       │  target adapters, ordinary Dawn code
+       ▼
+{ LiftIO }                        one capability carrying an IO value
+       │  the terminal interpreter, which takes a closed row
+       ▼
+IO                                a value, inert until executed
+       │  D25
+       ▼
+the runtime ABI executes it
+```
+
+Nothing obliges a capability to travel this route. A handler interpreting
+`Console` straight into `IO` is equally ordinary, and takes a closed row for the
+same reason the terminal stage does.
 
 ### Implementation is what varies, not meaning
 
@@ -308,8 +396,10 @@ neither may do is let that choice reach the result of a `Base` operation.
 
 ### Profiles
 
-Obligation is graded, and a **profile** is a named set of `Base` entries a
-backend undertakes to implement.
+Obligation is graded, and a **profile** is a named set of `Base` **ABI entries**
+a backend undertakes to implement. A protocol is never among them: an effect
+declaration has no implementation for a backend to supply, so nothing about it
+is graded.
 
 | Profile | Contents |
 | --- | --- |
@@ -335,14 +425,16 @@ more precise than saying that programs using arithmetic happen not to run.
 
 `standard` is the profile the condition above names, so which entries it holds
 moves with the version of `Prelude` rather than being fixed once. A portable
-library reaching past `Prelude` to a `Base` entry the backend manifest records
+library reaching past `Prelude` to a `Base` ABI entry the backend manifest records
 nowhere — neither in a profile it claims nor among the entries it adds — is what
 target validation rejects.
 
 ### Where obligation is recorded
 
-**Not in `Σ`.** `Σ` answers a question about type checking, and for a `Base`
-entry the answer is the same as for any other `foreign`.
+**Not in `Σ`.** `Σ` records every declaration: a foreign scheme for an ABI
+entry, an effect declaration for a protocol. What it does not record is which
+profile an entry belongs to, or what a backend implements. For type checking a
+`Base` ABI entry the answer is the same as for any other `foreign`.
 
 ```text
 Base.Int.add : Int -> Int -> Int        declared type, trusted
@@ -374,8 +466,10 @@ profiles:
 
 ```text
 -- backend manifest, for one small target
+target:             Js
 implements profile: core-runtime
 implements also:    Base.Int.add, Base.Int.sub
+                    Js.Console.log
 ```
 
 Three stages then divide the work, and none of them duplicates another.
@@ -383,14 +477,17 @@ Three stages then divide the work, and none of them duplicates another.
 | Stage | What it establishes |
 | --- | --- |
 | type checking | the declared type is well-kinded and every arrow is pure (D23) |
-| target validation | the backend manifest records every `Base` entry the program uses, through a profile it claims or beyond them, and every target root the program imports is the selected target's |
+| target validation | the backend manifest records every entry the program uses — each `Base` ABI entry, through a profile it claims or beyond them, and each target ABI entry — and every target root the program imports is the selected target's |
 | linking | `Σ ⊨ G` condition (3): each `δ_f` returns what it claims, performs nothing observable to Core, and terminates ([Semantics](08-Semantics.md)) |
 
 **An unsupported entry is rejected at target validation, not at run time.** A
-program naming a `Base` entry the chosen backend does not implement fails to
-build, rather than building and faulting where the call is reached.
+program naming an ABI entry the chosen backend does not implement fails to
+build, rather than building and faulting where the call is reached. This holds
+of a target entry as of a `Base` one: importing `Js.Console` says which target
+the program wants, and whether `Js.Console.log` is among what that backend
+implements is a separate question, settled at the same stage.
 
-### What the ABI specification must fix per entry
+### What the ABI specification must fix per ABI entry
 
 - **Observable meaning**, in terms that name no backend
 - **Whether it may fault**, and on which inputs ([Semantics](08-Semantics.md))

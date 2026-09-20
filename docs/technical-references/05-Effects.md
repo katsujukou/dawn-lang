@@ -406,17 +406,19 @@ Operations are **declared without implementations**. Writing `effect Console whe
 An `IO` value may flow through ordinary code — an operation may take one, and a caller may hand one over — but **executing one happens only in the runtime ABI**, applied to `main` (D25). Interpreters are where such a value is ordinarily built and sequenced; nothing about the type confines it to them.
 
 ```purescript
+-- Base.Effect.Console declares the capability
 effect Console where
   log :: String ->* Unit
 
-foreign primLog :: String -> IO Unit
+-- Js.Console supplies the native leaf for one target
+foreign log :: String -> IO Unit
 
 runConsoleIO :: forall a. (Unit -> a / {| Console |}) -> IO a
 runConsoleIO thunk =
   handle (thunk ()) with
     { handles Console
     ; return x        -> Base.IO.pure x
-    ; log (s, k)      -> Base.IO.bind (primLog s) (\_ -> k ())
+    ; log (s, k)      -> Base.IO.bind (Js.Console.log s) (\_ -> k ())
     }
 ```
 
@@ -424,7 +426,7 @@ The clause's result type is already `IO a`, so `Base.IO.bind` composes there nat
 
 ### Where the trust boundary lies
 
-The type of `primLog`, `String -> IO Unit`, says only that some IO occurs. That it performs only console IO is not guaranteed by the type; an implementation that deleted files would still type check.
+The type of `Js.Console.log`, `String -> IO Unit`, says only that some IO occurs. That it performs only console IO is not guaranteed by the type; an implementation that deleted files would still type check.
 
 This is a trust boundary that **should be accepted**. That is what FFI is, and [Modules](09-Modules.md) already declares it.
 
@@ -443,7 +445,7 @@ effect LiftIO where
 
 ```purescript
 program :: Unit / {| LiftIO |}
-program = liftIO (primLog "Hello")           -- builds an IO value; writes nothing
+program = liftIO (Js.Console.log "Hello")    -- builds an IO value; writes nothing
 
 main :: IO Unit
 main =

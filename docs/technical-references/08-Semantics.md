@@ -593,7 +593,7 @@ The two sides of the boundary carry different kinds of obligation, and conflatin
 | A `foreign` implementation constructs a value and performs nothing | `Σ ⊨ G` condition (3) above, a conformance obligation on the backend |
 | An `IO` value is executed, and executed once per execution of the value containing it | the runtime ABI |
 
-That `primLog s` defers its effect therefore rests on the second row, not the first. D23 makes the declaration incapable of *claiming* to be effect-free while sitting on an effectful arrow; it cannot make an implementation behave.
+That `Js.Console.log s` defers its effect therefore rests on the second row, not the first. D23 makes the declaration incapable of *claiming* to be effect-free while sitting on an effectful arrow; it cannot make an implementation behave.
 
 Placing execution outside Core keeps the trusted core free of world state and keeps the reduction relation a closed, deterministic system. The cost is that the ABI must be specified separately before a program can be run end to end ([Open Questions](14-Open-Questions.md)).
 

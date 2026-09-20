@@ -141,6 +141,8 @@ The heading of each group names the step of the plan that the group belongs to.
 | A handler omitting an operation of `E` | Rejected. `handle` removes the keyed element, so an operation without a clause has nowhere to go |
 | A handler clause that does not respect an operation's own `forall b̄` | Rejected |
 | An interpreter sequencing a native action before resuming a continuation, the residual row not being closed | Rejected. That continuation is `a -{ρ}-> IO r`, which the pure arrow of `Base.IO.bind` does not take. Abandoning the continuation, or resuming it first, is admitted |
+| A pure global applied where the ambient row is not empty, as `Base.Int.add n 1` is under `( State Int | e )` | Rejected without `openEff`. An application requires the arrow to carry the ambient row and containment is never inserted (D8); currying makes it one `openEff` per argument consumed |
+| A data constructor applied in a handler clause, the row outside the handle not being empty | Rejected for the same reason. Constructor arrows are pure by declaration, so one is widened like any other pure global. An instantiation such as `Prelude.Nothing [a]` needs no widening, applying nothing |
 | `handle (perform E.op v) with h` at ambient row `()` | **Accepted.** Effect safety is not "no operation is performed" |
 | A `λ` whose body jumps to a join point bound outside it | Rejected. The join point context is discarded at a lambda |
 | A `letjoin` in argument position whose definition jumps to itself | Accepted. The root of a definition is in tail position wherever the `letjoin` stands |
@@ -157,7 +159,7 @@ The heading of each group names the step of the plan that the group belongs to.
 | --- | --- |
 | `foreign log : String -{( Console )}-> Unit` | Rejected. An effectful result arrow would let the effect bypass a handler |
 | `foreign mapImpl : ( a -{e}-> b ) -> …` | Rejected. An effectful argument arrow would leak the calling convention across the boundary |
-| `foreign primLog : String -> IO Unit` | Accepted. This is the shape every real-world leaf takes |
+| `foreign Js.Console.log : String -> IO Unit` | Accepted. This is the shape every real-world leaf takes |
 | `foreign use : Record ( cb : Int -{( Console )}-> Int ) -> Unit` | Rejected. An arrow reaches the boundary through the payload of a row as readily as through an argument |
 | A `foreign` whose only effectful arrow stands inside a constraint | Accepted. A constraint is an erased proposition and carries no value across the boundary |
 | An effect with an operation `liftIO : forall a. IO a ->* a` | **Accepted.** `perform` carries the opaque `IO` to the handler without executing it. What it costs is the granularity of the capability, not soundness |

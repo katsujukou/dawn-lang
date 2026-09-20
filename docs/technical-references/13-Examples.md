@@ -152,16 +152,26 @@ nonrec Example.tick
   = Λ (e : Row Effect). Λ (_ : State ∉ e).
       λ (_ : Unit).
         let n : Int  = perform State.get [] Prim.Unit in
-        let _ : Unit = perform State.put [] ( Base.Int.add n 1 ) in
+        let _ : Unit = perform State.put []
+                         ( ( openEff [( State Int | e )]
+                               ( ( openEff [( State Int | e )] Base.Int.add ) n ) ) 1 ) in
         n
 ```
+
+**The arithmetic is widened before it is applied.** `Base.Int.add` has pure
+arrows while the ambient row here is `( State Int | e )`, and an application
+requires the two to agree; containment is never inserted (D8). Currying is what
+makes it two `openEff`s rather than one, since each argument consumes an arrow
+of its own. An author writes none of this, the elaborator inserting it ([Typing
+Rules](07-Typing-Rules.md)).
 
 A handler for `Partial`, interpreting abortion into `Maybe`:
 
 ```text
+-- Prelude declares `Maybe`, whose identity it owns
 data Maybe (a : Type) = Nothing | Just a
-  -- Example.Nothing : forall (a : Type). Maybe a            tag 0, arity 0
-  -- Example.Just    : forall (a : Type). a -> Maybe a       tag 1, arity 1
+  -- Prelude.Nothing : forall (a : Type). Maybe a            tag 0, arity 0
+  -- Prelude.Just    : forall (a : Type). a -> Maybe a       tag 1, arity 1
 
 nonrec Example.toMaybe
   : forall (e : Row Effect). Partial ∉ e => forall (a : Type).
@@ -170,13 +180,18 @@ nonrec Example.toMaybe
       λ (thunk : Unit -{ ( Partial | e ) }-> a).
         handle ( thunk Prim.Unit ) with
           { handles Partial
-          ; return (x : a) -> Example.Just [a] x
+          ; return (x : a) -> ( openEff [e] ( Prelude.Just [a] ) ) x
           ; abort [b] (_ : Unit, k : b -{e}-> Maybe a) ->
-              Example.Nothing [a]
+              Prelude.Nothing [a]
           }
 ```
 
 Abandoning `k` and returning `Nothing` realizes the abortion. The effect of PureScript's `Partial` class is obtained with no class mechanism at all.
+
+A data constructor has pure arrows by declaration, so `Prelude.Just` is widened
+in the return clause for the same reason the arithmetic is above: the clause is
+typed at `e`, the row outside the handle. `Prelude.Nothing [a]` needs no
+widening, being an instantiation rather than an application.
 
 In surface syntax:
 
@@ -194,6 +209,6 @@ runConsoleIO thunk =
   handle (thunk ()) with
     { handles Console
     ; return x        -> Base.IO.pure x
-    ; log (s, k)      -> Base.IO.bind (primLog s) (\_ -> k ())
+    ; log (s, k)      -> Base.IO.bind (Js.Console.log s) (\_ -> k ())
     }
 ```

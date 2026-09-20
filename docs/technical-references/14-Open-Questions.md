@@ -98,7 +98,7 @@ What the surface writes for such an instance, and how ordinary code names one, i
 
 ## FFI and backends
 
-**Writing the `Base` ABI specification.** The shape is settled: `Base.*` is the versioned ABI surface, obligation is graded by profile, and neither fact is recorded in `Σ` ([Prim and Base](16-Prim.md)). What remains is the content.
+**Writing the `Base` ABI specification.** The shape is settled: `Base.*` is the versioned runtime contract, its ABI entries are graded by profile while its protocols are not, and `Σ` records neither the grading nor what a backend implements ([Prim and Base](16-Prim.md)). What remains is the content.
 
 - **Which entries each `Base` module holds**, and the observable meaning of each, stated in terms that name no backend
 - **Which manifest intrinsic type constructors the ABI manifest supplies, portable and target alike.** `Base.Array.Array` and the uncurried families are intrinsic without being part of Core, so no declaration in any module can produce them. Each needs its opaque representation and its `foreign` operations fixed together

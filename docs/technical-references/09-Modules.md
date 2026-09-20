@@ -115,8 +115,8 @@ The kind scheme is normally empty. The Core type checker does not examine a `for
 A runtime-bearing position is anywhere a value passes through, the payload of a row element included: `Record ( cb : a -{ρ}-> b )` hands a callback across the boundary as an argument does. A constraint is excluded, being an erased proposition that carries no value; neither handler bypass nor a leaking calling convention can arise inside one.
 
 ```text
-foreign Console.primLog : String -> IO Unit             ← correct
-foreign Console.log     : String -{( Console )}-> Unit  ← not admitted
+foreign Js.Console.log : String -> IO Unit                 ← correct
+foreign Js.Console.log : String -{( Console )}-> Unit      ← not admitted
 ```
 
 The reason is soundness. `handle` intercepts only `perform`, whereas a `foreign` application calls the implementation directly. An effectful `foreign` would therefore let a handler remove the effect from the row while the actual effect **bypasses the handler's clauses**.
@@ -127,7 +127,7 @@ handle (log "x") with { handles Console ; … log (s,k) -> … }
 -- the type removes Console, yet the output never reaches the clause
 ```
 
-Returning `IO` closes this. `primLog s` merely **constructs a value** of type `IO Unit`; the effect occurs when the runtime executes the `IO` (D20). Note that D23 constrains the declared type, not the implementation: that `δ_primLog` actually does nothing when applied is a conformance obligation on the backend ([Semantics](08-Semantics.md)). Handleable effects travel only through `perform`, and native effects only through `IO`.
+Returning `IO` closes this. `Js.Console.log s` merely **constructs a value** of type `IO Unit`; the effect occurs when the runtime executes the `IO` (D20). Note that D23 constrains the declared type, not the implementation: that the implementation actually does nothing when applied is a conformance obligation on the backend ([Semantics](08-Semantics.md)). Handleable effects travel only through `perform`, and native effects only through `IO`.
 
 The same rule forbids effectful arrows on the argument side, for a different reason.
 
@@ -219,7 +219,7 @@ Authors of alternative backends are consequently forced to reimplement FFI and t
 Dawn's policy:
 
 1. **Leaf operations only.** Control structures are written in the language.
-2. **Keep the ABI surface small, explicit, and versioned.** `Base.*` is the set of FFI a backend implements, versioned and graded by profile ([Prim and Base](16-Prim.md)); everything else is Dawn code.
+2. **Keep the ABI surface small, explicit, and versioned.** The ABI entries of `Base.*` are the FFI a backend implements, versioned and graded by profile ([Prim and Base](16-Prim.md)); everything else is Dawn code.
 3. **Do not depend on representation.** Types appearing in `foreign` declarations should be restricted to those with a declared ABI. Passing a `Record r` or a user-defined ADT raw fixes its representation for every backend.
 4. **Separate per-backend implementations.** A `foreign` declaration — a name and a type — lives in the module; implementations are per-backend artifacts. Adding a backend must not require editing modules.
 
