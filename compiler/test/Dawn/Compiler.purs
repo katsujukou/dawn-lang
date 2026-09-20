@@ -10,6 +10,7 @@ import Test.Dawn.Compiler.TypedCore.Kinding as Kinding
 import Test.Dawn.Compiler.TypedCore.Row as Row
 import Test.Dawn.Compiler.Elaborate.Unify as Unify
 import Test.Dawn.Compiler.TypedCore.RowProperties as RowProperties
+import Test.Dawn.Compiler.TypedCore.EffectSlice as EffectSlice
 import Test.Dawn.Compiler.TypedCore.VerticalSlice as VerticalSlice
 import Test.Spec.Reporter (consoleReporter)
 import Test.Spec.Runner.Node (runSpecAndExitProcess)
@@ -22,5 +23,6 @@ main = runSpecAndExitProcess [ consoleReporter ] do
   Declare.spec
   Check.spec
   VerticalSlice.spec
+  EffectSlice.spec
   RowProperties.spec
   Unify.spec
