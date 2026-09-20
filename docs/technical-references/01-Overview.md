@@ -109,7 +109,7 @@ These serve as architecture tests as well as demonstrations.
 | Document | Content |
 | --- | --- |
 | [00-Notation](00-Notation.md) | Metavariables, sequences, symbols |
-| [02-Design-Decisions](02-Design-Decisions.md) | The numbered decisions D1–D25 |
+| [02-Design-Decisions](02-Design-Decisions.md) | The numbered decisions D1–D27 |
 | [03-Kinds-and-Types](03-Kinds-and-Types.md) | Names, kinds, types, kinding rules |
 | [04-Rows](04-Rows.md) | Row theory, normal form, entailment, surface syntax |
 | [05-Effects](05-Effects.md) | Effect rows, operations, handlers, `IO` |
@@ -123,6 +123,6 @@ These serve as architecture tests as well as demonstrations.
 | [13-Examples](13-Examples.md) | Worked examples in Core |
 | [14-Open-Questions](14-Open-Questions.md) | Questions deferred beyond v0.1 |
 | [15-Implementation-Plan](15-Implementation-Plan.md) | Order of implementation work |
-| [16-Prim](16-Prim.md) | What `Prim` holds, and which part of it Core names |
+| [16-Prim](16-Prim.md) | The four layers: what `Prim` holds, and what the `Base` ABI surface does |
 
 The numbers record the order the documents were written in rather than the order to read them in. [16-Prim](16-Prim.md) belongs beside [Modules](09-Modules.md).

@@ -146,13 +146,13 @@ The rule is syntactically checkable.
 
 ### Uncurried FFI
 
-To avoid a chain of closures, PureScript uses `Fn2` through `Fn10`. The equivalent in Dawn is a family of n-argument function types, which are ABI intrinsics of a standard library module rather than part of `Prim` ([Prim](16-Prim.md)).
+To avoid a chain of closures, PureScript uses `Fn2` through `Fn10`. The equivalent in Dawn is a family of n-argument function types, which are manifest intrinsics of `Base.Function.Uncurried` rather than part of `Prim` ([Prim and Base](16-Prim.md)).
 
 **The family takes no effect row.** Since `runFn2`'s result arrow must also be pure, admitting `Fn2 a b ρ c` would make `runFn2 : Fn2 a b ρ c -> a -> b -{ρ}-> c` undeclarable.
 
 ```text
-Fn2 : Type -> Type -> Type -> Type
-foreign runFn2 : forall a b c. Fn2 a b c -> a -> b -> c
+Base.Function.Uncurried.Fn2 : Type -> Type -> Type -> Type
+foreign Base.Function.Uncurried.runFn2 : forall a b c. Fn2 a b c -> a -> b -> c
 ```
 
 External effects are expressed, as everywhere else, by an `IO` result.
@@ -165,7 +165,7 @@ foreign primWriteAt : Fn2 Int String (IO Unit)
 
 **One family suffices.** PureScript needs `Data.Function.Uncurried.Fn2` for pure functions and `Effect.Uncurried.EffectFn2` for effectful ones; in Dawn `Fn2 a b (IO c)` covers the latter, because being uncurried and having effects are orthogonal.
 
-These are conventions between the standard library and backends, not part of Core. To Core, `Fn2` is an ordinary type constructor and `runFn2` an ordinary `foreign`.
+These belong to the ABI surface rather than to Core. To Core, `Fn2` is an ordinary type constructor and `runFn2` an ordinary `foreign`.
 
 ### FFI supplies leaf operations
 
@@ -176,18 +176,19 @@ The restrictions above follow from a single principle.
 `map`, `traverse`, and `fold` are control structures, not leaf operations. They are written in Dawn, and FFI supplies only pure components.
 
 ```text
-foreign Array.length      : forall a. Array a -> Int
-foreign Array.unsafeIndex : forall a. Array a -> Int -> a
-foreign Array.fromList    : forall a. List a -> Array a
+foreign Base.Array.length      : forall a. Array a -> Int
+foreign Base.Array.unsafeIndex : forall a. Array a -> Int -> a
 ```
 
-On top of these, `mapArray` is Dawn code.
+A `Base` signature mentions only `Prim` types and portable manifest intrinsics, so no leaf here takes a `List`: `List` belongs to `Prelude`, and converting between the two is `Data.Array` ([Prim and Base](16-Prim.md)).
+
+On top of these leaves, `mapArray` is Dawn code, written in `Data.Array`.
 
 ```purescript
 mapArray :: forall a b. (a -> b / {| ... |}) -> Array a -> Array b / {| ... |}
 ```
 
-It traverses with `unsafeIndex`, accumulates into a `List`, and converts with `fromList`. Should mutable arrays be wanted, their operations are declared as leaves returning `IO`, and `mapArray`'s type returns `IO` accordingly.
+It traverses with `unsafeIndex` and builds its result with the construction its own module provides. Should mutable arrays be wanted, their operations are declared as leaves returning `IO`, and `mapArray`'s type returns `IO` accordingly.
 
 Since `f` is called from the Dawn side, the lowering takes care of driving generators and **the calling convention never crosses the FFI boundary**.
 
@@ -196,10 +197,10 @@ This is the standard arrangement for a language with algebraic effects. Koka wri
 **What is lost is a fast path, not expressiveness.** Even when the effect row is empty, the Dawn loop runs rather than JavaScript's `Array.prototype.map`. A pure variant may be declared as a separate `foreign`, since all of its arrows are pure.
 
 ```text
-foreign Array.mapPure : forall a b. (a -> b) -> Array a -> Array b
+foreign Base.Array.mapPure : forall a b. (a -> b) -> Array a -> Array b
 ```
 
-Forcing authors to choose between the two is undesirable, so the intended resolution is for `mapArray` to be an elaboration macro that inspects the effect row and emits `Array.mapPure` when it resolves to empty and the Dawn loop otherwise. This is exactly the typed transformation that the metaprogramming design provides, and it needs only the Phase B foundation. The equivalence of the two is asserted by the library, not derived by the compiler.
+Forcing authors to choose between the two is undesirable, so the intended resolution is for `mapArray` to be an elaboration macro that inspects the effect row and emits `Base.Array.mapPure` when it resolves to empty and the Dawn loop otherwise. This is exactly the typed transformation that the metaprogramming design provides, and it needs only the Phase B foundation. The equivalence of the two is asserted by the library, not derived by the compiler.
 
 ### Keeping the FFI surface small
 
@@ -218,11 +219,11 @@ Authors of alternative backends are consequently forced to reimplement FFI and t
 Dawn's policy:
 
 1. **Leaf operations only.** Control structures are written in the language.
-2. **Keep the primitive surface small, explicit, and versioned.** The standard library defines the set of FFI a backend must implement as a small versioned surface; everything else is Dawn code.
+2. **Keep the ABI surface small, explicit, and versioned.** `Base.*` is the set of FFI a backend implements, versioned and graded by profile ([Prim and Base](16-Prim.md)); everything else is Dawn code.
 3. **Do not depend on representation.** Types appearing in `foreign` declarations should be restricted to those with a declared ABI. Passing a `Record r` or a user-defined ADT raw fixes its representation for every backend.
 4. **Separate per-backend implementations.** A `foreign` declaration — a name and a type — lives in the module; implementations are per-backend artifacts. Adding a backend must not require editing modules.
 
-This is the same shape as the small trusted core. A small Core protects soundness against metaprograms; a **small primitive surface protects backend independence against FFI**. Only the adversary differs.
+This is the same shape as the small trusted core. A small Core protects soundness against metaprograms; a **small ABI surface protects backend independence against FFI**. Only the adversary differs.
 
 Of these, the Core type checker enforces only the first, through D23. The rest are conventions of the standard library and the build system.
 
@@ -296,17 +297,17 @@ The join point context is empty. Join points do not cross a function boundary, a
   Σ_ty = Σ_Prim ∪ Σ_ABI(M) ∪ Σ_imp ∪ { all of the above }
 ```
 
-`Σ_Prim` is the signature of `Prim` ([Prim](16-Prim.md)), which no module imports and every module may name. `Σ_ABI(M)` is what the primitive-surface manifest supplies to `M` itself, empty for every module it does not name; a module holding an ABI intrinsic needs its own entries in scope before its declarations are collected.
+`Σ_Prim` is the signature of `Prim` ([Prim and Base](16-Prim.md)), which no module imports and every module may name. `Σ_ABI(M)` is what the ABI manifest supplies to `M` itself, empty for every module it does not name, and the manifest names `Base.*` modules and the target namespaces it describes, and no others; a module holding a manifest intrinsic needs its own entries in scope before its declarations are collected.
 
-Core names are fully qualified, so nothing here can collide the way an unqualified name would: a module declaring `Int` contributes `Main.Int`, which is a different entry from `Prim.Int` and shadows it in no way. What the union does require is that **`Prim` be a reserved module name**, so that no module can supply a second `Prim.Int`; that a module declare no name twice within one namespace, as it must anyway; and that an entry arriving through two import paths be the same entry, which it is, since a name belongs to the module that declares it.
+Core names are fully qualified, so nothing here can collide the way an unqualified name would: a module declaring `Int` contributes `Main.Int`, which is a different entry from `Prim.Int` and shadows it in no way. What the union does require is that **`Prim` be a reserved module name**, so that no module can supply a second `Prim.Int` — a rival `Base.Int.add` is excluded by package resolution instead, since no property of a Core module distinguishes one ([Prim and Base](16-Prim.md)); that a module declare no name twice within one namespace, as it must anyway; and that an entry arriving through two import paths be the same entry, which it is, since a name belongs to the module that declares it.
 
 Under `Σ_ty` the interiors are checked and the signature extended. This stage does not depend on order.
 
 A type constructor entry is **intrinsic** or **data**. Nothing adds a constructor to an intrinsic entry, and `switchCtor` requires a data one ([Typing Rules](07-Typing-Rules.md)).
 
-An intrinsic entry carries a **canonical-value class** — literal, function, record, variant, or opaque — which says how a value of that type is built and what may examine one. Rules consult it rather than the entry's origin ([Prim](16-Prim.md)).
+An intrinsic entry carries a **canonical-value class** — literal, function, record, variant, or opaque — which says how a value of that type is built and what may examine one. Rules consult it rather than the entry's origin ([Prim and Base](16-Prim.md)).
 
-**No declaration produces an intrinsic entry.** `data` and `newtype` produce data entries, `foreign` declares a value and not a type, and the surface has no third form. An intrinsic reaches `Σ` either as part of `Σ_Prim`, which the compiler holds, or through the manifest of the primitive surface, which a compiler and its backends implement together; the module it then belongs to is imported like any other ([Prim](16-Prim.md)).
+**No declaration produces an intrinsic entry.** `data` and `newtype` produce data entries, `foreign` declares a value and not a type, and the surface has no third form. An intrinsic reaches `Σ` either as part of `Σ_Prim`, which the compiler holds, or through the ABI manifest, which a compiler and its backends implement together; the module it then belongs to is under `Base`, or under a target namespace the manifest names, and is imported like any other ([Prim and Base](16-Prim.md)).
 
 ```text
   Σ_ty ⊢ each constructor type Ctor : forall k̄. forall (ā : κ̄). τ̄ -> T ā  is well formed

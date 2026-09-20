@@ -7,12 +7,14 @@ The surface program:
 ```purescript
 module Main where
 
+import Base.Int
+
 data List a = Nil | Cons a (List a)
 
 sum :: List Int -> Int
 sum = case _ of
   Nil       -> 0
-  Cons x xs -> x + sum xs
+  Cons x xs -> Base.Int.add x (sum xs)
 
 result :: Int
 result = sum (Cons 1 (Cons 2 (Cons 3 Nil)))
@@ -23,7 +25,7 @@ The corresponding Core:
 ```text
 module Main where
 
-import Int
+import Base.Int
 
 data List (a : Type) = Nil | Cons a (List a)
   -- Main.Nil  : forall (a : Type). List a                    tag 0, arity 0
@@ -37,7 +39,7 @@ rec {
             Main.Nil  -> leaf 0
             Main.Cons -> bind x  = s0 ! Main.Cons . 0 in
                          bind ys = s0 ! Main.Cons . 1 in
-                         leaf (Int.add x (Main.sum ys))
+                         leaf (Base.Int.add x (Main.sum ys))
           }
 }
 
@@ -49,7 +51,7 @@ nonrec Main.result : Int
 
 Points to observe.
 
-- **No type class appears.** `+` is `Int.add : Int -> Int -> Int`. When `Semiring` arrives, this position holds `select add` applied to a dictionary instead, and the shape of Core is unchanged.
+- **No type class appears.** The addition is a direct call to `Base.Int.add : Int -> Int -> Int`, which is why the surface writes it out and imports `Base.Int` to reach it. `+` becomes available once `Prelude` provides a `Semiring` class and an operator alias for its method; this position then holds `select add` applied to a dictionary, and the shape of Core is unchanged.
 - Every effect row is `()`. Since `switchCtor` exhausts the constructors there is no `fail`, and no `Partial` effect.
 - The right-hand side of the `rec` group is a `λ`, satisfying guardedness.
 - Type abstraction and application appear in `Main.Cons [Int]`. CoreFn has no counterpart.
@@ -59,7 +61,7 @@ Points to observe.
 
 ## Rows
 
-A row-polymorphic merge. `merge` is a term constructor, so this is the shape of its rule rather than a declaration ([Prim](16-Prim.md)):
+A row-polymorphic merge. `merge` is a term constructor, so this is the shape of its rule rather than a declaration ([Prim and Base](16-Prim.md)):
 
 ```text
 merge : forall (r : Row Type). forall (s : Row Type).
@@ -150,7 +152,7 @@ nonrec Example.tick
   = Λ (e : Row Effect). Λ (_ : State ∉ e).
       λ (_ : Unit).
         let n : Int  = perform State.get [] Prim.Unit in
-        let _ : Unit = perform State.put [] ( Int.add n 1 ) in
+        let _ : Unit = perform State.put [] ( Base.Int.add n 1 ) in
         n
 ```
 
@@ -191,7 +193,7 @@ runConsoleIO :: forall a. (Unit -> a / {| Console |}) -> IO a
 runConsoleIO thunk =
   handle (thunk ()) with
     { handles Console
-    ; return x        -> IO.pure x
-    ; log (s, k)      -> IO.bind (primLog s) (\_ -> k ())
+    ; return x        -> Base.IO.pure x
+    ; log (s, k)      -> Base.IO.bind (primLog s) (\_ -> k ())
     }
 ```

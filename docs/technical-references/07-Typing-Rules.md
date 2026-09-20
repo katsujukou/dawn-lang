@@ -163,7 +163,7 @@ merge : forall (r : Row Type). forall (s : Row Type).
         r # s => Record r -> Record s -> Record ( r ⊎ s )
 ```
 
-`merge` is a term constructor and not a global name, so that type describes the rule rather than declaring anything ([Prim](16-Prim.md)).
+`merge` is a term constructor and not a global name, so that type describes the rule rather than declaring anything ([Prim and Base](16-Prim.md)).
 
 `r # s` is a `C => τ`, not a dictionary argument, and disappears at run time.
 

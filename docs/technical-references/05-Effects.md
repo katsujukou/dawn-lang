@@ -189,7 +189,7 @@ D8 contributes here: because rows do not widen automatically, an obligation cann
 
 A non-exhaustive pattern match produces a `Partial` effect (D10).
 
-`Partial` is an ordinary effect declaration in the standard library, not a builtin.
+`Partial` is an ordinary effect declaration of `Prelude`, not a builtin ([Prim and Base](16-Prim.md)).
 
 ```text
 effect Partial where
@@ -250,11 +250,11 @@ effect State s where
 tick :: Unit -> Int / {| State Int, ... |}
 tick _ =
   let n = get ()
-  put (n + 1)
+  put (Base.Int.add n 1)
   n
 ```
 
-`get ()` and `put (n + 1)` are ordinary applications; the elaborator turns them into `perform State.get [] Prim.Unit` and `perform State.put [] (…)`. From the author's side, calling an effectful function looks no different from calling a pure one.
+`get ()` and `put (Base.Int.add n 1)` are ordinary applications; the elaborator turns them into `perform State.get [] Prim.Unit` and `perform State.put [] (…)`. From the author's side, calling an effectful function looks no different from calling a pure one.
 
 Requiring `do` and `bind` for effects would restore at the level of syntax exactly the division that D7 removed from types: whether one passes a pure function or a `do` block to `map` would become a visible distinction, and D7's benefit would be lost.
 
@@ -319,14 +319,14 @@ Removing `IO` from the effect world dissolves the question. Effects are mutually
 IO : Type -> Type
 ```
 
-`IO a` is a **value** denoting a computation that returns an `a` when executed. It is an opaque primitive type, and `Prim` supplies only the minimum.
+`IO a` is a **value** denoting a computation that returns an `a` when executed. It is an opaque primitive type: `Prim` supplies the type constructor and `Base.IO` the two operations over it ([Prim and Base](16-Prim.md)).
 
 ```text
-foreign IO.pure : forall a. a -> IO a
-foreign IO.bind : forall a b. IO a -> (a -> IO b) -> IO b
+foreign Base.IO.pure : forall a. a -> IO a
+foreign Base.IO.bind : forall a b. IO a -> (a -> IO b) -> IO b
 ```
 
-**`IO.bind`'s continuation is a pure arrow**, unlike the effect-polymorphic `bind` of classical monads above, for two reasons.
+**`Base.IO.bind`'s continuation is a pure arrow**, unlike the effect-polymorphic `bind` of classical monads above, for two reasons.
 
 First, every arrow in a `foreign` type has an empty effect row (D23), so `( a -{f}-> IO b )` cannot be declared at all.
 
@@ -334,14 +334,14 @@ Second, the semantics would not hold. Deferring `k` until the `IO` is executed w
 
 ### Interpreters that sequence native actions take a closed row
 
-The consequence does not extend to every handler that returns `IO`. A closed row is required only when a **native `IO` action is sequenced before the continuation using `IO.bind`**.
+The consequence does not extend to every handler that returns `IO`. A closed row is required only when a **native `IO` action is sequenced before the continuation using `Base.IO.bind`**.
 
 With ambient row `e` and `k : τ -{e}-> IO a`:
 
 ```text
 k v                     : IO a ! e      resume synchronously, return that IO
-IO.pure x               : IO a ! e      abandon the continuation
-IO.bind act (\_ -> k v) : ill typed     ← IO.bind's second argument must be pure
+Base.IO.pure x               : IO a ! e      abandon the continuation
+Base.IO.bind act (\_ -> k v) : ill typed     ← Base.IO.bind's second argument must be pure
 ```
 
 Only the third fails, because `\_ -> k v` has effect `e`. The requirement is therefore a **library discipline** for terminal interpreters, not a typing restriction on `IO`-returning handlers in general.
@@ -351,7 +351,7 @@ Std.runConsoleIO
   : forall (a : Type). ( Unit -{ ( Console ) }-> a ) -> IO a
 ```
 
-With no `⊎ e`, the clause's `k : Unit -{()}-> IO a` is a pure arrow and composes with the pure `IO.bind`.
+With no `⊎ e`, the clause's `k : Unit -{()}-> IO a` is a pure arrow and composes with the pure `Base.IO.bind`.
 
 Expressiveness is unaffected. Handlers nest, and only the one stage that sequences native actions needs a closed row; in the standard library that stage is the outermost interpreter.
 
@@ -365,7 +365,7 @@ runConsoleIO :: forall a. (Unit -> a / {| Console |}) -> IO a
 main = runConsoleIO (\_ -> runState (\_ -> body) 0)
 ```
 
-A `Monad` instance is placed on `IO.bind` by the standard library. To Core, `IO` is an ordinary type constructor with no special status.
+A `Monad` instance is placed on `Base.IO.bind` by the standard library. To Core, `IO` is an ordinary type constructor with no special status.
 
 ### Uninterpreted effects are not executed
 
@@ -415,12 +415,12 @@ runConsoleIO :: forall a. (Unit -> a / {| Console |}) -> IO a
 runConsoleIO thunk =
   handle (thunk ()) with
     { handles Console
-    ; return x        -> IO.pure x
-    ; log (s, k)      -> IO.bind (primLog s) (\_ -> k ())
+    ; return x        -> Base.IO.pure x
+    ; log (s, k)      -> Base.IO.bind (primLog s) (\_ -> k ())
     }
 ```
 
-The clause's result type is already `IO a`, so `IO.bind` composes there naturally. **No lift of the form `IO a -> a / {| Console |}` is needed.**
+The clause's result type is already `IO a`, so `Base.IO.bind` composes there naturally. **No lift of the form `IO a -> a / {| Console |}` is needed.**
 
 ### Where the trust boundary lies
 
@@ -449,8 +449,8 @@ main :: IO Unit
 main =
   handle program with
     { handles LiftIO
-    ; return x        -> IO.pure x
-    ; liftIO (act, k) -> IO.bind act k
+    ; return x        -> Base.IO.pure x
+    ; liftIO (act, k) -> Base.IO.bind act k
     }
 ```
 
@@ -459,10 +459,10 @@ That clause keeps `k` and runs it after `act`, and it typechecks for the same re
 ```text
 act : IO a
 k   : a -> IO r          ← pure, because the residual row is closed
-IO.bind act k : IO r
+Base.IO.bind act k : IO r
 ```
 
-**A continuation-preserving interpreter that sequences `act` before `k` requires a closed residual row.** Were the row not closed, `k` would be `a -{ρ}-> IO r`, and `IO.bind` takes a pure arrow, so a native action cannot be deferred behind effects that are still to be interpreted. A clause that abandons `k`, or that resumes it before sequencing anything, is under no such condition. That discipline is what excludes the unsound case, not a restriction on the signature.
+**A continuation-preserving interpreter that sequences `act` before `k` requires a closed residual row.** Were the row not closed, `k` would be `a -{ρ}-> IO r`, and `Base.IO.bind` takes a pure arrow, so a native action cannot be deferred behind effects that are still to be interpreted. A clause that abandons `k`, or that resumes it before sequencing anything, is under no such condition. That discipline is what excludes the unsound case, not a restriction on the signature.
 
 D20 keeps `IO` out of the effect world. It does not exclude an effect whose *operation* takes an `IO`: `LiftIO` is an ordinary key in the row, removed by an ordinary handler, and no rule of the type system makes `Console` a part of it.
 

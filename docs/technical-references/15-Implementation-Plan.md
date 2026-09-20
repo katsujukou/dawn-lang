@@ -30,7 +30,7 @@ Two constraints must be respected even though the constructs they concern belong
 
 ## Notes on step 6
 
-The set of FFI the backend must implement is the first version of the primitive surface ([Open Questions](14-Open-Questions.md)). The longer it is deferred, the more the standard library settles into a shape that depends on FFI, so the minimum version should be fixed while writing this backend.
+The set of FFI the backend must implement is `dawn-base-0.1`, the first version of the `Base` ABI surface ([Open Questions](14-Open-Questions.md)). The longer it is deferred, the more the standard library settles into a shape that depends on FFI, so it should be fixed while writing this backend.
 
 ## Testing the properties instead of proving them
 
@@ -140,7 +140,7 @@ The heading of each group names the step of the plan that the group belongs to.
 | `switchKey` default | The occurrence is refined to the residual `Variant r'`, not left at the original type |
 | A handler omitting an operation of `E` | Rejected. `handle` removes the keyed element, so an operation without a clause has nowhere to go |
 | A handler clause that does not respect an operation's own `forall b̄` | Rejected |
-| An interpreter sequencing a native action before resuming a continuation, the residual row not being closed | Rejected. That continuation is `a -{ρ}-> IO r`, which the pure arrow of `IO.bind` does not take. Abandoning the continuation, or resuming it first, is admitted |
+| An interpreter sequencing a native action before resuming a continuation, the residual row not being closed | Rejected. That continuation is `a -{ρ}-> IO r`, which the pure arrow of `Base.IO.bind` does not take. Abandoning the continuation, or resuming it first, is admitted |
 | `handle (perform E.op v) with h` at ambient row `()` | **Accepted.** Effect safety is not "no operation is performed" |
 | A `λ` whose body jumps to a join point bound outside it | Rejected. The join point context is discarded at a lambda |
 | A `letjoin` in argument position whose definition jumps to itself | Accepted. The root of a definition is in tail position wherever the `letjoin` stands |
@@ -179,7 +179,7 @@ The heading of each group names the step of the plan that the group belongs to.
 | `id [Int -> Int] f 0` with `foreign id : forall a. a -> a` | `δ_id(f)` runs and returns `f`, and `0` is applied to the result. Testing the substituted type instead absorbs `0` and calls `δ_id(f, 0)` |
 | `foreign clock : IO Time`, an arity-zero foreign | Steps to `δ_clock()`. The spine is saturated as soon as it is formed |
 | `M.f v` for a unary foreign | Steps. The final value argument must fire the implementation |
-| `IO.pure [Int]` | Steps. A polymorphic foreign accumulates the type argument on its spine |
+| `Base.IO.pure [Int]` | Steps. A polymorphic foreign accumulates the type argument on its spine |
 | `letjoin j (x : Int) : Int = e1 in let y = (λz.z) 1 in jump j y` | The body reduces before the jump fires |
 | `letrec { f = λx. … } in e` | Unfolds only in elimination position. No term steps to itself |
 | `switchKey` on a value wrapped in `weaken` | Dispatches on the key actually injected. `weaken` is a value form and is looked through |

@@ -1,9 +1,9 @@
 -- | The vertical slice of the Examples document, written in Core by hand and
 -- | run through declaration checking.
 -- |
--- | Two modules are written out. `Int` supplies the arithmetic the slice uses,
--- | which is an ordinary foreign of a standard library module. `Main` declares
--- | a list type, sums one recursively, and applies that to a literal list.
+-- | Two modules are written out. `Base.Int` supplies the arithmetic the slice
+-- | uses, as an ordinary foreign of the `Base` ABI surface. `Main` declares a
+-- | list type, sums one recursively, and applies that to a literal list.
 -- |
 -- | Together they take the path a compiled module takes: the kinds of a `data`
 -- | declaration, the scheme each constructor acquires, the dependency order of
@@ -38,7 +38,7 @@ mainModuleName :: ModuleName
 mainModuleName = ModuleName "Main"
 
 intModuleName :: ModuleName
-intModuleName = ModuleName "Int"
+intModuleName = ModuleName "Base.Int"
 
 int :: Type
 int = TCon intTy []
@@ -66,10 +66,17 @@ intAdd = Qualified intModuleName (Ident "add")
 
 -- The modules -----------------------------------------------------------------
 
--- | `module Int where foreign add : Int -> Int -> Int`.
+-- | `module Base.Int where foreign add : Int -> Int -> Int`.
 -- |
--- | Every arrow is pure, which is what D23 asks of a foreign type. The module
--- | carries 0 and its declaration 1.
+-- | `Base.*` is the versioned runtime ABI surface, which is where arithmetic
+-- | lives: `Prim` holds the vocabulary the rules of Core name and no values but
+-- | `Prim.Unit`. Every arrow is pure, which is what D23 asks of a foreign type.
+-- |
+-- | This stands for the package implementing the ABI, which is the one entitled
+-- | to a name under `Base`. Package resolution is what verifies that, so the
+-- | module passes ordinary declaration checking like any other.
+-- |
+-- | The module carries 0 and its declaration 1.
 intModule :: Module P.Int
 intModule =
   { annotation: 0
@@ -182,8 +189,9 @@ listLiteral end = consAt 1 (consAt 2 (consAt 3 end))
 
 -- Running the checker ---------------------------------------------------------
 
--- | `Σ` the two modules contribute, `Int` first: the slice names `Int.add`, so
--- | the signature of `Int` is what `Main` is checked against.
+-- | `Σ` the two modules contribute, `Base.Int` first: the slice names
+-- | `Base.Int.add`, so the signature of `Base.Int` is what `Main` is checked
+-- | against.
 checkedSignature :: Module P.Int -> Either (DeclFailure P.Int) Signature
 checkedSignature m = do
   imported <- declare primSignature intModule

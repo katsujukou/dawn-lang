@@ -167,7 +167,7 @@ The order mirrors the three stages of declaration checking ([Modules](09-Modules
     rec { x̄ : σ̄ = v̄ }     G_{i+1} = G_i, M.x_1 : σκ_1 = v_1, …, M.x_n : σκ_n = v_n
 ```
 
-`G_Prim` mirrors `Σ_Prim` on the value side ([Prim](16-Prim.md)). `Prim` is not imported, so without it a `Prim.Unit` occurring in the module would have nothing to unfold to, and condition (1) of `Σ ⊨ G` would fail. The implementations the runtime ABI is obliged to supply arrive with the imports, since the module that declares them is imported like any other.
+`G_Prim` mirrors `Σ_Prim` on the value side ([Prim and Base](16-Prim.md)). `Prim` is not imported, so without it a `Prim.Unit` occurring in the module would have nothing to unfold to, and condition (1) of `Σ ⊨ G` would fail. The implementations the runtime ABI is obliged to supply arrive with the imports, since the module that declares them is imported like any other.
 
 A `rec` group installs **every entry at once, with the right-hand sides themselves**. Guardedness makes each `v_i` a value already, so nothing is evaluated, and a recursive reference inside `v_i` is `M.x_j [[κ̄]]`, an ordinary global name resolved by the lookup rule. No local recursive closure is involved, and each `v_i` keeps the kind binder `k̄_i` under which it was checked.
 
@@ -183,7 +183,7 @@ A failure of this kind is **not an effect**. It is not intercepted by `handle`, 
 
 Reduction therefore relates a term to a configuration, `G ⊢ e → c`, where `c` is a term or a fault. The rule propagating a fault out of an evaluation context appears with the contexts below.
 
-**Which primitives may fault, and on which inputs, belongs to the primitive surface specification** ([Open Questions](14-Open-Questions.md)) rather than to Core. Core only records that a fault is a possible outcome of applying a `foreign`.
+**Which entries may fault, and on which inputs, belongs to the `Base` ABI specification** ([Open Questions](14-Open-Questions.md)) rather than to Core. Core only records that a fault is a possible outcome of applying a `foreign`.
 
 ### Conformance of the global environment
 
@@ -242,7 +242,7 @@ A `foreign` returns a value of its instantiated result type, and what shape that
 | Result type | The value `δ_f` returns |
 | --- | --- |
 | a data type | a constructor spine |
-| an intrinsic type | the canonical form of `Σ(T)`'s class ([Prim](16-Prim.md)) |
+| an intrinsic type | the canonical form of `Σ(T)`'s class ([Prim and Base](16-Prim.md)) |
 
 The second row covers more than one case. A `foreign` whose result is `Int` returns a literal, one whose result is a function type returns a function value — `foreign make : forall a. a` instantiated at `Int -> Int` does exactly that, below — and one whose result is a `Record` returns `{}` or an `extend`. Only the `intrinsic opaque` class is left without a form of its own.
 
@@ -254,7 +254,7 @@ The second row covers more than one case. A `foreign` whose result is `Int` retu
   Γ;Δ ⊢ opaque ω [τ] : τ ! ρ
 ```
 
-The premise names the **canonical-value class** `Σ` records of `T` ([Prim](16-Prim.md)), not merely that `T` is intrinsic. Admitting any intrinsic type here would admit `opaque ω [Boolean]`, and a `guard` would then meet a value that is neither `true` nor `false`; the same argument applies to `Record` against `select` and to `Function` against application. Progress holds class by class, and this is the premise that keeps it so.
+The premise names the **canonical-value class** `Σ` records of `T` ([Prim and Base](16-Prim.md)), not merely that `T` is intrinsic. Admitting any intrinsic type here would admit `opaque ω [Boolean]`, and a `guard` would then meet a value that is neither `true` nor `false`; the same argument applies to `Record` against `select` and to `Function` against application. Progress holds class by class, and this is the premise that keeps it so.
 
 **The payload is what distinguishes one opaque value from another.** Two `IO Unit` values obtained from different foreign applications are different values, and a form carrying only `τ` could not say so.
 
@@ -270,7 +270,7 @@ Erasure keeps the payload, which carries the run-time content, and drops the typ
 
 A global constructor or foreign accumulates its arguments on a **single ordered spine**. Each entry is a kind, type, or constraint instantiation, or a value, and the order is whatever the declared type calls for; nothing requires the erased entries to precede the values. `values(ς)` is the subsequence of value arguments, which is what erasure keeps and what `δ_f` receives.
 
-Without a spine, a polymorphic `foreign` could not be used at all: `IO.pure : forall a. a -> IO a` requires `IO.pure [Int]`, and the rule for type application applies only to a `Λ`.
+Without a spine, a polymorphic `foreign` could not be used at all: `Base.IO.pure : forall a. a -> IO a` requires `Base.IO.pure [Int]`, and the rule for type application applies only to a `Λ`.
 
 A **constructor spine is always a value**, saturated or not: a saturated one is a completed structure, an unsaturated one behaves as a function. A **foreign spine is a value only while it is unsaturated**; once saturated it is a redex that invokes `δ_f`.
 
@@ -580,7 +580,7 @@ Core reduction halts once it has constructed a value of type `IO`. **This is by 
 
 Executing an `IO` belongs to the runtime ABI, which is a separate normative specification. Core's semantics ends at the boundary, and the ABI is obliged to define:
 
-- execution of `IO.pure` and `IO.bind`
+- execution of `Base.IO.pure` and `Base.IO.bind`
 - execution of native leaf actions, that is, the `IO` values that `foreign` declarations construct
 - the world state or external events these act upon
 - the invocation of `main : IO Unit`, the point at which a program begins

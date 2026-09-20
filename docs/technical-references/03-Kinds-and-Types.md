@@ -123,7 +123,7 @@ Function   : Type -> Row Effect -> Type -> Type
 State      : Type -> Effect
 ```
 
-These illustrate the shapes a kind takes; which of them `Prim` declares is settled in [Prim](16-Prim.md).
+These illustrate the shapes a kind takes; which of them `Prim` declares is settled in [Prim and Base](16-Prim.md).
 
 `Row Type` is the row kind of records and variants; `Row Effect` is that of effect rows. Both share the row theory of [Rows](04-Rows.md).
 

@@ -32,11 +32,13 @@ It arises when `Map` or label polymorphism is introduced in Phase D, and should 
 
 Restoring it costs more than adding a row to that table. The element becomes `E [[κ̄]] τ̄`, and a row's normal form then carries a kind vector beside its argument vector. Row equality and unification compare payloads, so both would compare kinds as well. Entailment is unaffected: it decides by the keys of a normal form and the atomic facts of `Γ*`, and never examines a payload, however rich the payload becomes. Whether an effect parameterized over a kind other than `Type` is ever wanted is the question; no use has arisen. The addition is backward compatible, since an empty scheme writes nothing.
 
-**The value domains of literals.** [Prim](16-Prim.md) fixes the type of each literal and leaves what those types range over open.
+**The value domains of `Int` and `Number`.** [Prim and Base](16-Prim.md) fixes the type of each literal, and fixes what `String` and `Char` range over; what `Int` and `Number` range over is open.
 
-What Core requires is only that literal identity be decidable, since `switchLit` demands distinct literals. What is unsettled is the range of `Int`, the representation of `Number` together with how NaN and signed zero behave under that identity, whether a `Char` is a Unicode scalar value or a code unit, and what a `String` is a sequence of.
+What Core requires is only that literal identity be decidable, since `switchLit` demands distinct literals. What is unsettled is the range of `Int`, and the representation of `Number` together with how NaN and signed zero behave under that identity.
 
 These belong in Core rather than in the runtime ABI, because two backends disagreeing on them would give one Core term two meanings — which is exactly what the backend independence of Mid IR exists to prevent. Until they are settled, an implementation's incidental choices are not the specification.
+
+`String` is settled as a sequence of Unicode scalar values and `Char` as one of them, which leaves each backend free in its representation and fixes what a `Base.String` operation returns. What remains belongs to the ABI specification rather than to Core: which entries `Base.String` holds, and where the operations counting UTF-16 code units or UTF-8 bytes live.
 
 **Label polymorphism and a `Symbol` kind.** D13 restricts labels to literals, so the kind grammar has nothing corresponding to `Symbol` and labels are not types.
 
@@ -74,11 +76,11 @@ That requires a per-clause opt-in comparable to Koka's `ctl`, which adds a flag 
 
 The other is **confirming the Wasm stack-switching proposal**. The tables in [Semantics](08-Semantics.md) assume that its continuations are one-shot and linear and that no cloning primitive is in the MVP. This is secondhand and should be verified against primary sources before Phase E.
 
-**Effect-polymorphism of handlers that sequence native actions.** By D23 and the purity of `IO.bind`, a handler that sequences a native action **before the continuation** must take a closed row ([Effects](05-Effects.md)). This is not true of `IO`-returning handlers in general: one that merely resumes synchronously, or merely abandons the continuation, may remain effect-polymorphic.
+**Effect-polymorphism of handlers that sequence native actions.** By D23 and the purity of `Base.IO.bind`, a handler that sequences a native action **before the continuation** must take a closed row ([Effects](05-Effects.md)). This is not true of `IO`-returning handlers in general: one that merely resumes synchronously, or merely abandons the continuation, may remain effect-polymorphic.
 
 In the standard library this constraint falls on terminal interpreters, producing a non-uniformity in which only the terminal stage has a different shape.
 
-Making it uniform requires either indexing `IO` by an effect row, or giving `IO.bind` a different semantics as a runtime primitive aware of the handler context. The latter must solve the problem that deferring `k` until the `IO` executes takes the residual effect outside the handler's dynamic context.
+Making it uniform requires either indexing `IO` by an effect row, or giving `Base.IO.bind` a different semantics as a runtime primitive aware of the handler context. The latter must solve the problem that deferring `k` until the `IO` executes takes the residual effect outside the handler's dynamic context.
 
 **Masking and scoped labels for effect rows.** Effect rows are sharp (D4), so Koka's `mask<exn>` is not expressible. Named instances, below, cover many of the uses, but temporarily hiding one occurrence of an effect may still require something separate.
 
@@ -96,15 +98,16 @@ What the surface writes for such an instance, and how ordinary code names one, i
 
 ## FFI and backends
 
-**Defining the primitive surface and its ABI.** Of D19, the Core type checker enforces only that every arrow of a `foreign` is pure (D23). The rest must be settled as conventions of the standard library and the build system.
+**Writing the `Base` ABI specification.** The shape is settled: `Base.*` is the versioned ABI surface, obligation is graded by profile, and neither fact is recorded in `Σ` ([Prim and Base](16-Prim.md)). What remains is the content.
 
-- How to define the set of FFI a backend must implement, and how to version it, so that a new backend can state mechanically how much it must implement to work
-- **Which ABI intrinsic type constructors the surface supplies.** `Array` and the uncurried families are intrinsic without being part of Core, so no declaration in any module can produce them ([Prim](16-Prim.md)); the manifest that does is the same one this question is about. Each needs its opaque representation and its `foreign` operations fixed together
-- **Which primitives may fault, and on which inputs.** A pure primitive such as an unchecked array index can fail, and no Dawn type describes it. A fault is not an effect and no handler intercepts it ([Semantics](08-Semantics.md)); Core records only that applying a `foreign` may produce one. Enumerating the faulting primitives and their preconditions belongs here
+- **Which entries each `Base` module holds**, and the observable meaning of each, stated in terms that name no backend
+- **Which manifest intrinsic type constructors the ABI manifest supplies, portable and target alike.** `Base.Array.Array` and the uncurried families are intrinsic without being part of Core, so no declaration in any module can produce them. Each needs its opaque representation and its `foreign` operations fixed together
+- **Which profiles exist beyond `core-runtime` and `standard`**, and what a backend states to claim one
+- **Which entries may fault, and on which inputs.** A pure entry such as an unchecked array index can fail, and no Dawn type describes it. A fault is not an effect and no handler intercepts it ([Semantics](08-Semantics.md)); Core records only that applying a `foreign` may produce one. Enumerating them and their preconditions belongs here
 - How to restrict the types that may appear in a `foreign` declaration. `Int`, `String`, and opaque handles are safe, but passing a `Record r` or a user-defined ADT raw fixes its representation for every backend. Whether to introduce a mechanism restricting this to types with a declared ABI, or to leave it as convention
 - How to associate a `foreign` declaration with its per-backend implementations. PureScript uses the implicit convention of a `.js` file beside the module, and alternative backends place parallel files. Adding a backend should not require editing modules
 
-These lie outside Core, but the longer they are deferred the more the standard library settles into a shape that depends on FFI. The minimum version should be fixed while writing the Phase A JavaScript backend.
+These lie outside Core, but the longer they are deferred the more the standard library settles into a shape that depends on FFI. The first version, `dawn-base-0.1`, should be fixed while writing the Phase A JavaScript backend.
 
 **A fast path for pure cases.** `mapArray` runs the Dawn loop even when the effect row is empty, rather than falling through to `Array.prototype.map`. An elaboration macro that inspects the effect row can resolve this ([Modules](09-Modules.md)); it needs only the Phase B foundation and need not wait for Phase E.
 
@@ -141,6 +144,7 @@ There is a roadmap consequence: `do` with `bind` requires a `Monad` class and th
 - Whether to provide both the expression form `M.( e )` and a block form `import M in e`
 - Rules for nesting local opens and for shadowing outer bindings
 - That the namespace token `A` is managed in a namespace separate from values and types
+- **Whether a header may select or hide names**, as in `import Js.String (JSString)`. The three forms above bring in everything a module exports or nothing at all, and nothing between. A selective list leaves D22 intact, since the header still names the module and the dependency is on the module rather than on a name within it; what it changes is only which names enter scope unqualified
 
 None of this reaches Core.
 
@@ -166,7 +170,7 @@ D25 places execution of `IO` outside Core, which leaves a specification to be wr
 
 It must define:
 
-- execution of `IO.pure` and `IO.bind`
+- execution of `Base.IO.pure` and `Base.IO.bind`
 - execution of native leaf actions, the `IO` values that `foreign` declarations construct
 - the world state or external events these act upon, and whether execution is deterministic with respect to them
 - the invocation of `main : IO Unit`, and what a program's exit value is
@@ -174,4 +178,4 @@ It must define:
 
 Two properties should be stated there rather than in Core. That an `IO` value is inert until executed is what Core guarantees to the ABI, given a conforming `G` — D23 keeps effects out of the arrows of a `foreign` type, and condition (3) of `Σ ⊨ G` keeps them out of the implementation. That the ABI executes each action exactly once per execution of the value containing it is what the ABI guarantees in return.
 
-Whether the ABI is shared between the JavaScript and Wasm backends, or specified per backend with a common core, is open. It interacts directly with the definition of the primitive surface above, since native leaf actions are exactly the FFI a backend must implement.
+Whether the ABI is shared between the JavaScript and Wasm backends, or specified per backend with a common core, is open. It interacts directly with the `Base` ABI specification above, since native leaf actions are exactly what the `core-runtime` profile obliges a backend to implement.
