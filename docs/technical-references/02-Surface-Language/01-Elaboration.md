@@ -1,7 +1,5 @@
 # Elaboration
 
-Nothing defined here is part of Core. This boundary is what makes the trusted core small.
-
 ## Core⁺
 
 The representation elaborators work with is Core⁺: Core with unresolved holes added.
