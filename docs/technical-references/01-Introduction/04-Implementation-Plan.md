@@ -261,3 +261,30 @@ The heading of each group names the step of the plan that the group belongs to.
 | `RET` at the end of a `handle` body | The return clause runs and its own value goes to the `HNDL`. `RET` itself has no case for a handler; where the marker stands is what produces this |
 | `isNewtype` on a constructor | Carried from Core through Mid IR into `CTORS`. A `newtype` and a data type of one constructor with one field have the same shape, so a backend erasing the representation cannot tell them apart without the flag |
 
+### Handler declarations and implicit insertion (step 7)
+
+These belong with elaboration and are written once a surface language exists ([Effect Handlers](../02-Surface-Language/02-Effect-Handlers.md)).
+
+| Input | Required outcome |
+| --- | --- |
+| `handler h : E ~> ρ where …` | Desugars to a value declaration whose scheme is effect-polymorphic and whose source row holds the target beside `E`. The narrower source row does not compose |
+| A clause written with neither marker | Desugars to `full`. Core has no unmarked form to fall back on (D28) |
+| A handler declaration with a `return` clause and an answer type of its own | Accepted, written with a full signature rather than `~>` |
+| `implicit` on a handler with a `full` clause, a `return` clause, or a value parameter | Rejected where it is declared |
+| An expression at `a ! ( Console \| e )` inferred, with no expected row | No insertion. Inference gives an expression its own least row |
+| The same expression checked against `a ! ( LiftIO \| e )`, one implicit handler for `Console` | The handler is applied to a thunk of it, under one `openEff`. What reaches Core is application, `openEff`, and `handle`, and nothing else |
+| `ρ1 ≡ ρ2` solvable by instantiating a metavariable | Solved by unification. Insertion is attempted only on a definite failure |
+| `( Console \| ?e )` checked against `( LiftIO \| ?e )` | Accepted. The shared flexible tail cancels first, leaving a settled key difference. Waiting on it would stall the ordinary case |
+| A flexible tail surviving the cancellation of shared tails | Stuck on the metavariables awaited, in the queue synthesis goals use. Not a failure |
+| A rigid tail shared by both rows | Not a reason to wait. It cancels, and nothing in the goal can assign it a key |
+| A computation already performing the target, `( Console, LiftIO \| e )` checked against `( LiftIO \| e )` | Accepted, and widened by nothing. Adding an element the row already carries is not well-kinded |
+| A key carried only by the expected row, with an empty plan | Accepted. Step 4 widens, and the term is the widened thunk forced at once rather than a nest of applications |
+| A key on both sides whose payloads differ | Failure. A widening adds elements and reconciles no payload |
+| One key contributed to `W` twice with different payloads, by two targets or by a target and the expected row | Failure where `W` is formed. It is a union of finite maps and is partial |
+| `{ Console, File }` checked against `{ LiftIO }`, with an implicit handler for each | Ambiguity. The dependency relation orders neither, so the plan is not unique (D29) |
+| `{ Console }` checked against `{ LiftIO }` through `Console ~> Logging` and `Logging ~> LiftIO` | Accepted. The order is unique under the **transitive closure**, which the direct edges alone do not make total for a chain of three |
+| Two handlers nested by one plan | The inner result is thunked again before the outer receives it, a handler taking a thunk and returning a computation |
+| A plan of no handlers at all | The term is `q0 Prim.Unit`, the widened thunk forced. A rule written as a nest of applications has no term here |
+| Two implicit handlers for one key | Ambiguity, naming both and the modules they come from |
+| Implicit declarations forming a cycle across two modules | Rejected where `Ξ` is assembled from the imports. Neither declaration is wrong on its own, so checking one at a time does not see it |
+| An implicit handler for a labelled instance's key | Out of scope for v0.1, `Ξ` being keyed and the spelling of labelled instances unsettled |

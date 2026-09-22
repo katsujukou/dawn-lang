@@ -82,6 +82,12 @@ In the standard library this constraint falls on terminal interpreters, producin
 
 Making it uniform requires either indexing `IO` by an effect row, or giving `Base.IO.bind` a different semantics as a runtime primitive aware of the handler context. The latter must solve the problem that deferring `k` until the `IO` executes takes the residual effect outside the handler's dynamic context.
 
+**Independent implicit handlers, and whether an order can be forced.** An implicit handler is inserted only where the plan is totally ordered by its dependencies (D29), so two capabilities lowering independently into one target — `Console` and `File` both into `LiftIO` — are an ambiguity, and such a site writes the composition itself ([Effect Handlers](../02-Surface-Language/02-Effect-Handlers.md)).
+
+Two routes would lift it, and neither is available yet. One is a **proof that handlers meeting the conditions commute**, which needs an account of what a `fast` clause's performances do under a residual handler that resumes other than once (D28); the conditions as they stand do not supply one. The other is a **declared order**, which must come from the declarations rather than from the spelling of identifiers or the order of imports, or the meaning of a program would turn on either. Evidence about how often the case arises should come before the choice.
+
+**Whether an implicit handler may take parameters.** The mechanism exists — a value parameter could be a synthesis goal, resolved by the hook type classes use — so this is a question of whether it is wanted rather than of whether it can be built, and it waits on Phase C in any case ([Effect Handlers](../02-Surface-Language/02-Effect-Handlers.md)). The argument against is that a parameter worth writing is one the caller means to choose.
+
 **Masking and scoped labels for effect rows.** Effect rows are sharp (D4), so Koka's `mask<exn>` is not expressible. Named instances, below, cover many of the uses, but temporarily hiding one occurrence of an effect may still require something separate.
 
 Forwarding belongs to the same gap, and what it cannot cross is a **key**, not an effect. A clause cannot pass its operation on to an outer handler of the same key, since `handle` removes that element from the row and the clause body is typed without it ([Effects](../03-Typed-Core/03-Effects.md)). Two instances of one effect are unaffected: a handler keyed `cache` may perform on `counter` freely, those being different keys. What is needed is a semantics that distinguishes the current handler for `k` from an outer handler of `k`, and a second occurrence of the key in the row is only one way to obtain it. Three candidates are available.
@@ -161,6 +167,8 @@ Should a design without the header entry be adopted later, it must be stated in 
 **Coherence and termination guarantees for the standard type class resolver.** These are library policy, and Core imposes nothing ([Elaboration](../02-Surface-Language/01-Elaboration.md)).
 
 **A serialization format for Core**, corresponding to CoreFn's JSON. What a module's interface carries — types, attributes, effect declarations, constructor tags, bodies eligible for inlining — is directly tied to the unit of separate compilation.
+
+D34 settles where the artefacts are and which of them others build on: the compiler writes a `.dmi` and a `.dmo` per module, and what a backend outside it reads is the lowered form rather than Typed Core ([Bytecode](../05-Backend/01-Bytecode.md)). Two things remain. The **content of a `.dmi`** is determined by what optimization across a module boundary requires, and is settled when the optimizer is written. Whether **Typed Core is serialized at all** is separate: nothing outside the compiler consumes it, and whether the compiler itself wants to cache it is a question about incremental builds rather than about what is published.
 
 **Kind inference for mutually recursive data and effect declarations.** Core assumes every kind is explicit; the procedure by which elaboration supplies them must be settled.
 

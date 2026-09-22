@@ -339,11 +339,11 @@ performs `LiftIO` in its place, carrying the `IO` value the native leaf built.
 Js.Effect.Console.lowerConsole
   : forall (e : Row Effect). forall (a : Type).
     Console ∉ e => LiftIO ∉ e =>
-    ( Unit -{ ( Console | e ) }-> a ) -{ ( LiftIO | e ) }-> a
+    ( Unit -{ ( Console, LiftIO | e ) }-> a ) -{ ( LiftIO | e ) }-> a
   = Λ (e : Row Effect). Λ (a : Type).
       Λ (_ : Console ∉ e). Λ (_ : LiftIO ∉ e).
-        λ (thunk : Unit -{ ( Console | e ) }-> a).
-          handle ( ( openEff [( LiftIO )] thunk ) Prim.Unit ) with
+        λ (thunk : Unit -{ ( Console, LiftIO | e ) }-> a).
+          handle ( thunk Prim.Unit ) with
             { handles Console
             ; return (x : a) -> x
             ; fast log (msg : String) ->
@@ -358,11 +358,18 @@ it binds no continuation, and its body has the type `log` resumes with, `Unit`.
 Building a continuation here would cost something and buy nothing
 ([Effects](../03-Typed-Core/03-Effects.md)).
 
-**Two widenings are needed, and neither is optional** (D8). The `handle` removes
-`Console` from a body standing at `( Console, LiftIO | e )`, while the thunk
-arrives at `( Console | e )`, so `openEff [( LiftIO )]` is what makes the two
-agree. And `Js.Console.log` has pure arrows while the clause is typed at
-`( LiftIO | e )`, so it is widened for the same reason arithmetic is in
+**The source row carries `LiftIO` beside `Console`.** An adapter accepts a
+computation that already lifts and returns one that still does, which is what
+lets a second adapter into the same target stand after this one: were the source
+`( Console | e )`, the assumption `LiftIO ∉ e` would fail exactly where the row
+already carries it. Bringing a computation that lifts nothing yet to this shape
+is the caller's `openEff`, and the elaborator writes it where a handler is
+supplied rather than written
+([Effect Handlers](../02-Surface-Language/02-Effect-Handlers.md)).
+
+**One widening remains inside, and it is not optional** (D8). `Js.Console.log`
+has pure arrows while the clause is typed at `( LiftIO | e )`, so it is widened
+for the same reason arithmetic is in
 [Examples](../03-Typed-Core/08-Examples.md).
 
 **An adapter stays effect-polymorphic.** It performs another operation rather

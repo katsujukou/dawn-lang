@@ -177,7 +177,7 @@ Termination:
 
 Distinguishing "unsolvable" from "not enough information yet" is exactly this three-way split. `Show (Array ?a)` is `Stuck {?a}`, not `Failed`.
 
-Case (d) of row unification joins the same queue. The row solver and the synthesis scheduler share one resumption mechanism.
+Case (d) of row unification joins the same queue, and so does the search for an implicit effect handler ([Effect Handlers](02-Effect-Handlers.md)). The row solver, the handler search, and the synthesis scheduler share one resumption mechanism.
 
 ## Operations available to metaprograms
 

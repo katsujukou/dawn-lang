@@ -154,12 +154,9 @@ partialRow = TRowExtend (RowEffectEntry partialEff []) rowVar
 consoleRow :: Type
 consoleRow = TRowExtend (RowEffectEntry consoleEff []) TRowEmpty
 
--- | `( LiftIO | e )` and `( LiftIO )`
+-- | `( LiftIO | e )`
 liftIORow :: Type
 liftIORow = TRowExtend (RowEffectEntry liftIOEff []) rowVar
-
-liftIOOnly :: Type
-liftIOOnly = TRowExtend (RowEffectEntry liftIOEff []) TRowEmpty
 
 -- The supporting modules --------------------------------------------------------
 
@@ -328,10 +325,10 @@ jsEffectConsoleModule :: Module P.Int
 jsEffectConsoleModule = jsEffectConsoleOf lowerConsoleClause
 
 jsEffectConsoleOf :: OpClause P.Int -> Module P.Int
-jsEffectConsoleOf = jsEffectConsoleWith widenedThunk
+jsEffectConsoleOf = jsEffectConsoleWith adapterSourceRow
 
-jsEffectConsoleWith :: Expr P.Int -> OpClause P.Int -> Module P.Int
-jsEffectConsoleWith body clause =
+jsEffectConsoleWith :: Type -> OpClause P.Int -> Module P.Int
+jsEffectConsoleWith source clause =
   { annotation: 0
   , name: jsEffectConsoleModuleName
   , imports: [ baseConsoleModuleName, baseLiftIOModuleName, jsConsoleModuleName ]
@@ -339,56 +336,51 @@ jsEffectConsoleWith body clause =
   , decls:
       [ DeclNonRec 1
           { name: Ident "lowerConsole"
-          , scheme: lowerConsoleScheme
-          , value: lowerConsoleOf body clause
+          , scheme: lowerConsoleSchemeOf source
+          , value: lowerConsoleOf source clause
           , attributes: []
           }
       ]
   }
 
+-- | `( Console | ( LiftIO | e ) )`, the row an adapter takes its computation at.
+-- | The target stands beside the source so that a second adapter into the same
+-- | target can follow this one; `( Console | e )` could not, `LiftIO ∉ e`
+-- | failing where the row already carries it.
+adapterSourceRow :: Type
+adapterSourceRow = TRowExtend (RowEffectEntry consoleEff []) liftIORow
+
 -- | `forall (e : Row Effect) (a : Type). Console ∉ e => LiftIO ∉ e =>`
--- | `( Unit -{ ( Console | e ) }-> a ) -{ ( LiftIO | e ) }-> a`
+-- | `( Unit -{ source }-> a ) -{ ( LiftIO | e ) }-> a`
 lowerConsoleScheme :: TypeScheme
-lowerConsoleScheme = monoScheme
+lowerConsoleScheme = lowerConsoleSchemeOf adapterSourceRow
+
+lowerConsoleSchemeOf :: Type -> TypeScheme
+lowerConsoleSchemeOf source = monoScheme
   ( TForall (TyVar "e") (KRow RowEffect)
       ( TForall (TyVar "a") KType
           ( TConstrained (Lacks (EffectKey consoleEff) rowVar)
               ( TConstrained (Lacks (EffectKey liftIOEff) rowVar)
-                  (fn (fn unit' openConsoleRow tyVarA) liftIORow tyVarA)
+                  (fn (fn unit' source tyVarA) liftIORow tyVarA)
               )
           )
       )
   )
 
--- | Two widenings are needed and neither is optional (D8). The `handle` removes
--- | `Console` from a body standing at `( Console, LiftIO | e )` while the thunk
--- | arrives at `( Console | e )`, which is what the first is for; the second is
--- | on the native leaf, inside the clause. Each is dropped separately below.
-lowerConsoleOf :: Expr P.Int -> OpClause P.Int -> Expr P.Int
-lowerConsoleOf body clause =
+-- | The thunk is applied as it arrives, the source row already carrying the
+-- | target. One widening remains inside the clause, on the native leaf.
+lowerConsoleOf :: Type -> OpClause P.Int -> Expr P.Int
+lowerConsoleOf source clause =
   TyLam 0 (TyVar "e") (KRow RowEffect)
     $ TyLam 0 (TyVar "a") KType
     $ ConstraintLam 0 (Lacks (EffectKey consoleEff) rowVar)
     $ ConstraintLam 0 (Lacks (EffectKey liftIOEff) rowVar)
-    $ Lam 0 (Ident "thunk") (fn unit' openConsoleRow tyVarA)
-    $ Handle 0 body
+    $ Lam 0 (Ident "thunk") (fn unit' source tyVarA)
+    $ Handle 0 (App 0 (Var 0 (Ident "thunk")) (Global 0 unitCtor []))
         { element: RowEffectEntry consoleEff []
         , returnClause: { binder: Ident "x", ty: tyVarA, body: Var 0 (Ident "x") }
         , opClauses: [ clause ]
         }
-
--- | The thunk applied under the handle, widened from `( Console | e )` to the
--- | `( Console, LiftIO | e )` the handled body stands at.
-widenedThunk :: Expr P.Int
-widenedThunk = App 0 (OpenEff 0 liftIOOnly (Var 0 (Ident "thunk"))) (Global 0 unitCtor [])
-
--- | The same application with that first widening dropped.
-bareThunk :: Expr P.Int
-bareThunk = App 0 (Var 0 (Ident "thunk")) (Global 0 unitCtor [])
-
--- | `( Console | ( LiftIO | e ) )`, the row inside the handle.
-adapterInnerRow :: Type
-adapterInnerRow = TRowExtend (RowEffectEntry consoleEff []) liftIORow
 
 -- | The clause translates `log` into a `LiftIO` and gives control back, which
 -- | is what a `fast` clause expresses: it binds no continuation, and its body
@@ -787,12 +779,12 @@ spec = describe "Dawn.Compiler.TypedCore.EffectSlice" do
     it "keeps the effect-polymorphic scheme, no native action being sequenced" do
       adapterScheme lowerConsoleName `shouldEqual` Just lowerConsoleScheme
 
-    it "refuses the thunk applied without the widening the handle calls for" do
-      -- the handled body stands at `( Console, LiftIO | e )` because the handle
-      -- removes `Console` and leaves `( LiftIO | e )`, while the thunk arrives
-      -- at `( Console | e )`
-      adapterVerdict (jsEffectConsoleWith bareThunk lowerConsoleClause)
-        `shouldEqual` Left (IllTyped (RowMismatch adapterInnerRow openConsoleRow))
+    it "refuses a source row that does not carry the target" do
+      -- the handle stands at `( LiftIO | e )` and removes `Console`, so its
+      -- body is at `( Console, LiftIO | e )`; a thunk declared `( Console | e )`
+      -- cannot be applied there, which is why the narrow shape does not compose
+      adapterVerdict (jsEffectConsoleWith openConsoleRow lowerConsoleClause)
+        `shouldEqual` Left (IllTyped (RowMismatch adapterSourceRow openConsoleRow))
 
     it "refuses the native leaf applied without openEff" do
       -- the clause is typed at `( LiftIO | e )` while `Js.Console.log` has pure

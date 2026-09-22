@@ -117,6 +117,7 @@ These serve as architecture tests as well as demonstrations.
 | [§1.3 Design Decisions](03-Design-Decisions.md) | The numbered decisions D1–D35 |
 | [§1.4 Implementation Plan](04-Implementation-Plan.md) | Order of implementation work |
 | [§2.1 Elaboration](../02-Surface-Language/01-Elaboration.md) | Core⁺, metavariables, unification, synthesis |
+| [§2.2 Effect Handlers](../02-Surface-Language/02-Effect-Handlers.md) | Handler declarations, clause forms, implicit insertion |
 | [§3.1 Kinds and Types](../03-Typed-Core/01-Kinds-and-Types.md) | Names, kinds, types, kinding rules |
 | [§3.2 Rows](../03-Typed-Core/02-Rows.md) | Row theory, normal form, entailment, surface syntax |
 | [§3.3 Effects](../03-Typed-Core/03-Effects.md) | Effect rows, operations, handlers, `IO` |
