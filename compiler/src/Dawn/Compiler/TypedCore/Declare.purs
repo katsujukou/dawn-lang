@@ -12,18 +12,21 @@
 module Dawn.Compiler.TypedCore.Declare
   ( DeclError(..)
   , DeclFailure
+  , Declared
+  , CheckedGroup
   , initialSignature
   , checkTyConEntries
   , checkEffectEntries
   , collectTypes
   , declare
+  , declareAnnotated
   ) where
 
 import Prelude
 
 import Prim as P
 
-import Dawn.Compiler.TypedCore.Check (CheckError, check, envOf, isFunVal)
+import Dawn.Compiler.TypedCore.Check (CheckError, Typed, check, envOf, isFunVal)
 import Dawn.Compiler.TypedCore.Context (Context, bindKindVars, bindTyVar, emptyContext)
 import Dawn.Compiler.TypedCore.Decl (CtorDecl, DataDecl, Decl(..), EffectDecl, Export(..), Module, OpDecl, ValueBinding)
 import Dawn.Compiler.TypedCore.Kind (Kind(..))
@@ -37,6 +40,7 @@ import Dawn.Compiler.TypedCore.Type (RowEntry(..), TyBinder, Type(..), TypeSchem
 import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Foldable (foldM, foldMap, foldl, foldr, traverse_)
+import Data.Traversable (traverse)
 import Data.Generic.Rep (class Generic)
 import Data.Map (Map)
 import Data.Map as Map
@@ -241,16 +245,38 @@ dataEntry moduleName decl =
     (map (\ctor -> Qualified moduleName ctor.name) decl.constructors)
 
 -- | `Σ ⊢ module M ⊣ Σ'`, less the right-hand sides.
+-- | A value binding group as checking leaves it: the right-hand sides carry the
+-- | types checking gave them, and the groups are in the declaration order the
+-- | module wrote.
+type CheckedGroup a =
+  { recursive :: P.Boolean
+  , bindings :: P.Array (ValueBinding (Typed a))
+  }
+
+-- | What a module contributes to `Σ`, together with its checked value
+-- | declarations.
+-- |
+-- | Data, effect, and foreign declarations are not among the groups: what they
+-- | contribute is in the signature, and a declaration annotation is a source
+-- | annotation rather than anything checking produces.
+type Declared a =
+  { signature :: Signature
+  , values :: P.Array (CheckedGroup a)
+  }
+
 declare :: forall a. Signature -> Module a -> Either (DeclFailure a) Signature
-declare imported m = do
+declare imported m = _.signature <$> declareAnnotated imported m
+
+declareAnnotated :: forall a. Signature -> Module a -> Either (DeclFailure a) (Declared a)
+declareAnnotated imported m = do
   when (m.name == primModule)
     (Left { at: m.annotation, error: ReservedModuleName m.name })
   sigTy <- collectTypes imported m
   checkOrder m
   sigDecl <- foldM (addDecl m sigTy) sigTy m.decls
-  sigAll <- foldM (addValue' m sigTy) sigDecl m.decls
-  checkExports m sigAll
-  pure sigAll
+  declared <- foldM (addValue' m sigTy) { signature: sigDecl, values: [] } m.decls
+  checkExports m declared.signature
+  pure declared
 
 -- | `Σ_decl`: what a data, effect, or foreign declaration contributes, checked
 -- | under `Σ_ty`.
@@ -285,22 +311,36 @@ addDecl m sigTy acc = case _ of
 -- | A right-hand side is checked under the signature as it stands. Their
 -- | dependency order is what makes that complete for each in turn, and what lets
 -- | the fold close in one pass.
-addValue' :: forall a. Module a -> Signature -> Signature -> Decl a -> Either (DeclFailure a) Signature
+addValue'
+  :: forall a
+   . Module a
+  -> Signature
+  -> Declared a
+  -> Decl a
+  -> Either (DeclFailure a) (Declared a)
 addValue' m sigTy acc = case _ of
   DeclNonRec at binding -> do
     checkScheme at sigTy binding.scheme
-    checkBody acc binding
-    addValue at m.name binding.name { scheme: binding.scheme, isForeign: false } acc
+    value <- checkBody acc.signature binding
+    signature <- addValue at m.name binding.name { scheme: binding.scheme, isForeign: false } acc.signature
+    pure
+      { signature
+      , values: acc.values <> [ { recursive: false, bindings: [ binding { value = value } ] } ]
+      }
 
   -- Every scheme of the group is registered before any right-hand side is
   -- checked, which is what lets its members carry different kind schemes.
   DeclRec at bindings -> do
-    registered <- foldM (flip (addBinding at m.name sigTy)) acc bindings
+    registered <- foldM (flip (addBinding at m.name sigTy)) acc.signature bindings
     traverse_ (guarded at m.name) bindings
-    traverse_ (checkBody registered) bindings
-    pure registered
+    checked <- traverse (checkedBinding registered) bindings
+    pure { signature: registered, values: acc.values <> [ { recursive: true, bindings: checked } ] }
 
   _ -> pure acc
+  where
+  checkedBinding registered binding = do
+    value <- checkBody registered binding
+    pure (binding { value = value })
 
 addBinding
   :: forall a
@@ -315,7 +355,7 @@ addBinding at moduleName sigTy binding acc = do
   addValue at moduleName binding.name { scheme: binding.scheme, isForeign: false } acc
 
 -- | `Σ ; ·, k̄ ; · ⊢ e : σ ! ()`.
-checkBody :: forall a. Signature -> ValueBinding a -> Either (DeclFailure a) Unit
+checkBody :: forall a. Signature -> ValueBinding a -> Either (DeclFailure a) (Expr (Typed a))
 checkBody sig binding =
   case check (envOf sig ctx) TRowEmpty binding.scheme.body binding.value of
     Left failure -> Left { at: failure.at, error: IllTyped failure.error }

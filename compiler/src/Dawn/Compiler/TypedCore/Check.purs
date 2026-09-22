@@ -13,6 +13,8 @@ module Dawn.Compiler.TypedCore.Check
   , CheckFailure
   , Env
   , JoinInfo
+  , Typed
+  , typeOf
   , envOf
   , infer
   , check
@@ -33,7 +35,7 @@ import Dawn.Compiler.TypedCore.Name (EffName, Ident, JoinName, OpName, Qualified
 import Dawn.Compiler.TypedCore.Prim (asFunction, booleanTy, fn, litType, recordTy, variantTy)
 import Dawn.Compiler.TypedCore.Row (RowError, RowNormalForm, fromNormalForm, nf)
 import Dawn.Compiler.TypedCore.Signature (CanonicalClass(..), CtorInfo, EffectInfo, Signature, TyConInfo(..), lookupCtor, lookupEffect, lookupOperation, lookupTyCon, lookupValue)
-import Dawn.Compiler.TypedCore.Term (Binding, DecisionTree(..), Expr(..), Handler, OpClause(..), Occurrence(..), Param, exprAnnotation, opClauseOp)
+import Dawn.Compiler.TypedCore.Term (Binding, DecisionTree(..), Expr(..), Handler, OpClause(..), Occurrence(..), Param, exprAnnotation, opClauseOp, withAnnotation)
 import Dawn.Compiler.TypedCore.Type (Constraint(..), RowEntry(..), RowKey, RowPayload(..), TyBinder, Type(..), TypeScheme, rowEntryKey, rowEntryPayload, substituteKindsInType, substituteType)
 import Data.Array as Array
 import Data.Either (Either(..))
@@ -65,6 +67,42 @@ type Env =
   , joins :: Map JoinName JoinInfo
   , tail :: P.Boolean
   }
+
+-- | What checking records at a node: the annotation the term arrived with, the
+-- | type the node has, and — at a `Case` alone — the types of the occurrences
+-- | its decision tree projects.
+-- |
+-- | `infer` records the type it synthesized and `check` the type it was asked
+-- | for. The two are equal by `≡` wherever both apply, so which of them a node
+-- | carries decides nothing.
+-- |
+-- | `occurrences` is empty at every node but a `Case`. It holds the `Ω` the tree
+-- | was checked under, so a consumer reads the type of a projection rather than
+-- | deriving one. The refinement a `switchKey` default makes — the occurrence
+-- | standing at the residual variant rather than the whole — is not recorded:
+-- | the two differ in the row alone, and a payload the tree goes on to project
+-- | is the same type under either.
+type Typed a =
+  { source :: a
+  , ty :: Type
+  , occurrences :: Map Occurrence Type
+  }
+
+-- | The type a checked term carries at its root.
+typeOf :: forall a. Expr (Typed a) -> Type
+typeOf = _.ty <<< exprAnnotation
+
+-- | A checked decision tree, the type every leaf of it takes, and the
+-- | occurrences it and its sub-trees project.
+type TreeResult a =
+  { ty :: Type
+  , occurrences :: Map Occurrence Type
+  , tree :: DecisionTree (Typed a)
+  }
+
+-- | A node that projects nothing.
+at' :: forall a. a -> Type -> Typed a
+at' source ty = { source, ty, occurrences: Map.empty }
 
 -- | An error together with the term it is reported at. A decision tree and a
 -- | handler carry no span of their own, so an error inside one is located at the
@@ -151,146 +189,160 @@ envOf signature context =
   { signature, context, joins: Map.empty, tail: true }
 
 -- | `Γ;Δ ⊢ e : τ ! ρ`, synthesizing the type.
-infer :: forall a. Env -> Type -> Expr a -> Either (CheckFailure a) Type
+infer :: forall a. Env -> Type -> Expr a -> Either (CheckFailure a) (Expr (Typed a))
 infer env rho expr = case expr of
   Var at name -> case lookupVar env.context name of
-    Just ty -> Right ty
+    Just ty -> Right (Var (at' at ty) name)
     Nothing -> Left { at, error: UnboundVar name }
 
   Global at name kinds -> do
     scheme <- globalScheme at env.signature name
-    instantiateKinds at env name kinds scheme
+    ty <- instantiateKinds at env name kinds scheme
+    Right (Global (at' at ty) name kinds)
 
-  Lit _ literal -> Right (litType literal)
+  Lit at literal -> Right (Lit (at' at (litType literal)) literal)
 
   -- A `λ` does not write the row of its arrow. A synthesized one takes the
   -- ambient row, which is what application requires of it; every other position
   -- that reaches a `λ` has a type to check it against.
   Lam at name ty body -> do
     kinded at (checkKind env.signature env.context ty KType)
-    result <- infer (lambdaEnv env name ty) rho body
-    Right (fn ty rho result)
+    body' <- infer (lambdaEnv env name ty) rho body
+    Right (Lam (at' at (fn ty rho (typeOf body'))) name ty body')
 
   App at f x -> do
-    fnType <- infer (notTail env) rho f
-    parts <- functionParts at fnType
+    f' <- infer (notTail env) rho f
+    parts <- functionParts at (typeOf f')
     sameRow at rho parts.row
-    check (notTail env) rho parts.argument x
-    Right parts.result
+    x' <- check (notTail env) rho parts.argument x
+    Right (App (at' at parts.result) f' x')
 
   TyLam at name kind body -> do
     kinded at (quantifiableKind env.context kind)
     valueForm at env body
     let inner = (abstracted env) { context = bindTyVar env.context name kind }
-    result <- infer inner TRowEmpty body
-    Right (TForall name kind result)
+    body' <- infer inner TRowEmpty body
+    Right (TyLam (at' at (TForall name kind (typeOf body'))) name kind body')
 
   TyApp at e ty -> do
-    quantified <- infer (notTail env) rho e
-    case quantified of
+    e' <- infer (notTail env) rho e
+    case typeOf e' of
       TForall name kind body -> do
         kinded at (checkKind env.signature env.context ty kind)
-        Right (substituteType (Map.singleton name ty) body)
+        Right (TyApp (at' at (substituteType (Map.singleton name ty) body)) e' ty)
       other -> Left { at, error: NotAForall other }
 
   ConstraintLam at constraint body -> do
     kinded at (wellFormedConstraint env.signature env.context constraint)
     valueForm at env body
     inner <- assuming at env constraint
-    result <- infer (abstracted inner) TRowEmpty body
-    Right (TConstrained constraint result)
+    body' <- infer (abstracted inner) TRowEmpty body
+    Right (ConstraintLam (at' at (TConstrained constraint (typeOf body'))) constraint body')
 
   ConstraintApp at e -> do
-    constrained <- infer (notTail env) rho e
-    case constrained of
+    e' <- infer (notTail env) rho e
+    case typeOf e' of
       TConstrained constraint body -> do
         require at env constraint
-        Right body
+        Right (ConstraintApp (at' at body) e')
       other -> Left { at, error: NotConstrained other }
 
   Let at name ty value body -> do
     kinded at (checkKind env.signature env.context ty KType)
-    check (notTail env) rho ty value
-    infer (bound env name ty) rho body
+    value' <- check (notTail env) rho ty value
+    body' <- infer (bound env name ty) rho body
+    Right (Let (at' at (typeOf body')) name ty value' body')
 
   LetRec at bindings body -> do
-    inner <- recursiveEnv at env bindings
-    infer inner rho body
+    { env: inner, bindings: bindings' } <- recursiveEnv at env bindings
+    body' <- infer inner rho body
+    Right (LetRec (at' at (typeOf body')) bindings' body')
 
   Case at scrutinees dt -> do
-    occurrences <- scrutineeTypes env rho scrutinees
-    tree at env rho Nothing occurrences dt
+    scrutinees' <- scrutineeTypes env rho scrutinees
+    result <- tree at env rho Nothing scrutinees'.occurrences dt
+    Right (Case { source: at, ty: result.ty, occurrences: result.occurrences } scrutinees'.exprs result.tree)
 
   LetJoin at name params result value body -> do
     traverse_ (\param -> kinded at (checkKind env.signature env.context param.ty KType)) params
     kinded at (checkKind env.signature env.context result KType)
-    checkJoinBody env name params result rho value
-    check (joining env name params result rho) rho result body
-    Right result
+    value' <- checkJoinBody env name params result rho value
+    body' <- check (joining env name params result rho) rho result body
+    Right (LetJoin (at' at result) name params result value' body')
 
   Jump at name args -> do
     info <- joinInfo at env name
     when (not env.tail) (Left { at, error: JumpNotInTail name })
     sameRow at rho info.row
-    checkArguments at env rho name info.params args
-    Right info.result
+    args' <- checkArguments at env rho name info.params args
+    Right (Jump (at' at info.result) name args')
 
-  RecordEmpty _ -> Right (record TRowEmpty)
+  RecordEmpty at -> Right (RecordEmpty (at' at (record TRowEmpty)))
 
   RecordExtend at key value rest -> do
     kinded at (wellFormedKey env.signature key RowType)
-    valueType <- infer (notTail env) rho value
-    row <- recordRow at env rho rest
-    require at env (Lacks key row)
-    Right (record (TRowExtend (RowTypeEntry key valueType) row))
+    value' <- infer (notTail env) rho value
+    rest' <- recordRow at env rho rest
+    require at env (Lacks key rest'.row)
+    Right
+      ( RecordExtend (at' at (record (TRowExtend (RowTypeEntry key (typeOf value')) rest'.row)))
+          key
+          value'
+          rest'.expr
+      )
 
   RecordSelect at key e -> do
     kinded at (wellFormedKey env.signature key RowType)
-    row <- recordRow at env rho e
-    payloadAt at key row
+    e' <- recordRow at env rho e
+    ty <- payloadAt at key e'.row
+    Right (RecordSelect (at' at ty) key e'.expr)
 
   RecordRestrict at key e -> do
     kinded at (wellFormedKey env.signature key RowType)
-    row <- recordRow at env rho e
-    normal <- normalize at row
-    _ <- payloadAt at key row
-    rest <- rowOfNormalForm at row (normal { known = Map.delete key normal.known })
-    Right (record rest)
+    e' <- recordRow at env rho e
+    normal <- normalize at e'.row
+    _ <- payloadAt at key e'.row
+    rest <- rowOfNormalForm at e'.row (normal { known = Map.delete key normal.known })
+    Right (RecordRestrict (at' at (record rest)) key e'.expr)
 
   RecordUpdate at key value rest -> do
     kinded at (wellFormedKey env.signature key RowType)
-    row <- recordRow at env rho rest
-    normal <- normalize at row
-    _ <- payloadAt at key row
-    valueType <- infer (notTail env) rho value
-    updated <- rowOfNormalForm at row (normal { known = Map.insert key (TypePayload valueType) normal.known })
-    Right (record updated)
+    rest' <- recordRow at env rho rest
+    normal <- normalize at rest'.row
+    _ <- payloadAt at key rest'.row
+    value' <- infer (notTail env) rho value
+    updated <- rowOfNormalForm at rest'.row (normal { known = Map.insert key (TypePayload (typeOf value')) normal.known })
+    Right (RecordUpdate (at' at (record updated)) key value' rest'.expr)
 
   RecordMerge at left right -> do
-    leftRow <- recordRow at env rho left
-    rightRow <- recordRow at env rho right
-    require at env (Disjoint leftRow rightRow)
-    Right (record (TRowUnion leftRow rightRow))
+    left' <- recordRow at env rho left
+    right' <- recordRow at env rho right
+    require at env (Disjoint left'.row right'.row)
+    Right (RecordMerge (at' at (record (TRowUnion left'.row right'.row))) left'.expr right'.expr)
 
   -- The residual row of an injection is not written in the term. A synthesized
   -- one is the variant of that key alone, and `weaken` is what widens it.
   VariantInject at key value -> do
     kinded at (wellFormedKey env.signature key RowType)
-    valueType <- infer (notTail env) rho value
-    Right (variant (TRowExtend (RowTypeEntry key valueType) TRowEmpty))
+    value' <- infer (notTail env) rho value
+    Right
+      ( VariantInject (at' at (variant (TRowExtend (RowTypeEntry key (typeOf value')) TRowEmpty)))
+          key
+          value'
+      )
 
   VariantWeaken at key ty e -> do
     kinded at (wellFormedKey env.signature key RowType)
     kinded at (checkKind env.signature env.context ty KType)
-    row <- variantRow at env rho e
-    require at env (Lacks key row)
-    Right (variant (TRowExtend (RowTypeEntry key ty) row))
+    e' <- variantRow at env rho e
+    require at env (Lacks key e'.row)
+    Right (VariantWeaken (at' at (variant (TRowExtend (RowTypeEntry key ty) e'.row))) key ty e'.expr)
 
   VariantAbsurd at ty e -> do
     kinded at (checkKind env.signature env.context ty KType)
-    row <- variantRow at env rho e
-    sameRow at TRowEmpty row
-    Right ty
+    e' <- variantRow at env rho e
+    sameRow at TRowEmpty e'.row
+    Right (VariantAbsurd (at' at ty) ty e'.expr)
 
   -- The key selects the element and the payload selects the protocol: the
   -- operation's signature comes from the effect the payload names, never from
@@ -303,53 +355,71 @@ infer env rho expr = case expr of
       Just (EffectPayload name args) -> do
         { params, signature } <- operationOf at env name op
         substitution <- operationSubstitution at env op params args signature.tyBinders tyArgs
-        check (notTail env) rho (substituteType substitution signature.argument) arg
-        Right (substituteType substitution signature.resumesWith)
+        arg' <- check (notTail env) rho (substituteType substitution signature.argument) arg
+        Right
+          ( Perform (at' at (substituteType substitution signature.resumesWith))
+              key
+              op
+              tyArgs
+              arg'
+          )
 
-  Handle at body handler -> handled at env rho Nothing body handler
+  Handle at body handler -> do
+    result <- handled at env rho Nothing body handler
+    Right (Handle (at' at result.ty) result.body result.handler)
 
   OpenEff at row e -> do
     kinded at (checkKind env.signature env.context row (KRow RowEffect))
-    fnType <- infer (notTail env) rho e
-    parts <- functionParts at fnType
+    e' <- infer (notTail env) rho e
+    parts <- functionParts at (typeOf e')
     require at env (Disjoint parts.row row)
-    Right (fn parts.argument (TRowUnion parts.row row) parts.result)
+    Right (OpenEff (at' at (fn parts.argument (TRowUnion parts.row row) parts.result)) row e')
 
 -- | `Γ;Δ ⊢ e : τ ! ρ` against a type an enclosing annotation supplies.
-check :: forall a. Env -> Type -> Type -> Expr a -> Either (CheckFailure a) Unit
+-- |
+-- | The root of what comes back carries `expected`, which is the type checking
+-- | used. Where the case below delegates to `infer`, the synthesized type is
+-- | equal to it by `≡` and the annotation is replaced so that a node records
+-- | one thing whichever way it was reached.
+check :: forall a. Env -> Type -> Type -> Expr a -> Either (CheckFailure a) (Expr (Typed a))
 check env rho expected expr = case expr of
   Lam at name ty body -> do
     parts <- functionParts at expected
     kinded at (checkKind env.signature env.context ty KType)
     equalTypes at parts.argument ty
-    check (lambdaEnv env name ty) parts.row parts.result body
+    body' <- check (lambdaEnv env name ty) parts.row parts.result body
+    Right (Lam (at' at expected) name ty body')
 
   VariantInject at key value -> do
     kinded at (wellFormedKey env.signature key RowType)
     row <- variantOf at expected
     payload <- payloadAt at key row
-    check (notTail env) rho payload value
+    value' <- check (notTail env) rho payload value
+    Right (VariantInject (at' at expected) key value')
 
   Let at name ty value body -> do
     kinded at (checkKind env.signature env.context ty KType)
-    check (notTail env) rho ty value
-    check (bound env name ty) rho expected body
+    value' <- check (notTail env) rho ty value
+    body' <- check (bound env name ty) rho expected body
+    Right (Let (at' at expected) name ty value' body')
 
   LetRec at bindings body -> do
-    inner <- recursiveEnv at env bindings
-    check inner rho expected body
+    { env: inner, bindings: bindings' } <- recursiveEnv at env bindings
+    body' <- check inner rho expected body
+    Right (LetRec (at' at expected) bindings' body')
 
   Case at scrutinees dt -> do
-    occurrences <- scrutineeTypes env rho scrutinees
-    _ <- tree at env rho (Just expected) occurrences dt
-    Right unit
+    scrutinees' <- scrutineeTypes env rho scrutinees
+    result <- tree at env rho (Just expected) scrutinees'.occurrences dt
+    Right (Case { source: at, ty: expected, occurrences: result.occurrences } scrutinees'.exprs result.tree)
 
   LetJoin at name params result value body -> do
     traverse_ (\param -> kinded at (checkKind env.signature env.context param.ty KType)) params
     kinded at (checkKind env.signature env.context result KType)
     equalTypes at expected result
-    checkJoinBody env name params result rho value
-    check (joining env name params result rho) rho result body
+    value' <- checkJoinBody env name params result rho value
+    body' <- check (joining env name params result rho) rho result body
+    Right (LetJoin (at' at expected) name params result value' body')
 
   TyLam at name kind body -> case expected of
     TForall expectedName expectedKind inner -> do
@@ -357,7 +427,8 @@ check env rho expected expr = case expr of
       when (kind /= expectedKind) (Left { at, error: BinderKindMismatch expectedKind kind })
       valueForm at env body
       let aligned = substituteType (Map.singleton expectedName (TVar name)) inner
-      check ((abstracted env) { context = bindTyVar env.context name kind }) TRowEmpty aligned body
+      body' <- check ((abstracted env) { context = bindTyVar env.context name kind }) TRowEmpty aligned body
+      Right (TyLam (at' at expected) name kind body')
     other -> Left { at, error: NotAForall other }
 
   ConstraintLam at constraint body -> case expected of
@@ -366,16 +437,18 @@ check env rho expected expr = case expr of
       sameConstraint at expectedConstraint constraint
       valueForm at env body
       assumed <- assuming at env constraint
-      check (abstracted assumed) TRowEmpty inner body
+      body' <- check (abstracted assumed) TRowEmpty inner body
+      Right (ConstraintLam (at' at expected) constraint body')
     other -> Left { at, error: NotConstrained other }
 
   Handle at body handler -> do
-    _ <- handled at env rho (Just expected) body handler
-    Right unit
+    result <- handled at env rho (Just expected) body handler
+    Right (Handle (at' at expected) result.body result.handler)
 
   other -> do
-    actual <- infer env rho other
-    equalTypes (exprAnnotation other) expected actual
+    other' <- infer env rho other
+    equalTypes (exprAnnotation other) expected (typeOf other')
+    Right (withAnnotation ((exprAnnotation other') { ty = expected }) other')
 
 -- | `handle e with h`.
 -- |
@@ -390,18 +463,30 @@ handled
   -> Maybe Type
   -> Expr a
   -> Handler a
-  -> Either (CheckFailure a) Type
+  -> Either (CheckFailure a) { ty :: Type, body :: Expr (Typed a), handler :: Handler (Typed a) }
 handled at env rho expected body handler = do
   let inner = TRowExtend handler.element rho
   kinded at (checkKind env.signature env.context inner (KRow RowEffect))
   let alpha = handler.returnClause.ty
   kinded at (checkKind env.signature env.context alpha KType)
-  check (abstracted env) inner alpha body
-  beta <- returnType at env rho expected alpha handler
+  body' <- check (abstracted env) inner alpha body
+  returned <- returnType at env rho expected alpha handler
   payload <- effectPayloadOf at handler.element
   info <- effectInfoOf at env payload.name
-  checkClauses at env rho beta payload info handler.opClauses
-  Right beta
+  clauses <- checkClauses at env rho returned.ty payload info handler.opClauses
+  Right
+    { ty: returned.ty
+    , body: body'
+    , handler:
+        { element: handler.element
+        , returnClause:
+            { binder: handler.returnClause.binder
+            , ty: handler.returnClause.ty
+            , body: returned.body
+            }
+        , opClauses: clauses
+        }
+    }
 
 returnType
   :: forall a
@@ -411,12 +496,14 @@ returnType
   -> Maybe Type
   -> Type
   -> Handler a
-  -> Either (CheckFailure a) Type
+  -> Either (CheckFailure a) { ty :: Type, body :: Expr (Typed a) }
 returnType _ env rho expected alpha handler = case expected of
   Just ty -> do
-    check returning rho ty handler.returnClause.body
-    Right ty
-  Nothing -> infer returning rho handler.returnClause.body
+    body <- check returning rho ty handler.returnClause.body
+    Right { ty, body }
+  Nothing -> do
+    body <- infer returning rho handler.returnClause.body
+    Right { ty: typeOf body, body }
   where
   returning = abstracted (bound env handler.returnClause.binder alpha)
 
@@ -444,11 +531,11 @@ checkClauses
   -> { name :: Qualified EffName, args :: P.Array Type }
   -> EffectInfo
   -> P.Array (OpClause a)
-  -> Either (CheckFailure a) Unit
+  -> Either (CheckFailure a) (P.Array (OpClause (Typed a)))
 checkClauses at env rho beta payload info clauses = do
   distinct at (map opClauseOp clauses)
   traverse_ declared (Array.fromFoldable (Map.keys info.operations))
-  traverse_ (checkClause at env rho beta payload info) clauses
+  traverse (checkClause at env rho beta payload info) clauses
   where
   declared op =
     when (not (Array.elem op (map opClauseOp clauses)))
@@ -472,7 +559,7 @@ checkClause
   -> { name :: Qualified EffName, args :: P.Array Type }
   -> EffectInfo
   -> OpClause a
-  -> Either (CheckFailure a) Unit
+  -> Either (CheckFailure a) (OpClause (Typed a))
 checkClause at env rho beta payload info clause = do
   decl <- case Map.lookup shared.op info.operations of
     Just decl -> Right decl
@@ -492,9 +579,11 @@ checkClause at env rho beta payload info clause = do
   case clause of
     FullClause c -> do
       equalTypes at (fn resumesWith rho beta) c.contBinder.ty
-      check (bound inner c.contBinder.name c.contBinder.ty) rho beta c.body
-    FastClause c ->
-      check inner rho resumesWith c.body
+      body <- check (bound inner c.contBinder.name c.contBinder.ty) rho beta c.body
+      Right (FullClause (c { body = body }))
+    FastClause c -> do
+      body <- check inner rho resumesWith c.body
+      Right (FastClause (c { body = body }))
   where
   shared = case clause of
     FullClause c -> { op: c.op, tyBinders: c.tyBinders, argBinder: c.argBinder }
@@ -530,49 +619,116 @@ tree
   -> Maybe Type
   -> Map Occurrence Type
   -> DecisionTree a
-  -> Either (CheckFailure a) Type
+  -> Either (CheckFailure a) (TreeResult a)
 tree at env rho expected occurrences dt = case dt of
   Leaf e -> case expected of
     Just ty -> do
-      check env rho ty e
-      Right ty
-    Nothing -> infer env rho e
+      e' <- check env rho ty e
+      Right { ty, occurrences, tree: Leaf e' }
+    Nothing -> do
+      e' <- infer env rho e
+      Right { ty: typeOf e', occurrences, tree: Leaf e' }
 
   Bind name occurrence inner -> do
-    ty <- occurrenceType at occurrences occurrence
-    tree at (bound env name ty) rho expected occurrences inner
+    found <- occurrenceType at occurrences occurrence
+    result <- tree at (bound env name found.ty) rho expected found.occurrences inner
+    Right (result { tree = Bind name occurrence result.tree })
 
   SwitchCtor occurrence branches fallback -> do
-    scrutinee <- occurrenceType at occurrences occurrence
-    spine <- constructorSpine at env occurrence scrutinee
+    found <- occurrenceType at occurrences occurrence
+    spine <- constructorSpine at env occurrence found.ty
     distinct at (map _.ctor branches)
-    items <- traverse (ctorItem at env occurrences occurrence spine) branches
+    items <- traverse (ctorItem at env found.occurrences occurrence spine) branches
     exhaustive at spine.constructors (map _.ctor branches) fallback
-    subTrees at env rho expected (items <> fallbackItem occurrences fallback)
+    ty <- subTreeType at env rho expected (items <> fallbackItem found.occurrences fallback)
+    checked <- traverse (checkItem at env rho ty) items
+    fallback' <- traverse (tree at env rho (Just ty) found.occurrences) fallback
+    Right
+      { ty
+      , occurrences: gathered found.occurrences checked fallback'
+      , tree:
+          SwitchCtor occurrence
+            (Array.zipWith (\branch r -> { ctor: branch.ctor, tree: r.tree }) branches checked)
+            (map _.tree fallback')
+      }
 
   SwitchLit occurrence branches fallback -> do
-    scrutinee <- occurrenceType at occurrences occurrence
-    literalType at env scrutinee
+    found <- occurrenceType at occurrences occurrence
+    literalType at env found.ty
     distinct at (map _.lit branches)
-    traverse_ (\branch -> equalTypes at scrutinee (litType branch.lit)) branches
-    subTrees at env rho expected
-      (map (\branch -> Tuple occurrences branch.tree) branches <> [ Tuple occurrences fallback ])
+    traverse_ (\branch -> equalTypes at found.ty (litType branch.lit)) branches
+    let items = map (\branch -> Tuple found.occurrences branch.tree) branches
+    ty <- subTreeType at env rho expected (items <> [ Tuple found.occurrences fallback ])
+    checked <- traverse (checkItem at env rho ty) items
+    fallback' <- tree at env rho (Just ty) found.occurrences fallback
+    Right
+      { ty
+      , occurrences: gathered found.occurrences checked (Just fallback')
+      , tree:
+          SwitchLit occurrence
+            (Array.zipWith (\branch r -> { lit: branch.lit, tree: r.tree }) branches checked)
+            fallback'.tree
+      }
 
   SwitchKey occurrence branches fallback -> do
-    scrutinee <- occurrenceType at occurrences occurrence
-    row <- variantOf at scrutinee
+    found <- occurrenceType at occurrences occurrence
+    row <- variantOf at found.ty
     normal <- normalize at row
     distinct at (map _.key branches)
-    items <- traverse (keyItem at occurrences occurrence row normal) branches
+    items <- traverse (keyItem at found.occurrences occurrence row normal) branches
     residual <- residualVariant at row normal (map _.key branches)
     keysExhaustive at normal (map _.key branches) fallback
-    subTrees at env rho expected
-      (items <> fallbackItem (Map.insert occurrence residual occurrences) fallback)
+    let residualOccurrences = Map.insert occurrence residual found.occurrences
+    ty <- subTreeType at env rho expected (items <> fallbackItem residualOccurrences fallback)
+    checked <- traverse (checkItem at env rho ty) items
+    fallback' <- traverse (tree at env rho (Just ty) residualOccurrences) fallback
+    Right
+      { ty
+      , occurrences: gathered found.occurrences checked fallback'
+      , tree:
+          SwitchKey occurrence
+            (Array.zipWith (\branch r -> { key: branch.key, tree: r.tree }) branches checked)
+            (map _.tree fallback')
+      }
 
   Guard condition consequent alternative -> do
-    check (notTail env) rho (TCon booleanTy []) condition
-    subTrees at env rho expected
+    condition' <- check (notTail env) rho (TCon booleanTy []) condition
+    ty <- subTreeType at env rho expected
       [ Tuple occurrences consequent, Tuple occurrences alternative ]
+    consequent' <- tree at env rho (Just ty) occurrences consequent
+    alternative' <- tree at env rho (Just ty) occurrences alternative
+    Right
+      { ty
+      , occurrences: gathered occurrences [ consequent' ] (Just alternative')
+      , tree: Guard condition' consequent'.tree alternative'.tree
+      }
+
+-- | One sub-tree of a dispatch, at the type the dispatch takes.
+checkItem
+  :: forall a
+   . a
+  -> Env
+  -> Type
+  -> Type
+  -> Tuple (Map Occurrence Type) (DecisionTree a)
+  -> Either (CheckFailure a) (TreeResult a)
+checkItem at env rho ty (Tuple occurrences dt) = tree at env rho (Just ty) occurrences dt
+
+-- | The occurrences a dispatch and its sub-trees between them project.
+-- |
+-- | The parent's `Ω` is unioned first and `Map.union` is left-biased, so where a
+-- | `switchKey` default refined an occurrence to the residual variant, the type
+-- | it had outside that branch is the one recorded.
+gathered
+  :: forall a
+   . Map Occurrence Type
+  -> P.Array (TreeResult a)
+  -> Maybe (TreeResult a)
+  -> Map Occurrence Type
+gathered parent branches fallback =
+  foldl (\acc result -> Map.union acc result.occurrences)
+    parent
+    (branches <> Array.fromFoldable fallback)
 
 -- The rules, one helper each --------------------------------------------------
 
@@ -601,17 +757,23 @@ instantiateKinds at env name kinds scheme = do
 
 -- | Every scheme of a recursive group is registered before any right-hand side
 -- | is checked, and each of those is a function value.
-recursiveEnv :: forall a. a -> Env -> P.Array (Binding a) -> Either (CheckFailure a) Env
+recursiveEnv
+  :: forall a
+   . a
+  -> Env
+  -> P.Array (Binding a)
+  -> Either (CheckFailure a) { env :: Env, bindings :: P.Array (Binding (Typed a)) }
 recursiveEnv at env bindings = do
   let inner = foldl (\acc binding -> bound acc binding.name binding.ty) env bindings
-  traverse_ (checkBinding inner) bindings
-  Right inner
+  checked <- traverse (checkBinding inner) bindings
+  Right { env: inner, bindings: checked }
   where
   checkBinding inner binding = do
     kinded at (checkKind env.signature env.context binding.ty KType)
     when (not (isFunVal binding.value))
       (Left { at, error: NotAFunctionValue binding.name })
-    check inner TRowEmpty binding.ty binding.value
+    value <- check inner TRowEmpty binding.ty binding.value
+    Right (binding { value = value })
 
 checkJoinBody
   :: forall a
@@ -621,7 +783,7 @@ checkJoinBody
   -> Type
   -> Type
   -> Expr a
-  -> Either (CheckFailure a) Unit
+  -> Either (CheckFailure a) (Expr (Typed a))
 checkJoinBody env name params result rho value =
   check inner rho result value
   where
@@ -640,22 +802,26 @@ checkArguments
   -> JoinName
   -> P.Array Type
   -> P.Array (Expr a)
-  -> Either (CheckFailure a) Unit
+  -> Either (CheckFailure a) (P.Array (Expr (Typed a)))
 checkArguments at env rho name params args = do
   let expected = Array.length params
   let actual = Array.length args
   when (expected /= actual) (Left { at, error: JoinArity name expected actual })
-  traverse_ (\(Tuple ty arg) -> check (notTail env) rho ty arg) (Array.zip params args)
+  traverse (\(Tuple ty arg) -> check (notTail env) rho ty arg) (Array.zip params args)
 
 scrutineeTypes
   :: forall a
    . Env
   -> Type
   -> P.Array (Expr a)
-  -> Either (CheckFailure a) (Map Occurrence Type)
+  -> Either (CheckFailure a) { exprs :: P.Array (Expr (Typed a)), occurrences :: Map Occurrence Type }
 scrutineeTypes env rho scrutinees = do
-  types <- traverse (infer (notTail env) rho) scrutinees
-  Right (Map.fromFoldable (Array.mapWithIndex (\i ty -> Tuple (OccScrutinee i) ty) types))
+  exprs <- traverse (infer (notTail env) rho) scrutinees
+  Right
+    { exprs
+    , occurrences:
+        Map.fromFoldable (Array.mapWithIndex (\i e -> Tuple (OccScrutinee i) (typeOf e)) exprs)
+    }
 
 -- | `Ω ⊢ o : τ`.
 -- |
@@ -663,14 +829,23 @@ scrutineeTypes env rho scrutinees = do
 -- | variant carries is typeable only under the branch that established it. The
 -- | element of a record at a key needs no branch: a record has one at every key
 -- | of its row, so that path is read off the type of what it projects from.
-occurrenceType :: forall a. a -> Map Occurrence Type -> Occurrence -> Either (CheckFailure a) Type
+-- | What a path projects is recorded as it is resolved, so that `Ω` ends up
+-- | holding every occurrence the tree mentions rather than only those a
+-- | dispatch established.
+occurrenceType
+  :: forall a
+   . a
+  -> Map Occurrence Type
+  -> Occurrence
+  -> Either (CheckFailure a) { ty :: Type, occurrences :: Map Occurrence Type }
 occurrenceType at occurrences occurrence = case Map.lookup occurrence occurrences of
-  Just ty -> Right ty
+  Just ty -> Right { ty, occurrences }
   Nothing -> case occurrence of
     OccRecordField base key -> do
-      baseType <- occurrenceType at occurrences base
-      row <- recordOf at baseType
-      payloadAt at key row
+      found <- occurrenceType at occurrences base
+      row <- recordOf at found.ty
+      ty <- payloadAt at key row
+      Right { ty, occurrences: Map.insert occurrence ty found.occurrences }
     _ -> Left { at, error: UnknownOccurrence occurrence }
 
 -- | `T σ̄` together with the constructors of `T`, which a `switchCtor` takes
@@ -699,7 +874,7 @@ spineOf ty acc = case ty of
 -- |
 -- | The first is checked against what an enclosing annotation gave, or
 -- | synthesized where there was none, and the rest against that.
-subTrees
+subTreeType
   :: forall a
    . a
   -> Env
@@ -707,14 +882,11 @@ subTrees
   -> Maybe Type
   -> P.Array (Tuple (Map Occurrence Type) (DecisionTree a))
   -> Either (CheckFailure a) Type
-subTrees at env rho expected items = do
-  ty <- case expected of
-    Just given -> Right given
-    Nothing -> case Array.find (hasLeaf <<< snd) items of
-      Just (Tuple occurrences dt) -> tree at env rho Nothing occurrences dt
-      Nothing -> Left { at, error: NoLeaf }
-  traverse_ (\(Tuple occurrences dt) -> tree at env rho (Just ty) occurrences dt) items
-  Right ty
+subTreeType at env rho expected items = case expected of
+  Just given -> Right given
+  Nothing -> case Array.find (hasLeaf <<< snd) items of
+    Just (Tuple occurrences dt) -> _.ty <$> tree at env rho Nothing occurrences dt
+    Nothing -> Left { at, error: NoLeaf }
 
 -- | Whether a tree reaches a leaf. A sub-tree that reaches none gives the
 -- | dispatch no type, and the written order of branches carries no meaning, so
@@ -1022,15 +1194,29 @@ variantOf at ty = case ty of
   TApp (TCon name []) row | name == variantTy -> Right row
   _ -> Left { at, error: NotAVariant ty }
 
-recordRow :: forall a. a -> Env -> Type -> Expr a -> Either (CheckFailure a) Type
+recordRow
+  :: forall a
+   . a
+  -> Env
+  -> Type
+  -> Expr a
+  -> Either (CheckFailure a) { expr :: Expr (Typed a), row :: Type }
 recordRow at env rho e = do
-  ty <- infer (notTail env) rho e
-  recordOf at ty
+  expr <- infer (notTail env) rho e
+  row <- recordOf at (typeOf expr)
+  Right { expr, row }
 
-variantRow :: forall a. a -> Env -> Type -> Expr a -> Either (CheckFailure a) Type
+variantRow
+  :: forall a
+   . a
+  -> Env
+  -> Type
+  -> Expr a
+  -> Either (CheckFailure a) { expr :: Expr (Typed a), row :: Type }
 variantRow at env rho e = do
-  ty <- infer (notTail env) rho e
-  variantOf at ty
+  expr <- infer (notTail env) rho e
+  row <- variantOf at (typeOf expr)
+  Right { expr, row }
 
 payloadAt :: forall a. a -> RowKey -> Type -> Either (CheckFailure a) Type
 payloadAt at key row = do

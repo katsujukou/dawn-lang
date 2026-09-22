@@ -4,6 +4,7 @@ import Prelude
 
 import Effect (Effect)
 import Test.Dawn.Compiler.TypedCore as TypedCore
+import Test.Dawn.Compiler.TypedCore.Annotation as Annotation
 import Test.Dawn.Compiler.TypedCore.Check as Check
 import Test.Dawn.Compiler.TypedCore.Declare as Declare
 import Test.Dawn.Compiler.TypedCore.Kinding as Kinding
@@ -22,6 +23,7 @@ main = runSpecAndExitProcess [ consoleReporter ] do
   Kinding.spec
   Declare.spec
   Check.spec
+  Annotation.spec
   VerticalSlice.spec
   EffectSlice.spec
   RowProperties.spec

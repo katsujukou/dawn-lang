@@ -11,7 +11,7 @@ import Prelude
 import Prim as P
 
 import Dawn.Compiler.TypedCore (Decl(..), DecisionTree(..), EffName(..), Expr(..), Handler, Ident(..), JoinName(..), Kind(..), Literal(..), Module, ModuleName(..), OpClause(..), Occurrence(..), OpName(..), Qualified(..), RowElemKind(..), RowEntry(..), RowKey(..), Symbol(..), TyName(..), TyVar(..), Type(..))
-import Dawn.Compiler.TypedCore.Check (CheckError(..), Env, check, envOf, infer)
+import Dawn.Compiler.TypedCore.Check (CheckError(..), Env, check, envOf, infer, typeOf)
 import Dawn.Compiler.TypedCore.Kinding (KindError(..))
 import Dawn.Compiler.TypedCore.Context (bindVar, emptyContext)
 import Dawn.Compiler.TypedCore.Declare (declare)
@@ -169,12 +169,12 @@ applied = env
 inferAt :: Type -> Expr Unit -> Either CheckError Type
 inferAt rho expr = case infer env rho expr of
   Left failure -> Left failure.error
-  Right ty -> Right ty
+  Right checked -> Right (typeOf checked)
 
 inferIn :: Env -> Type -> Expr Unit -> Either CheckError Type
 inferIn e rho expr = case infer e rho expr of
   Left failure -> Left failure.error
-  Right ty -> Right ty
+  Right checked -> Right (typeOf checked)
 
 checkAt :: Type -> Type -> Expr Unit -> Either CheckError Unit
 checkAt rho expected expr = case check env rho expected expr of

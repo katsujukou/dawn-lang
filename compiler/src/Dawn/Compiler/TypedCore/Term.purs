@@ -19,6 +19,7 @@ module Dawn.Compiler.TypedCore.Term
   , LitBranch
   , KeyBranch
   , exprAnnotation
+  , withAnnotation
   ) where
 
 import Prelude
@@ -245,6 +246,37 @@ exprAnnotation = case _ of
   Perform a _ _ _ _ -> a
   Handle a _ _ -> a
   OpenEff a _ _ -> a
+
+-- | Replace the annotation of the outermost node, leaving those beneath it as
+-- | they are. `map` reaches every node; this one reaches the root.
+withAnnotation :: forall a. a -> Expr a -> Expr a
+withAnnotation a = case _ of
+  Var _ x -> Var a x
+  Global _ name kinds -> Global a name kinds
+  Lit _ literal -> Lit a literal
+  Lam _ x ty body -> Lam a x ty body
+  App _ f x -> App a f x
+  TyLam _ name kind body -> TyLam a name kind body
+  TyApp _ e ty -> TyApp a e ty
+  ConstraintLam _ c body -> ConstraintLam a c body
+  ConstraintApp _ e -> ConstraintApp a e
+  Let _ x ty value body -> Let a x ty value body
+  LetRec _ bindings body -> LetRec a bindings body
+  Case _ scrutinees dt -> Case a scrutinees dt
+  LetJoin _ j params result value body -> LetJoin a j params result value body
+  Jump _ j args -> Jump a j args
+  RecordEmpty _ -> RecordEmpty a
+  RecordExtend _ key value rest -> RecordExtend a key value rest
+  RecordSelect _ key e -> RecordSelect a key e
+  RecordRestrict _ key e -> RecordRestrict a key e
+  RecordUpdate _ key value rest -> RecordUpdate a key value rest
+  RecordMerge _ left right -> RecordMerge a left right
+  VariantInject _ key value -> VariantInject a key value
+  VariantWeaken _ key ty e -> VariantWeaken a key ty e
+  VariantAbsurd _ ty e -> VariantAbsurd a ty e
+  Perform _ key op tyArgs arg -> Perform a key op tyArgs arg
+  Handle _ body handler -> Handle a body handler
+  OpenEff _ row e -> OpenEff a row e
 
 derive instance Eq Literal
 derive instance Ord Literal
