@@ -633,6 +633,26 @@ spec = describe "TypedCore.Check" do
         (counting (Just oneCell) [ oneLit ] (var "x") (fastNext (ReadCell unit nKey)))
         `shouldEqual` Right int
 
+    it "gives a writeCell the Unit type rather than the cell's" do
+      -- a write is done for its effect on the region and hands back nothing of
+      -- its own; reading back what was set takes a readCell
+      inferAt TRowEmpty
+        ( counting (Just oneCell) [ oneLit ] (var "x")
+            ( fastNext
+                (Let unit (Ident "w") unitT (WriteCell unit nKey oneLit) (ReadCell unit nKey))
+            )
+        )
+        `shouldEqual` Right int
+
+    it "refuses a writeCell bound at the cell's type" do
+      inferAt TRowEmpty
+        ( counting (Just oneCell) [ oneLit ] (var "x")
+            ( fastNext
+                (Let unit (Ident "w") int (WriteCell unit nKey oneLit) (ReadCell unit nKey))
+            )
+        )
+        `shouldEqual` Left (TypeMismatch int unitT)
+
     it "refuses a readCell in the computation the handler handles" do
       -- the handled computation stands at `( ent | ρ )`, which carries no
       -- region, so the code a handler handles reaches no cell of its own (D36)
@@ -716,6 +736,90 @@ spec = describe "TypedCore.Check" do
             [ oneLit ]
         )
         `shouldEqual` Left (RegionEscapes regionVar)
+
+    it "checks the handler a var declaration desugars to" do
+      -- the generated scheme carries `RegionKey ∉ e` beside the effect's own
+      -- Lacks, and that is what discharges the region premise at a residual row
+      -- which is a variable
+      let
+        e = TyVar "e"
+        rowE = TVar e
+        a = TyVar "a"
+        tyA = TVar a
+        thunkTy = fn unitT (TRowExtend (RowEffectEntry counterEff []) rowE) tyA
+        -- the row the clauses stand at, which is what the widenings below name
+        clauseRow =
+          TRowExtend
+            (RowRegionEntry (TVar regionVar) (TRowExtend (RowTypeEntry nKey int) TRowEmpty))
+            rowE
+        -- `add` is pure and curried, so each stage that consumes an argument is
+        -- widened to the clause's row: containment is written, never implied
+        added =
+          App unit
+            (OpenEff unit clauseRow (App unit (OpenEff unit clauseRow (var "add")) (var "v")))
+            oneLit
+        body =
+          Let unit (Ident "add") (pureFn int (pureFn int int))
+            (lam "p" int (lam "q" int (var "p")))
+            ( Let unit (Ident "v") int (ReadCell unit nKey)
+                (Let unit (Ident "w") unitT (WriteCell unit nKey added) (var "v"))
+            )
+        term =
+          TyLam unit e (KRow RowEffect)
+            $ TyLam unit a KType
+            $ ConstraintLam unit (Lacks (EffectKey counterEff) rowE)
+            $ ConstraintLam unit (Lacks RegionKey rowE)
+            $ lam "thunk" thunkTy
+            $ Handle unit (App unit (var "thunk") primUnit)
+                { element: RowEffectEntry counterEff []
+                , cells: Just oneCell
+                , returnClause: { binder: Ident "x", ty: tyA, body: var "x" }
+                , opClauses: [ fastNext body ]
+                }
+                [ oneLit ]
+        scheme =
+          TForall e (KRow RowEffect)
+            ( TForall a KType
+                ( TConstrained (Lacks (EffectKey counterEff) rowE)
+                    (TConstrained (Lacks RegionKey rowE) (fn thunkTy rowE tyA))
+                )
+            )
+      checkAt TRowEmpty scheme term `shouldEqual` Right unit
+
+    it "refuses a handler with cells applied in a clause of another with cells" do
+      let
+        inner =
+          Handle unit (Perform unit (EffectKey counterEff) (OpName "next") [] primUnit)
+            { element: RowEffectEntry counterEff []
+            , cells: Just { var: TyVar "s", cells: [ { key: nKey, ty: int } ] }
+            , returnClause: { binder: Ident "y", ty: int, body: primUnit }
+            , opClauses: [ fastNext (ReadCell unit nKey) ]
+            }
+            [ oneLit ]
+        outer =
+          Handle unit (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (LitString "x")))
+            { element: RowEffectEntry consoleEff []
+            , cells: Just { var: regionVar, cells: [ { key: sizeKey, ty: int } ] }
+            , returnClause: { binder: Ident "x", ty: unitT, body: oneLit }
+            , opClauses:
+                [ FastClause
+                    { op: OpName "log"
+                    , tyBinders: []
+                    , argBinder: { name: Ident "m", ty: string }
+                    , body: inner
+                    }
+                ]
+            }
+            [ oneLit ]
+      inferAt TRowEmpty outer `shouldEqual` Left
+        ( NotEntailed
+            ( Lacks RegionKey
+                ( TRowExtend
+                    (RowRegionEntry (TVar regionVar) (TRowExtend (RowTypeEntry sizeKey int) TRowEmpty))
+                    TRowEmpty
+                )
+            )
+        )
 
     it "refuses a cell binder already bound where the handler stands" do
       -- every bound variable of a Core term is unique within its context, and a

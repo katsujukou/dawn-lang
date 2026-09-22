@@ -32,7 +32,7 @@ import Dawn.Compiler.TypedCore.Equality (constraintEquiv, typeEquiv)
 import Dawn.Compiler.TypedCore.Kind (Kind(..), RowElemKind(..))
 import Dawn.Compiler.TypedCore.Kinding (KindError, checkKind, quantifiableKind, wellFormedConstraint, wellFormedKey)
 import Dawn.Compiler.TypedCore.Name (EffName, Ident, JoinName, OpName, Qualified, TyName, TyVar)
-import Dawn.Compiler.TypedCore.Prim (asFunction, booleanTy, fn, litType, recordTy, variantTy)
+import Dawn.Compiler.TypedCore.Prim (asFunction, booleanTy, fn, litType, recordTy, unitTy, variantTy)
 import Dawn.Compiler.TypedCore.Row (RowError, RowNormalForm, fromNormalForm, nf)
 import Dawn.Compiler.TypedCore.Signature (CanonicalClass(..), CtorInfo, EffectInfo, Signature, TyConInfo(..), lookupCtor, lookupEffect, lookupOperation, lookupTyCon, lookupValue)
 import Dawn.Compiler.TypedCore.Term (Binding, DecisionTree(..), Expr(..), Handler, Layout, OpClause(..), Occurrence(..), Param, exprAnnotation, opClauseOp, withAnnotation)
@@ -392,12 +392,13 @@ infer env rho expr = case expr of
     ty <- cellAt at key rho
     Right (ReadCell (at' at ty) key)
 
-  -- `writeCell` evaluates to the value written, which is what lets a clause read
-  -- back what it just set without a second `readCell` (D36).
+  -- A write is done for its effect on the region and hands back nothing of its
+  -- own, so its type is `Unit` rather than the cell's. Reading back what was
+  -- just set takes a `readCell` (D36).
   WriteCell at key value -> do
     ty <- cellAt at key rho
     value' <- check (notTail env) rho ty value
-    Right (WriteCell (at' at ty) key value')
+    Right (WriteCell (at' at (TCon unitTy [])) key value')
 
   OpenEff at row e -> do
     kinded at (checkKind env.signature env.context row (KRow RowEffect))
