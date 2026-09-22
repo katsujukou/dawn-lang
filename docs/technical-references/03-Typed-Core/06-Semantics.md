@@ -526,7 +526,7 @@ Ev_c ::= an evaluation context in which no `region [r] θ in _` on the path
          to the hole has k in dom(θ)
 ```
 
-`Ev_c` picks the **innermost** region declaring `k`, exactly as `Ev_k` picks the innermost handler of a key. Typing admits at most one region in a row, so in a well-typed term there is only ever one to pick; the context is written this way because reduction carries no types and must find it by walking.
+`Ev_c` picks the **innermost** region declaring `k`, exactly as `Ev_k` picks the innermost handler of a key. **Regions nest at run time.** A handler owning one may be applied within the computation another such handler handles, so a path to the hole may pass through several `region [r] θ in _`. What typing admits at most one of is a region in a **row**, which is what makes the region an expression can *reach* unique; it does not make the term carry one. Reduction has no types to consult and finds the region by walking, and `Ev_c` is what says which one it finds.
 
 A `jump` appears only in tail position, so the position it may occupy is narrower than a general context.
 
@@ -727,7 +727,8 @@ Since nothing is captured, the `fast` rule raises none of what D18 leaves open o
 ```text
   region [r] θ in Ev_c[ readCell k ]      →  region [r] θ in Ev_c[ θ(k) ]        k ∈ dom(θ)
 
-  region [r] θ in Ev_c[ writeCell k v ]   →  region [r] θ[k ↦ v] in Ev_c[ v ]    k ∈ dom(θ)
+  region [r] θ in Ev_c[ writeCell k v ]   →  region [r] θ[k ↦ v] in Ev_c[ Prim.Unit ]
+                                                                                k ∈ dom(θ)
 ```
 
 **A write rewrites the evaluation context.** Nothing is mutated and nothing is shared: the region is a part of the term, and the step replaces it with another region. This is what makes a cell a binder with a lifetime rather than a location (D36).
@@ -749,8 +750,6 @@ The second row is not an omission. A handler's own cells are its state across th
 ```
 
 **That the snapshot is free where it matters is the point of the placement.** A `fast` clause captures nothing (D28), so the common path — a clause that reads and writes and hands control back — copies no cell at all; where a capture does happen, the values ride along in a context that was being copied regardless. This is what a store would not give: two resumptions would share one location whatever the composition order, and the first row of that table would read like the second.
-
-`writeCell` steps to the value written rather than to `Prim.Unit`, so a clause that sets a cell and continues has the new value already in hand.
 
 ## The runtime boundary
 

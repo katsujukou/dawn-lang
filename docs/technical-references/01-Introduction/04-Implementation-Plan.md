@@ -170,6 +170,7 @@ The heading of each group names the step of the plan that the group belongs to.
 | `readCell k` in the return clause | Rejected. The return clause stands at `ρ`, which is what makes an ordinary return hand back no state |
 | `full next (_, k) -> let _ : Int = k Prim.Unit in readCell n`, the answer type being `Int` and the cell `Int` | Accepted. A `full` clause stands at `ρ'` and may make a cell's value its answer; what the rules withhold is the automatic return, not the ability |
 | `readCell k` for a key the region's layout does not declare | Rejected |
+| `writeCell k e` | Typed `Unit`, not the cell's type. The result may be dropped, which is what lets a clause set a cell and carry on |
 | A clause returning `λ (_ : Unit). readCell k` as the answer | Rejected. The closure carries `( region r ι \| ρ )` in its arrow, so it mentions `r`, and `r ∉ ftv(β)` |
 | A continuation typed to carry the region, where the handle's residual row does not | Rejected by the same condition, `r ∉ ftv(ρ)` |
 | A handler whose `cells` binder is already bound where the handler stands | Rejected. `r ∉ dom(Γ)`: the layout is kinded outside the binder and then stands inside it, so a binder shadowing an outer variable would draw that variable under the region |
@@ -230,7 +231,7 @@ The heading of each group names the step of the plan that the group belongs to.
 | A `fast` clause of a handler owning a region | Its body is bound by a `let` and the value placed in the hole. Placing the body itself there does not typecheck, the body standing at `ρ'` and the hole at the handled computation's row |
 | A `full` clause of a handler installed **outside** a region, resuming twice | Each resumption begins from the cell contents at the capture, `Ev_k` containing the region. A write during the first is not seen by the second, which a store would not give |
 | A `full` clause of the handler **owning** the region, resuming twice | Both share the region, which stands outside what was captured. The cells stay live across the handler's own resumptions |
-| `writeCell k v` | Steps to `v`, not to `Prim.Unit`, so a clause has the new value in hand |
+| `writeCell k v` | Steps to `Prim.Unit`, the write having no result of its own. Reading back what was just set takes a `readCell` |
 | A saturated foreign whose `δ_f` faults | Steps to `fault φ`, which propagates out of every context including `handle`. It is not caught by a handler and is not the `Partial` effect |
 | A term at ambient row `()` reaching a `perform` with no enclosing handler | Does not arise. This is what effect safety asserts |
 
@@ -338,3 +339,20 @@ These belong with elaboration and are written once a surface language exists ([E
 | Two implicit handlers for one key | Ambiguity, naming both and the modules they come from |
 | Implicit declarations forming a cycle across two modules | Rejected where `Ξ` is assembled from the imports. Neither declaration is wrong on its own, so checking one at a time does not see it |
 | An implicit handler for a labelled instance's key | Out of scope for v0.1, `Ξ` being keyed and the spelling of labelled instances unsettled |
+
+### A handler's cells (step 7)
+
+| Input | Expected |
+| --- | --- |
+| A handler declaration with `var` declarations | The declarations become its `cells` layout and the `@ ( ē )` of its `handle`, keys and initial values in the order written |
+| `x!` and `x := e` | `readCell` and `writeCell` on the key the name gives. The write is `Unit`, which a clause binds as it binds any other result |
+| Two `var` declarations of one name | Rejected where they are written. A region's keys are distinct |
+| `x!` or `x := e` in a `return` clause, in an initial value, or outside the handler | Rejected. A cell stands in the operation clauses alone |
+| `x` alone, where `x` names a cell | Never denotes the cell; it denotes a local `x` where one stands and is unbound otherwise. No value stands for a cell, which is what keeps one from being stored or returned |
+| The region variable the declarations generate | Fresh for the context the `handle` stands in, the layout being kinded outside the binder and then standing inside it |
+| The generated scheme | Carries `RegionKey ∉ e` beside the effect's own `Lacks`. That is what discharges the region premise where the residual row is a variable |
+| A handler with cells applied in a clause of another handler with cells | Rejected by that constraint, and reported against the clause the application stands in |
+| A handler with cells applied in the thunk of another | Accepted. The computation a handler handles carries no region, so the two never meet |
+| An implicit handler with cells, inserted into a clause of a handler with cells | Rejected the same way. The constraint is discharged where the handler is applied, not where it is declared |
+| A clause body of a handler with cells reaching a global | Widened through the region, the clauses standing at `ρ' = ( region r ι \| e )` where a handler without cells leaves them at `e`. A curried function is widened **once for each argument it is passed**, every stage being an arrow at the empty row standing where `ρ'` is ambient (D8) |
+| `implicit` on a handler one of whose initial values does not elaborate to a value form | Rejected where it is declared. An initial value runs whenever the handler is applied, and an inserted application stands where nothing is written |

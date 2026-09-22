@@ -219,7 +219,7 @@ handle e with
   ; return (x : α) -> x
   ; fast next (_ : Unit) ->
       let m : Int = readCell n in
-      let _ : Int = writeCell n ( Base.Int.add m 1 ) in
+      let _ : Unit = writeCell n ( Base.Int.add m 1 ) in
       m
   } @ ( 0 )
 ```

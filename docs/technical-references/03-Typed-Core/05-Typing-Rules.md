@@ -221,7 +221,7 @@ merge : forall (r : Row Type). forall (s : Row Type).
   nf(ρ) = ⟨ F ; T ⟩      F(RegionKey) = region r ι      nf(ι) = ⟨ G ; T' ⟩      G(k) = σ
   Γ;Δ ⊢ e : σ ! ρ
   ──────────────────────────────────────────────────────────────────────────────────────
-  Γ;Δ ⊢ writeCell k e : σ ! ρ
+  Γ;Δ ⊢ writeCell k e : Unit ! ρ
 
   Γ;Δ ⊢ e : τ1 -{r1}-> τ2 ! ρ    Γ ⊨ r1 # r'    Γ ⊢ r' : Row Effect
   ─────────────────────────────────────────────────────────────────
@@ -244,7 +244,7 @@ The return clause's row is the point at which "an ordinary return hands back no 
 
 **`ρ'` is sharp only under `RegionKey ∉ ρ`, and the rule requires it.** A handler polymorphic in its residual row cannot derive the absence of a region there, so the constraint is assumed — written in its type as any other is ([Kinds and Types](01-Kinds-and-Types.md)). What the premise rejects is a region opened where one is already open, which is what keeps `readCell` from having two regions to choose between.
 
-`readCell` and `writeCell` read the region out of the ambient row. **Neither says which region**, and neither needs to: a row holds at most one. `writeCell` evaluates to the value written, which is what lets a clause read back what it just set without a second `readCell`.
+`readCell` and `writeCell` read the region out of the ambient row. **Neither says which region**, and neither needs to: a row holds at most one. **`writeCell` evaluates to `Prim.Unit`.** A write is done for its effect on the region and has no result of its own to hand back; giving it the value written would let a use of that value be mistaken for a read. A clause that sets a cell and carries on binds the `Unit` like any other result, Core writing every binding out.
 
 **`r ∉ dom(Γ)` is what lets an occurrence of `r` mean the region.** Core terms are unique up to α-equivalence, and every bound variable is renamed to be unique within its context ([Kinds and Types](01-Kinds-and-Types.md)); the rule writes the condition out because a region binder is where leaving it implicit costs the most. The layout `ι` is kinded under `Γ`, outside the binder, and then stands under it in `ρ'`: a binder shadowing an outer variable would draw that variable's occurrences in `σ̄` under the region, and would make the condition below read an outer variable of the same name as an escape. Under the premise neither can happen.
 
