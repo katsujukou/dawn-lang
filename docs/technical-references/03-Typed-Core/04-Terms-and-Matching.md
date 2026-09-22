@@ -91,7 +91,7 @@ handle e with h              check e, the return clause, and every operation cla
 
 This is why `Δ` is a context separate from `Γ`: their scoping rules differ. `Γ` extends into the body of a lambda; `Δ` is cut off there. A single context could not express the difference.
 
-Discarding `Δ` at `handle` is conservative. Each clause of a handler receives a continuation and is invoked later, so it is a function boundary, and an outward `jump` from the handled computation would be a non-local exit that unwinds the handler. v0.1 takes the simple rule and may relax it; since the elaborator can move join points inward, the practical restriction is small.
+Discarding `Δ` at `handle` is conservative. A clause is entered from the `perform` site, which lies at an arbitrary depth inside the handled computation and in general in another function activation, so an outward `jump` from a clause body would be a non-local exit that unwinds the handler. This holds of both clause forms ([Effects](03-Effects.md)): a `full` clause is a function boundary outright, receiving a continuation and being invoked later, while a `fast` clause builds no continuation but is still entered from that arbitrary point. v0.1 takes the simple rule and may relax it; since the elaborator can move join points inward, the practical restriction is small.
 
 Join points exist for two reasons: so that a decision tree can hold each alternative's body once, and so that lowering to Mid IR join points preserves structure.
 

@@ -133,11 +133,10 @@ e ::= ...
     | handle e with h                 apply a handler
     | openEff [ρ'] e                  effect widening, erased
 
-h ::= { handles ent
-      ; return (x : τ) -> e_r
-      ; op1 [b̄1] (x1 : σ1, k1 : τ1 -{ρ}-> β) -> e1
-      ; ...
-      ; opn [b̄n] (xn : σn, kn : τn -{ρ}-> β) -> en }
+h  ::= { handles ent ; return (x : τ) -> e_r ; cl1 ; ... ; cln }
+
+cl ::= full op [b̄] (x : σ, k : τ' -{ρ}-> β) -> e    binds the continuation
+     | fast op [b̄] (x : σ)                   -> e    does not
 ```
 
 - `perform k.op [τ̄] e` invokes operation `op` of the element the ambient row keys with `k`. It requires that row to contain such an element, and the operation is looked up in the effect at the head of that element's **payload**, not in `k`.
@@ -158,6 +157,44 @@ A handler for `cache` and a handler for `counter` have the same clauses, `get` a
 **A handler must cover every operation of the effect its element carries.** Since `handle` removes that element from the row, an operation without a clause would leave its `perform` with nowhere to go. Which operations those are is read from the payload: a handler keyed `cache` over a payload `State Int` owes clauses for `get` and `put`. This is the same requirement as local totality of a decision tree ([Terms and Matching](04-Terms-and-Matching.md)).
 
 Every clause therefore gives its operation a meaning of its own: it resumes the continuation, abandons it, or translates the operation into another effect. **Passing an operation on to an outer handler of the same key is not expressible.** The row `( ent | ρ )` is sharp, so `key(ent) ∉ ρ`, while a clause body is typed at the ambient row `ρ`; a `perform` on that key there would require it to be in `ρ`. Two instances of one effect are a different matter: `cache` and `counter` are different keys, so a handler for one may perform on the other. Forwarding of that kind, and a partial handler that leaves the handled element in the row, each require a construct that v0.1 does not have; the candidates are recorded in [Open Questions](../07-Open-Questions/01-Open-Questions.md).
+
+### `full` and `fast` clauses
+
+A clause takes one of two forms, and what separates them is how much of the handled computation the clause can reach (D28).
+
+A **`full` clause** binds the continuation `k`. Its body has the type of the whole `handle`, so the clause decides what the `handle` returns: it may abandon the computation by never applying `k`, resume it once, or branch it by applying `k` more than once ([Semantics](06-Semantics.md)).
+
+A **`fast` clause** binds the operation's arguments and nothing else. Its body has the type the continuation resumes with, and a value the body produces is delivered to the point where the operation was performed. Such a clause is **tail-resumptive**: it translates one operation into a computation over the residual row and, where that computation returns, hands control back there.
+
+```text
+effect Console where log : String ->* Unit
+
+full log [] (msg : String, k : Unit -{ρ}-> β) -> …    -- body : β    ! ρ
+fast log [] (msg : String)                    -> …    -- body : Unit ! ρ
+```
+
+**Core writes the marker on every clause.** There is no default and no unmarked form. A surface language that lets the marker be omitted settles which form it means in its own desugaring, so that the marker is already determined by the time a clause reaches Core.
+
+**The typing rule is what fixes the difference.** A `full` clause's body is checked at the answer type `β`; a `fast` clause's body is checked at the resume type, and `β` appears nowhere in its premise ([Typing Rules](05-Typing-Rules.md)). Naming neither a continuation nor the answer, a `fast` clause cannot bypass the evaluation still to come in order to supply what the `handle` returns, and has no continuation of the handled operation to invoke zero or several times.
+
+**What a `fast` clause guarantees is local to the clause.** Reduction embeds its body at the point of the `perform` once, and on each run in which the body returns a value, the original evaluation context continues from that value under the same handler. The clause does select that value, and so influences the result; what it cannot do is skip the rest of the computation and answer in its place.
+
+A body need not return a value. It may diverge, it may fault, or it may perform an operation of the residual row `ρ` whose own handler declines to resume, and then the handled computation does not continue.
+
+**A `fast` clause does not make the program around it one-shot.** Where its body performs an operation of `ρ` and that operation's `full` handler resumes more than once, the continuation that handler built re-enters the evaluation context after the original `perform`, and the rest of the handled computation runs again with it. The duplication comes from that `full` handler, never from this clause. What holds of the clause is only that implementing it calls for no multi-shot continuation, which is what confines D18's question to `full` clauses ([Semantics](06-Semantics.md)).
+
+**A polymorphic resume type does not forbid a `fast` clause.** `Partial`'s `abort : forall (b : Type). Unit ->* b` needs a body of type `b` for the clause's own `b`, and no pure terminating term has that type. Performing an operation that resumes at `b` does.
+
+```text
+effect Abort1 where abort1 : forall (b : Type). Unit ->* b
+effect Abort2 where abort2 : forall (b : Type). Unit ->* b
+
+fast abort1 [b] (_ : Unit) -> perform Abort2.abort2 [b] Prim.Unit
+```
+
+This translates one capability into another, which is what a `fast` clause is for. Interpreting `Partial` into `Maybe` is a different matter and takes a `full` clause — not because `abort` is polymorphic, but because that handler's answer is `Maybe a` where the computation's is `a`, and only a `full` clause supplies an answer ([Examples](08-Examples.md)).
+
+**The property is declared, not inferred.** Whether a `full` clause happens to resume exactly once, in tail position, cannot be read off its syntax. A single occurrence of `k` may sit under a lambda that is applied twice, and two occurrences in separate branches of a `case` may amount to one resumption. Marking the clause is what makes the property available to the type checker, to reduction, and to a backend.
 
 ### `perform` does not require a handler to exist
 
@@ -267,9 +304,9 @@ Hiding `perform` while exposing `handle` is not arbitrary. The criterion is **us
 | | Surface | Reason |
 | --- | --- | --- |
 | `perform` | hidden | A use site. It occurs everywhere in ordinary code and must blend in with ordinary calls (D7) |
-| `handle` | **exposed** | A binder. It changes the body's effect row, from `( E τ̄ \| ρ )` to `ρ`, and each clause binds a continuation `k` |
+| `handle` | **exposed** | A binder. It changes the body's effect row, from `( E τ̄ \| ρ )` to `ρ`, and each clause binds the operation's arguments, a `full` one a continuation `k` besides |
 
-Changing an effect row and binding `k` are the work of a binder, like `let`, `λ`, or `case`. Hiding a binder would make it impossible to see where a scope changes.
+Changing an effect row and introducing names are the work of a binder, like `let`, `λ`, or `case`. Hiding a binder would make it impossible to see where a scope changes.
 
 **Application code nevertheless contains no `handle`.** Thanks to the thunk encoding below, a reusable interpreter is an ordinary function.
 

@@ -42,7 +42,7 @@ A number of forms carry no run-time content and are removed before evaluation on
 
 ## Handlers and continuations
 
-Handlers are deep. `perform k.op` captures the continuation up to the **innermost** handler whose key is `k`, and passes `(argument, continuation)` to that handler's `op` clause. Resuming the continuation reinstalls the same handler.
+Handlers are deep. `perform k.op` transfers control to the **innermost** handler whose key is `k`. A `full` clause receives the argument together with the continuation up to that handler, and resuming it reinstalls the same handler; a `fast` clause receives the argument alone, and control returns to the point of the `perform` when its body produces a value (D28).
 
 **Handlers of one key do nest at run time**, and the innermost wins. A function that handles `E` internally is pure to its caller, so calling it through `openEff [( E )]` from under an outer handler for `E` puts two on the stack at once. `Ev_k` is what picks between them: every `handle` on the path from the chosen one to the hole has some other key.
 
@@ -51,6 +51,8 @@ What sharpness gives is narrower and static: **no row holds one key twice**, so 
 ### How many times a continuation may be resumed
 
 **Core imposes no limit** (D18). A continuation `k_i` is an ordinary function value, and its type `τ_i' -{ρ}-> β` says nothing about how often it is used. The reference semantics is therefore multi-shot.
+
+The question belongs to `full` clauses, which are the ones that bind a continuation. A `fast` clause binds none and constructs none (D28), so implementing one asks nothing of a backend beyond ordinary evaluation. That is a statement about the clause: a program containing one is not thereby one-shot, since the clause's body may perform an operation of the residual row whose `full` handler resumes several times.
 
 - calling it zero times abandons the computation, as an interpreter of `Partial` into `Maybe` does
 - calling it once is ordinary resumption
@@ -89,7 +91,7 @@ Stated precisely:
 v0.1 **accepts this as a known gap**, under three conditions.
 
 1. **Failure is loud and specific.** A second resumption raises a dedicated run-time error, comparable to OCaml 5's `Continuation_already_resumed`. It must not be undefined behaviour and must not silently produce a wrong result.
-2. **A static best-effort check is performed.** Detecting multiple resumption is undecidable in general, since `k` can be stored and called in a loop, but the **syntactically evident** cases are detectable: a clause that mentions `k` more than once, or passes `k` to another function, warns at compile time. Most accidents are caught there, leaving the run-time check as a backstop.
+2. **A static best-effort check is performed.** Only `full` clauses are in question, a `fast` clause having no continuation to resume. Detecting multiple resumption within a `full` clause is undecidable in general, since `k` can be stored and called in a loop, but the **syntactically evident** cases are detectable: a clause that mentions `k` more than once, or passes `k` to another function, warns at compile time. Most accidents are caught there, leaving the run-time check as a backstop. Writing a clause `fast` where its shape allows removes it from the question altogether.
 3. **Closing the gap is a requirement for v1.0**, recorded in [Open Questions](../07-Open-Questions/01-Open-Questions.md).
 
 The routes to closing it appear in the table above: full CPS conversion on JavaScript, or a cloning primitive entering the Wasm stack-switching proposal. Making the reference semantics target-parameterized is a third possibility, but it would mean the same Core has different meanings on different backends, which conflicts with the backend independence of Mid IR.
@@ -97,6 +99,8 @@ The routes to closing it appear in the table above: full CPS conversion on JavaS
 ### Consequence for Mid IR
 
 Mid IR is designed in Phase A; effect lowering belongs to Phase E. Because of that order, **the representation of continuations in Mid IR must not assume one-shot**. This is a constraint to observe already in Phase A, and it is why Mid IR is specified to carry handler and continuation operations.
+
+A `fast` clause needs no such representation, so Mid IR must also keep the two clause forms apart, allowing a backend to lower one as an ordinary call and reserving the cost of a continuation for the other.
 
 ## Reduction
 
@@ -559,10 +563,16 @@ The second rule discards a binding whose join point is no longer reachable.
                                                      k_i := λ(y : τ_i'). handle Ev_k[y] with h ]
                                                  where h = { handles ent ; … }, key(ent) = k,
                                                    and its clause for op is
-                                                   op [b̄_i] (x_i, k_i) -> e_i
+                                                   full op [b̄_i] (x_i, k_i) -> e_i
+
+  handle Ev_k[ perform k.op [σ̄] v ] with h    →  handle Ev_k[ openEffC [( ent )]
+                                                     ( e_i[ b̄_i := σ̄,  x_i := v ] ) ] with h
+                                                 where h = { handles ent ; … }, key(ent) = k,
+                                                   and its clause for op is
+                                                   fast op [b̄_i] (x_i) -> e_i
 ```
 
-Two things are visible in the second rule.
+Three things are visible in the `full` rule.
 
 **The handler is reinstalled.** The continuation `k_i` rebuilds `handle Ev_k[y] with h`, so resuming returns under the same handler. This is what makes handlers deep (D15).
 
@@ -572,7 +582,17 @@ Two things are visible in the second rule.
 
 `k_i` is an ordinary function value. Nothing in the rule restricts how often it may be applied, which is the sense in which the reference semantics is multi-shot (D18).
 
-`fail τ` reduces through this rule too, being derived notation for `perform Partial.abort [τ] Prim.Unit`.
+**The `fast` rule constructs no continuation** (D28). The clause body takes the place of the `perform` within the same `Ev_k`, and the handler stays installed around it, so control reaches the handled computation again without a function value ever being made. The widening is what reconciles the two rows: the body is typed at the residual row `ρ`, while the hole of `Ev_k` stands at `( ent | ρ )`, and `openEffC [( ent )]` records the difference — admissible because `( ent | ρ )` is sharp, so `ρ # ( ent )`. Once the body reaches a value the widening is discharged against it, leaving that value where the operation was performed.
+
+Whether the body runs inside or outside the `handle` is not observable. A clause body is typed at `ρ`, which lacks `key(ent)` by sharpness, so under neither rule can it perform on the key being handled.
+
+A body that never reaches a value leaves the handled computation unfinished. The rule says what becomes of a value the body produces and requires no value of it; diverging, faulting, and performing an operation of `ρ` that is never resumed are the three ways that happens, the last of them recorded in the row ([Effects](03-Effects.md)).
+
+Since nothing is captured, the `fast` rule raises none of what D18 leaves open on its own account: it embeds the body once and holds no continuation that could be applied again. The construct able to demand a multi-shot continuation is therefore `full` alone, which is what confines the gap recorded above to `full` clauses.
+
+**That is not the same as the program being one-shot.** Where the body performs an operation of `ρ` and that operation's `full` handler applies its continuation twice, that continuation rebuilds `handle Ev_k[…] with h` and so runs `Ev_k` twice — the computation after the original `perform` is duplicated, by the other handler's continuation rather than by this rule.
+
+`fail τ` reduces through these rules too, being derived notation for `perform Partial.abort [τ] Prim.Unit`; which of the two applies is settled by the form of the installed handler's clause for `abort`.
 
 ## The runtime boundary
 
@@ -610,8 +630,11 @@ Erasure `⌊·⌋` removes the forms that carry no run-time content.
 
 ⌊letjoin j (x̄ : τ̄) : τ = e1 in e2⌋  = letjoin j (x̄) = ⌊e1⌋ in ⌊e2⌋
 
-⌊{ handles ent ; return (x : τ) -> e_r ; op_i [b̄_i] (x_i : σ_i, k_i : τ_i) -> e_i }⌋
-    = { key key(ent) ; return x -> ⌊e_r⌋ ; op_i (x_i, k_i) -> ⌊e_i⌋ }
+⌊{ handles ent ; return (x : τ) -> e_r ; cl_i }⌋
+    = { key key(ent) ; return x -> ⌊e_r⌋ ; ⌊cl_i⌋ }
+
+⌊full op [b̄] (x : σ, k : τ) -> e⌋  = full op (x, k) -> ⌊e⌋
+⌊fast op [b̄] (x : σ)        -> e⌋  = fast op (x)    -> ⌊e⌋
 
 ⌊handle e with h⌋ = handle ⌊e⌋ with ⌊h⌋
 ```
@@ -619,6 +642,8 @@ Erasure `⌊·⌋` removes the forms that carry no run-time content.
 This is **not** a reduction relation. `openEff`, `openEffC`, `weaken`, and `[[κ̄]]` change a term's type or its ambient row, and `[[κ̄]]` additionally discards an instantiation that the typed rules require. A backend erases first and then evaluates; the typed relation above evaluates without erasing.
 
 An erased handler carries the key alone: the payload of the element is what says which operations the clauses must exhaust, and that is settled before evaluation begins. The result type of a join point goes the same way, being written for the checker rather than for reduction.
+
+**The `full` and `fast` markers survive erasure.** They carry no type information; they say what a clause binds and which reduction rule applies to it, and a backend lowers the two differently — a `fast` clause needs no representation of a continuation at all. Core writes the marker on every clause, so which rule applies is settled in the erased term as well.
 
 A variant value loses its `weaken` wrappers, so an erased `switchKey` dispatches on the key the value carries directly. Recursive closures survive erasure, since `rec_i(x̄. v̄)` carries computational content.
 
@@ -648,4 +673,4 @@ This is the property the whole design rests on, and it is the one that testing i
 
 **Erasure.** If `G ⊢ e → e2` then `⌊e⌋` reduces to `⌊e2⌋` in zero or one steps under the erased relation, the zero-step case being a step that only introduced or discharged a coercion. If `G ⊢ e → fault φ` then `⌊e⌋` reduces to the same fault `φ`; an erased evaluator and a typed one fail identically. The value restriction is what makes this hold: the body of a type or constraint abstraction is already a value, so erasing the abstraction cannot move evaluation to a different point.
 
-**Non-conformance of the v0.1 backends.** The reduction rule for handlers places no bound on applications of `k_i`, so a term applying it twice is well typed and has a defined reduction sequence. The v0.1 JavaScript and Wasm backends do not reproduce that sequence; they raise a run-time error at the second application. This is the precise content of the soundness gap recorded above.
+**Non-conformance of the v0.1 backends.** The reduction rule for a `full` clause places no bound on applications of `k_i`, so a term applying it twice is well typed and has a defined reduction sequence. The v0.1 JavaScript and Wasm backends do not reproduce that sequence; they raise a run-time error at the second application. This is the precise content of the soundness gap recorded above.

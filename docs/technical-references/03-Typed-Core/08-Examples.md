@@ -181,12 +181,14 @@ nonrec Example.toMaybe
         handle ( thunk Prim.Unit ) with
           { handles Partial
           ; return (x : a) -> ( openEff [e] ( Prelude.Just [a] ) ) x
-          ; abort [b] (_ : Unit, k : b -{e}-> Maybe a) ->
+          ; full abort [b] (_ : Unit, k : b -{e}-> Maybe a) ->
               Prelude.Nothing [a]
           }
 ```
 
 Abandoning `k` and returning `Nothing` realizes the abortion. The effect of PureScript's `Partial` class is obtained with no class mechanism at all.
+
+The clause is `full` because it supplies the answer (D28). This handler returns `Maybe a` where the computation it handles returns `a`, and only a `full` clause names that answer. `abort`'s polymorphic resume type is no obstacle in itself: a `fast` clause for it can translate the abortion into another effect, which is not available here, the target being a pure type rather than another capability ([Effects](03-Effects.md)).
 
 A data constructor has pure arrows by declaration, so `Prelude.Just` is widened
 in the return clause for the same reason the arithmetic is above: the clause is

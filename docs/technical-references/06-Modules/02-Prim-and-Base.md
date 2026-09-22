@@ -346,13 +346,17 @@ Js.Effect.Console.lowerConsole
           handle ( ( openEff [( LiftIO )] thunk ) Prim.Unit ) with
             { handles Console
             ; return (x : a) -> x
-            ; log (msg : String, k : Unit -{ ( LiftIO | e ) }-> a) ->
-                let _ : Unit =
-                      perform LiftIO.liftIO [Unit]
-                        ( ( openEff [( LiftIO | e )] Js.Console.log ) msg ) in
-                k Prim.Unit
+            ; fast log (msg : String) ->
+                perform LiftIO.liftIO [Unit]
+                  ( ( openEff [( LiftIO | e )] Js.Console.log ) msg )
             }
 ```
+
+**The clause is `fast`** (D28). An adapter translates one operation into another
+and gives control straight back, which is exactly what a `fast` clause expresses:
+it binds no continuation, and its body has the type `log` resumes with, `Unit`.
+Building a continuation here would cost something and buy nothing
+([Effects](../03-Typed-Core/03-Effects.md)).
 
 **Two widenings are needed, and neither is optional** (D8). The `handle` removes
 `Console` from a body standing at `( Console, LiftIO | e )`, while the thunk

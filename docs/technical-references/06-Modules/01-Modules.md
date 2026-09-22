@@ -123,7 +123,7 @@ The reason is soundness. `handle` intercepts only `perform`, whereas a `foreign`
 
 ```text
 -- were foreign log : String -{( Console )}-> Unit admitted
-handle (log "x") with { handles Console ; … log (s,k) -> … }
+handle (log "x") with { handles Console ; … full log (s,k) -> … }
 -- the type removes Console, yet the output never reaches the clause
 ```
 

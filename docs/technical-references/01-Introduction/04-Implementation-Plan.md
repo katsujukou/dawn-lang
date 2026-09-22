@@ -151,6 +151,13 @@ The heading of each group names the step of the plan that the group belongs to.
 | A handler clause whose continuation is typed at the inner row | Rejected. It is `τ' -{ρ}-> β`, the row outside the handle and the result of it (D15) |
 | A clause binding `forall b` where the operation declares `forall a` | Accepted. The binders are aligned, a handler respecting the polymorphism rather than the spelling |
 | A clause binding a different number of them, or one at another kind | Rejected |
+| A `full` clause's body | Checked at the answer type `β`. It is the clause that supplies what the `handle` returns |
+| A `fast` clause's body | Checked at the resume type `τ_i'`. `β` appears nowhere in its premise (D28) |
+| A `fast` clause whose body has the answer type instead | Rejected by that check |
+| A `fast` clause carrying a continuation binder | Not representable. The forms are separate, so no clause has an optional one and no marker is absent |
+| A handler mixing a `full` clause with a `fast` one | Accepted. The form is written per clause |
+| `fast abort1 [b] (_ : Unit) -> perform Abort2.abort2 [b] Prim.Unit` | Accepted. A polymorphic resume type rules out a pure terminating body, not a translation into another effect |
+| The handler interpreting `Partial` into `Maybe` | `full`. Its answer is `Maybe a` where the computation's is `a`, and only a `full` clause supplies an answer |
 | `guard` whose consequent reaches no leaf and whose alternative does | Accepted, at the type the alternative gives |
 
 ### FFI and declarations (step 3)
@@ -187,6 +194,7 @@ The heading of each group names the step of the plan that the group belongs to.
 | `switchKey` on a value wrapped in `weaken` | Dispatches on the key actually injected. `weaken` is a value form and is looked through |
 | `bind x = o in guard (p x) …` | The substitution happens before descending, so the guard's condition has no free `x` |
 | That call, once it is evaluated | The innermost handler of the key is chosen: `Ev_k` lets no `handle` of that key stand between it and the hole |
+| `handle Ev_k[perform k.op v] with h` whose clause for `op` is `fast` | The body takes the place of the `perform` inside `Ev_k` with the handler still installed, and no continuation value is built. `openEffC [( ent )]` preserves the type and the ambient row exactly, and is discharged against the value the body produces |
 | A saturated foreign whose `δ_f` faults | Steps to `fault φ`, which propagates out of every context including `handle`. It is not caught by a handler and is not the `Partial` effect |
 | A term at ambient row `()` reaching a `perform` with no enclosing handler | Does not arise. This is what effect safety asserts |
 
@@ -197,3 +205,4 @@ The heading of each group names the step of the plan that the group belongs to.
 | A term and its erasure | The same sequence of observable steps, modulo steps that only introduce or discharge a coercion |
 | A term whose reduction faults | The erased term faults identically |
 | The number of run-time arguments a backend passes to `δ_f` | Determined by the arrow count of the **declared** type, not by the instantiated result type |
+| A handler carrying a `full` clause and a `fast` clause | Both markers survive erasure, Core having written each of them. They carry no type information, and a backend lowers the two differently |

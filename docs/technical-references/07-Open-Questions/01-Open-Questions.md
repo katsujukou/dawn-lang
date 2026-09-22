@@ -68,11 +68,11 @@ D17 has increased the weight of this item: under direct style the right-hand sid
 
 ## Effects
 
-**Declaring non-conformance, and per-clause multi-shot opt-in.** Under D18 the v0.1 JavaScript and Wasm backends remain non-conforming and provisionally tolerated.
+**Declaring non-conformance.** Under D18 the v0.1 JavaScript and Wasm backends remain non-conforming and provisionally tolerated.
 
-One question is **how to declare and check the extent of non-conformance**. Detecting a second resumption at run time suffices for now, but a program able to state that a handler requires multi-shot could fail at build time on a backend that does not conform.
+D28 settles part of this. A clause is `full` or `fast`, and a `fast` clause constructs no continuation, so implementing one demands no multi-shot continuation and the construct that can demand one is `full` alone ([Semantics](../03-Typed-Core/06-Semantics.md)). A program containing `fast` clauses is not thereby one-shot: duplication arises wherever a `full` handler on the residual row applies its continuation more than once.
 
-That requires a per-clause opt-in comparable to Koka's `ctl`, which adds a flag to each clause of Core's `handle`. There is no need to add it now, but it is where Core's syntax may change; the addition is backward compatible, since existing clauses read as unrestricted.
+What remains is **how to declare and check the extent of non-conformance among `full` clauses**. Detecting a second resumption at run time suffices for now, but a program able to state that a handler requires multi-shot could fail at build time on a backend that does not conform. Answering it means a third level beside `full` and `fast`, separating a `full` clause that resumes at most once from one that genuinely branches the computation. Whatever shape it takes stays backward compatible, a `full` clause reading as unrestricted.
 
 The other is **confirming the Wasm stack-switching proposal**. The tables in [Semantics](../03-Typed-Core/06-Semantics.md) assume that its continuations are one-shot and linear and that no cloning primitive is in the MVP. This is secondhand and should be verified against primary sources before Phase E.
 

@@ -177,15 +177,18 @@ merge : forall (r : Row Type). forall (s : Row Type).
   ────────────────────────────────────────────────────
   Γ;Δ ⊢ perform k.op [σ̄] e : τ[ā := τ̄][b̄ := σ̄] ! ρ
 
-  h = { handles ent ; return (x : α) -> e_r ; op_i [b̄_i] (x_i : σ_i', k_i : τ_i' -{ρ}-> β) -> e_i }
+  h = { handles ent ; return (x : α) -> e_r ; cl_i }
   Γ ⊢ ( ent | ρ ) : Row Effect                      ← the element the handle removes
   Γ;· ⊢ e : α ! ( ent | ρ )                         ← inside handle the row grows
   payload(ent) = E τ̄                                ← the key selects it, the payload names E
   Γ, x : α; · ⊢ e_r : β ! ρ
   each i:  Σ(E).op_i = forall (b̄_i : κ̄_i). σ_i ->* τ_i
            σ_i' = σ_i[ā := τ̄]    τ_i' = τ_i[ā := τ̄]
-           Γ, b̄_i : κ̄_i, x_i : σ_i', k_i : τ_i' -{ρ}-> β; · ⊢ e_i : β ! ρ
            (b̄_i is bound by the clause; a handler must respect an operation's polymorphism)
+           if cl_i = full op_i [b̄_i] (x_i : σ_i', k_i : τ_i' -{ρ}-> β) -> e_i
+              Γ, b̄_i : κ̄_i, x_i : σ_i', k_i : τ_i' -{ρ}-> β; · ⊢ e_i : β    ! ρ
+           if cl_i = fast op_i [b̄_i] (x_i : σ_i') -> e_i
+              Γ, b̄_i : κ̄_i, x_i : σ_i'                    ; · ⊢ e_i : τ_i' ! ρ
   { op_i } = dom(Σ(E))    and the op_i are distinct   ← the clauses exhaust E's operations, once each
   ───────────────────────────────────────────────────────────────────────
   Γ;Δ ⊢ handle e with h : β ! ρ
@@ -196,6 +199,10 @@ merge : forall (r : Row Type). forall (s : Row Type).
 ```
 
 That handlers are deep (D15) shows in the type of the continuation `k_i`, namely `τ_i -{ρ}-> β`: calling it returns under the same handler, so the result type is `β`, the result of the `handle`, and the ambient row is `ρ`, the row outside it. A shallow handler would give `τ_i -{( ent | ρ )}-> α`.
+
+A `fast` clause's premise names neither `k_i` nor `β`, and that absence is the whole content of the distinction (D28). Having no way to speak of the answer, such a clause cannot bypass the evaluation still to come in order to supply what the `handle` returns, and having no continuation it cannot invoke one zero or several times; its body is an ordinary computation at the residual row, of the type the continuation resumes with.
+
+**What the rule establishes is about the clause, not about the program containing it.** The body may diverge, it may fault, and it may perform an operation of `ρ` whose own handler declines to resume, or resumes more than once and so runs the rest of the handled computation again ([Effects](03-Effects.md)). The two forms are otherwise alike, both binding the operation's own type variables `b̄_i` and both checked with `Δ` discarded ([Terms and Matching](04-Terms-and-Matching.md)).
 
 `openEff` is required where a pure function is used in an effectful context.
 
