@@ -15,6 +15,7 @@ import Prim as P
 -- Everything Mid IR offers is reached through the facade, which is what a
 -- lowering imports. A member missing from its re-export list fails this module
 -- rather than going unnoticed.
+import Dawn.Compiler.Abi (PrimOp(..))
 import Dawn.Compiler.MidIR (Rep(..), TranslateError, translate)
 import Dawn.Compiler.MidIR as M
 import Dawn.Compiler.TypedCore (Ident(..), Literal(..), ModuleName(..), Qualified(..), TyName(..), declare, declareAnnotated, primSignature)
@@ -81,7 +82,7 @@ spec = describe "Dawn.Compiler.MidIR.Translate » the vertical slice" do
                 M.ELet (M.Local 1) RepInt (M.CField (M.ALocal (M.Local 0)) cons 0)
                   ( M.ELet (M.Local 2) (RepData listTy) (M.CField (M.ALocal (M.Local 0)) cons 1)
                       ( M.ELet (M.Local 3) RepInt (M.CCallKnown (value "sum") [ M.ALocal (M.Local 2) ])
-                          (M.ETail (M.CForeign intAdd [ M.ALocal (M.Local 1), M.ALocal (M.Local 3) ]))
+                          (M.ETail (M.CPrim IntAdd [ M.ALocal (M.Local 1), M.ALocal (M.Local 3) ]))
                       )
                   )
             }
@@ -108,9 +109,9 @@ spec = describe "Dawn.Compiler.MidIR.Translate » the vertical slice" do
           _ -> Left "not a dispatch"
     nilBranchBinds `shouldEqual` Right (M.ERet (M.ALit (LitInt 0)))
 
-  it "makes the addition a tail call and the recursion an ordinary one" do
-    -- `Main.sum ys` is an argument, so it is named; `Base.Int.add` stands where
-    -- the function returns
+  it "makes the addition an operation and the recursion an ordinary call" do
+    -- `Base.Int.add` is a `Base` entry the ABI fixes the meaning of, so it is an
+    -- operation carried out directly rather than a call to an implementation
     let
       tails = do
         f <- functionOf 0
@@ -119,7 +120,7 @@ spec = describe "Dawn.Compiler.MidIR.Translate » the vertical slice" do
             Just branch -> Right (spine branch.body)
             Nothing -> Left "no Cons branch"
           _ -> Left "not a dispatch"
-    tails `shouldEqual` Right (M.ETail (M.CForeign intAdd [ M.ALocal (M.Local 1), M.ALocal (M.Local 3) ]))
+    tails `shouldEqual` Right (M.ETail (M.CPrim IntAdd [ M.ALocal (M.Local 1), M.ALocal (M.Local 3) ]))
 
   it "folds the spine of `result` into saturated constructor calls" do
     -- `Main.Nil [Int]` erased to a constant, and each `Cons` is one `CCtor`.

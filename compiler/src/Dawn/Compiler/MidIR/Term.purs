@@ -40,6 +40,7 @@ import Prelude
 
 import Prim as P
 
+import Dawn.Compiler.Abi (PrimOp)
 import Dawn.Compiler.MidIR.Rep (Rep)
 import Dawn.Compiler.TypedCore.Name (EffName, Ident, ModuleName, OpName, Qualified, TyName)
 import Dawn.Compiler.TypedCore.Term (Literal)
@@ -77,10 +78,16 @@ data Atom
   | ACtor (Qualified Ident)
 
 -- | What a partial application is waiting to become.
+-- |
+-- | **An operation stays an operation through a partial application.** A callee
+-- | naming the foreign instead would leave a consumer recognizing a qualified
+-- | name to find out what saturating it runs, which is what naming the operation
+-- | exists to avoid, and would leave the use unrecorded.
 data Callee
   = CalleeValue (Qualified Ident)
   | CalleeForeign (Qualified Ident)
   | CalleeCtor (Qualified Ident)
+  | CalleePrim PrimOp
 
 -- | A computation, bound by a `let` or standing in tail position. The only
 -- | place an effect, an allocation, or a call occurs.
@@ -91,7 +98,13 @@ data Comp
   -- | A call whose callee is not known statically. Under- and over-application
   -- | are resolved here.
   | CCallUnknown Atom (P.Array Atom)
-  -- | A saturated foreign. **The only computation that may fault.**
+  -- | A saturated `Base` ABI operation, which the ABI fixes the meaning of. A
+  -- | consumer carries one out directly rather than calling an implementation a
+  -- | backend supplied. **May fault**: which entries do is the ABI
+  -- | specification's to say.
+  | CPrim PrimOp (P.Array Atom)
+  -- | A saturated foreign: an implementation a backend supplies, named. **May
+  -- | fault.**
   | CForeign (Qualified Ident) (P.Array Atom)
   | CCtor (Qualified Ident) (P.Array Atom)
   -- | Fewer arguments than the callee's arity. The result is a value.
@@ -127,6 +140,10 @@ data Expr
   | EJump JoinId (P.Array Atom)
   -- | A computation in tail position, which a backend reads as an obligation to
   -- | transfer control rather than to push a frame.
+  -- |
+  -- | It carries no `Rep`. A call returns its value rather than binding one and
+  -- | wants none; a computation that is not a call takes a register on the way to
+  -- | returning, and the class of that register is unknown for want of one here.
   | ETail Comp
   | ESwitchCtor Atom (P.Array CtorBranch) (Maybe Expr)
   -- | Literals cannot be exhausted, so the default is not optional.
@@ -211,14 +228,20 @@ type ForeignEntry =
   , arity :: P.Int
   }
 
--- | How initialization installs a top-level value.
+-- | How initialization installs a top-level value, which **the shape of the
+-- | right-hand side decides and not the form of the declaration**.
 data GlobalInit
-  -- | A `nonrec`: evaluate a function of no parameters once and store the
-  -- | result. Evaluating eagerly in declaration order is observable.
+  -- | A right-hand side that is not a lambda: evaluate a function of no
+  -- | parameters once and store the result. Evaluating eagerly in declaration
+  -- | order is observable.
   = GRun FuncId
-  -- | A member of a top-level `rec` group: install a closure over an empty
-  -- | capture list, evaluating nothing. Its recursive references are global
-  -- | names.
+  -- | A right-hand side that is a lambda once erasure has looked through the
+  -- | wrappers: install a closure over an empty capture list, evaluating
+  -- | nothing. At the top level every free name is a global, so there is
+  -- | nothing to capture.
+  -- |
+  -- | This is the same test the definitional arity is read by, so a global a
+  -- | `callk` reaches holds a function of the arity that call supplied.
   | GFunc FuncId
 
 type GlobalEntry =
@@ -257,8 +280,8 @@ type Debug ann =
   -- | A `Local` is unique within a function and not beyond one, so nothing but a
   -- | function and a local together identifies a binding.
   -- |
-  -- | A local holding a projection, or an intermediate result of a spine, was
-  -- | created for no name and appears in neither map.
+  -- | A local holding an intermediate result of a spine, or a projection no
+  -- | pattern gave a name to, was created for no name and appears in neither map.
   , locals :: Map FuncId (Map Local Ident)
   }
 

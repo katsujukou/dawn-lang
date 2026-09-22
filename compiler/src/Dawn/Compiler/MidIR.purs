@@ -12,6 +12,7 @@ module Dawn.Compiler.MidIR
   ( module Dawn.Compiler.MidIR.Rep
   , module Dawn.Compiler.MidIR.Term
   , module Dawn.Compiler.MidIR.Translate
+  , module Dawn.Compiler.MidIR.Verify
   ) where
 
 -- Re-exporting `Function` shadows the `Prim` name of that spelling, so `Prim` is
@@ -21,3 +22,4 @@ import Prim as P
 import Dawn.Compiler.MidIR.Rep (Rep(..), repOf)
 import Dawn.Compiler.MidIR.Term (Atom(..), Binder, Callee(..), ClauseForm(..), ClauseRef, Comp(..), CtorBranch, CtorEntry, Debug, EffectEntry, Expr(..), ForeignEntry, FuncId(..), Function, FunctionDebug, GlobalEntry, GlobalInit(..), Handler, JoinId(..), KeyBranch, LitBranch, Local(..), Module, OpClauseRef, RecBinding, emptyDebug)
 import Dawn.Compiler.MidIR.Translate (TranslateError(..), freeVars, translate)
+import Dawn.Compiler.MidIR.Verify (VerifyError(..), verify)

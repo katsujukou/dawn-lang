@@ -212,18 +212,25 @@ spec = describe "Dawn.Compiler.MidIR.Translate » cases a plausible translation 
     it "sees through every wrapper erasure removes, so each call is known" do
       -- a run stopping at `openEff`, `[τ]`, or `[•]` reads the definition as
       -- taking no argument, and every call to it degrades to `CCallUnknown`
-      bodyOf wrapperModule 6 `shouldEqual` Right
+      bodyOf wrapperModule 3 `shouldEqual` Right
         ( M.ELet (M.Local 0) RepInt (M.CCallKnown (value "viaTyApp") [ M.ALit (LitInt 1) ])
             ( M.ELet (M.Local 1) RepInt (M.CCallKnown (value "viaOpen") [ M.ALocal (M.Local 0) ])
                 (M.ETail (M.CCallKnown (value "viaCon") [ M.ALocal (M.Local 1) ]))
             )
         )
 
-    it "lifts the lambda under the wrapper as a function of one parameter" do
-      -- the `nonrec` thunk returns a closure over it; the arity belongs to the
-      -- closure the global holds, which is what a known call targets
-      bodyOf wrapperModule 0 `shouldEqual` Right (M.ETail (M.CClosure (M.FuncId 1) []))
-      bodyOf wrapperModule 1 `shouldEqual` Right (M.ERet (M.ALocal (M.Local 0)))
+    it "installs the lambda under the wrapper as the function itself" do
+      -- what a global holds is decided by the shape of its right-hand side and
+      -- not by the form of its declaration, so the arity a known call supplies
+      -- is the arity of the function the global was installed from
+      bodyOf wrapperModule 0 `shouldEqual` Right (M.ERet (M.ALocal (M.Local 0)))
+      let inits = map (map _.init <<< _.module.globals) (lower wrapperModule)
+      inits `shouldEqual` Right
+        [ M.GFunc (M.FuncId 0)
+        , M.GFunc (M.FuncId 1)
+        , M.GFunc (M.FuncId 2)
+        , M.GRun (M.FuncId 3)
+        ]
 
   describe "an application under a wrapper" do
 
@@ -232,7 +239,7 @@ spec = describe "Dawn.Compiler.MidIR.Translate » cases a plausible translation 
       -- peel strips it. A peel that stopped there would return the term it was
       -- given with no arguments taken off, and the head would be atomized into
       -- the same term again
-      bodyOf weakenModule 2 `shouldEqual` Right
+      bodyOf weakenModule 1 `shouldEqual` Right
         (M.ETail (M.CCallKnown (value "mkVariant") [ M.ALit (LitInt 1) ]))
 
   describe "the numbering of locals" do
@@ -245,57 +252,63 @@ spec = describe "Dawn.Compiler.MidIR.Translate » cases a plausible translation 
           result <- lower wrapperModule
           Right (map (\f -> map _.local f.params) result.module.functions)
       firstParams `shouldEqual` Right
-        [ [], [ M.Local 0 ], [], [ M.Local 0 ], [], [ M.Local 0 ], [] ]
+        [ [ M.Local 0 ], [ M.Local 0 ], [ M.Local 0 ], [] ]
 
   describe "the debug table" do
 
-    it "names the function each global is installed from" do
+    it "names the function each global is installed from, and no other" do
       let
-        names = do
-          result <- lower wrapperModule
+        names m = do
+          result <- lower m
           Right (map _.name (Array.fromFoldable (Map.values result.debug.functions)))
-      names `shouldEqual` Right
+      -- every function of the wrapper fixture is a global's
+      names wrapperModule `shouldEqual` Right
         [ Just (value "viaTyApp")
-        , Nothing
         , Just (value "viaOpen")
-        , Nothing
         , Just (value "viaCon")
-        , Nothing
         , Just (value "calls")
+        ]
+      -- `wrapped` holds a lambda inside a record, which is lifted out of a body
+      -- rather than installed from a global and so has no name
+      names debugModule `shouldEqual` Right
+        [ Just (value "named")
+        , Just (value "letName")
+        , Just (value "wrapped")
+        , Nothing
         ]
 
     it "records the annotation of the term the function was made from" do
       -- the outermost node of the run, not the body left after the lambdas come
       -- off, and not the lambda left after the wrappers come off:
-      --   #0 `named`'s thunk and #1 its lambda, from a `Lam` annotated 10 over a
-      --      `Var` annotated 11
-      --   #2 `letName`'s thunk, from a `Let` annotated 20
-      --   #3 `wrapped`'s thunk, from a `RecordExtend` annotated 40
-      --   #4 the lambda inside it, from an `openEff` annotated 30 over a `Lam`
+      --   #0 `named`, from a `Lam` annotated 10 over a `Var` annotated 11
+      --   #1 `letName`, from a `Let` annotated 20
+      --   #2 `wrapped`, from a `RecordExtend` annotated 40
+      --   #3 the lambda inside it, from an `openEff` annotated 30 over a `Lam`
       --      annotated 10
       let
         sources = do
           result <- lower debugModule
           Right (map _.source (Array.fromFoldable (Map.values result.debug.functions)))
-      sources `shouldEqual` Right [ Just 10, Just 10, Just 20, Just 40, Just 30 ]
+      sources `shouldEqual` Right [ Just 10, Just 20, Just 40, Just 30 ]
 
     it "names a local per function, and only where one was created for a name" do
-      -- `x` is a parameter of #1; `y` is the local the `let` created in #2, and
+      -- `x` is a parameter of #0; `y` is the local the `let` created in #1, and
       -- `z` aliases it rather than making one of its own. The two records `y`
-      -- is built from were created for no name and appear nowhere
+      -- is built from were created for no name and appear nowhere. #3 binds a
+      -- `y` of its own, a local being named within the function it belongs to
       let
         locals = do
           result <- lower debugModule
           Right (map (\(Tuple f m) -> Tuple f (Map.toUnfoldable m :: P.Array (Tuple M.Local Ident)))
                    (Map.toUnfoldable result.debug.locals :: P.Array (Tuple M.FuncId (Map.Map M.Local Ident))))
       locals `shouldEqual` Right
-        [ Tuple (M.FuncId 1) [ Tuple (M.Local 0) (Ident "x") ]
-        , Tuple (M.FuncId 2) [ Tuple (M.Local 2) (Ident "y") ]
-        , Tuple (M.FuncId 4) [ Tuple (M.Local 0) (Ident "y") ]
+        [ Tuple (M.FuncId 0) [ Tuple (M.Local 0) (Ident "x") ]
+        , Tuple (M.FuncId 1) [ Tuple (M.Local 2) (Ident "y") ]
+        , Tuple (M.FuncId 3) [ Tuple (M.Local 0) (Ident "y") ]
         ]
 
     it "leaves the aliased binding out, and the intermediates with it" do
-      bodyOf debugModule 2 `shouldEqual` Right
+      bodyOf debugModule 1 `shouldEqual` Right
         ( M.ELet (M.Local 0) RepRec M.CRecordEmpty
             ( M.ELet (M.Local 1) RepRec (M.CRecordExtend aKey (M.ALit (LitInt 1)) (M.ALocal (M.Local 0)))
                 ( M.ELet (M.Local 2) RepInt (M.CRecordSelect aKey (M.ALocal (M.Local 1)))

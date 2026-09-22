@@ -21,6 +21,7 @@ import Prelude
 
 import Prim as P
 
+import Dawn.Compiler.Abi (PrimOp, lookupPrim)
 import Dawn.Compiler.MidIR.Rep (Rep(..), repOf)
 import Dawn.Compiler.MidIR.Term as M
 import Dawn.Compiler.TypedCore.Check (Typed)
@@ -46,6 +47,11 @@ import Data.Tuple (Tuple(..))
 
 data TranslateError
   = UnboundLocal Ident
+  -- | A `Base` entry the manifest holds at one arity and the declaration at
+  -- | another, as the manifest's and the declaration's. The two describe one
+  -- | entry, so a disagreement is an inconsistent ABI package rather than
+  -- | something to fall back from.
+  | AbiArityMismatch (Qualified Ident) P.Int P.Int
   | UnboundJoin JoinName
   | UnknownGlobal (Qualified Ident)
   -- | A path the tree mentions that neither a scrutinee nor a dispatch
@@ -205,6 +211,17 @@ data Head
   = HValue (Maybe P.Int)
   | HForeign P.Int
   | HCtor P.Int
+
+-- | Whether a foreign is a `Base` operation.
+-- |
+-- | Both the bare reference and the saturated call read it here, so an entry
+-- | cannot be an operation on one path and an implementation on the other.
+foreignKind :: forall a. Qualified Ident -> P.Int -> T a (Maybe PrimOp)
+foreignKind name arity = case lookupPrim name of
+  Nothing -> pure Nothing
+  Just prim
+    | prim.arity == arity -> pure (Just prim.op)
+    | otherwise -> throw (AbiArityMismatch name prim.arity arity)
 
 classify :: Ctx -> Qualified Ident -> Maybe Head
 classify ctx name = case lookupValue ctx.signature name of
@@ -377,9 +394,16 @@ value ctx expr k = case stripErased expr of
     Just (HCtor 0) -> k (RAtom (M.ACtor name))
     Just (HCtor _) -> k (RComp (M.CPap (M.CalleeCtor name) []) RepClos)
     -- an arity-zero foreign saturates as soon as its spine is formed, so
-    -- referring to it calls the implementation
-    Just (HForeign 0) -> k (RComp (M.CForeign name []) (repAt ctx expr))
-    Just (HForeign _) -> k (RComp (M.CPap (M.CalleeForeign name) []) RepClos)
+    -- referring to it runs it; one of greater arity is a partial application.
+    -- Both read the same classification, so an entry is an operation on either
+    -- path or on neither
+    Just (HForeign arity) -> do
+      kind <- foreignKind name arity
+      case kind, arity of
+        Just op, 0 -> k (RComp (M.CPrim op []) (repAt ctx expr))
+        Just op, _ -> k (RComp (M.CPap (M.CalleePrim op) []) RepClos)
+        Nothing, 0 -> k (RComp (M.CForeign name []) (repAt ctx expr))
+        Nothing, _ -> k (RComp (M.CPap (M.CalleeForeign name) []) RepClos)
 
   C.Lam _ _ _ _ -> do
     let run = lambdaRun expr
@@ -478,7 +502,13 @@ saturate
 saturate ctx spine head name atoms whole k = case head of
   HValue Nothing -> k (RComp (M.CCallUnknown (M.AGlobal name) atoms) whole)
   HValue (Just arity) -> split arity (M.CCallKnown name) (M.CalleeValue name)
-  HForeign arity -> split arity (M.CForeign name) (M.CalleeForeign name)
+  HForeign arity -> do
+    kind <- foreignKind name arity
+    case kind of
+      -- the callee is the operation too: saturating a partial application of one
+      -- runs the operation, not an implementation of that name
+      Just op -> split arity (M.CPrim op) (M.CalleePrim op)
+      Nothing -> split arity (M.CForeign name) (M.CalleeForeign name)
   HCtor arity -> split arity (M.CCtor name) (M.CalleeCtor name)
   where
   supplied = Array.length atoms
@@ -660,8 +690,14 @@ decisionTree
 decisionTree ctx dest types atoms dt = case dt of
   C.Leaf e -> go ctx dest e
 
-  C.Bind name occurrence inner ->
-    materialize ctx types atoms occurrence \atoms' atom ->
+  -- a bind whose occurrence is already materialized aliases that local rather
+  -- than creating one, so only the first name reaches the debug table
+  C.Bind name occurrence inner -> do
+    let created = Map.lookup occurrence atoms == Nothing
+    materialize ctx types atoms occurrence \atoms' atom -> do
+      case atom of
+        M.ALocal local | created -> recordLocal local name
+        _ -> pure unit
       decisionTree (bindLocal ctx name { atom, rep: occurrenceRep ctx types occurrence }) dest types atoms' inner
 
   C.SwitchCtor occurrence branches fallback ->
@@ -868,24 +904,33 @@ definitionalArities moduleName declared =
       Map.insert (Qualified moduleName binding.name) (Array.length run.params) acc
     _ -> acc
 
+-- | How a top-level value is installed, which **the shape of its right-hand side
+-- | decides and not the form of its declaration**.
+-- |
+-- | A right-hand side that is a lambda once erasure has looked through the
+-- | wrappers becomes the function itself, installed as a closure over an empty
+-- | capture list: at the top level every free name is a global, so there is
+-- | nothing to capture and nothing to evaluate. Anything else becomes a
+-- | function of no parameters, evaluated once when the module is initialized.
+-- |
+-- | This is the same test the definitional arity is read by, which is what makes
+-- | the two agree: a global reached by `callk` holds a function of that arity,
+-- | and one that is evaluated has no definitional arity at all.
 globalOf :: forall a. Ctx -> ModuleName -> CheckedGroup a -> T a (P.Array M.GlobalEntry)
 globalOf ctx moduleName group = traverse one group.bindings
   where
-  one binding
-    | group.recursive = do
-        -- a member of a top-level group is a function value whose recursive
-        -- references are global names, so its capture list is empty and
-        -- installing it evaluates nothing
-        let run = lambdaRun binding.value
-        lifted <- liftFunction ctx (sourceAt binding.value) run.params run.body
-        nameFunction lifted.func (Qualified moduleName binding.name)
-        pure { ref: Qualified moduleName binding.name, init: M.GFunc lifted.func }
-    | otherwise = do
-        -- a `nonrec` right-hand side is an arbitrary pure expression, evaluated
-        -- once when the module is initialized
-        lifted <- liftFunction ctx (sourceAt binding.value) [] binding.value
-        nameFunction lifted.func (Qualified moduleName binding.name)
-        pure { ref: Qualified moduleName binding.name, init: M.GRun lifted.func }
+  one binding = do
+    let run = lambdaRun binding.value
+    lifted <-
+      if Array.null run.params then liftFunction ctx (sourceAt binding.value) [] binding.value
+      else liftFunction ctx (sourceAt binding.value) run.params run.body
+    nameFunction lifted.func (Qualified moduleName binding.name)
+    pure
+      { ref: Qualified moduleName binding.name
+      , init:
+          if Array.null run.params then M.GRun lifted.func
+          else M.GFunc lifted.func
+      }
 
 ctorEntries :: forall a. ModuleName -> D.Decl a -> P.Array M.CtorEntry
 ctorEntries moduleName = case _ of

@@ -1,0 +1,108 @@
+-- | The primitive operations of the `Base` ABI surface.
+-- |
+-- | A `Base` ABI entry whose meaning the ABI fixes is an **operation**, not an
+-- | implementation: every consumer carries it out directly rather than calling
+-- | something a backend supplied separately. Naming the operation is what lets a
+-- | machine add two integers in its dispatch loop and a JavaScript backend emit
+-- | `a + b`, neither of them recognizing a qualified name to find out.
+-- |
+-- | **This table stands in for the ABI manifest**, which defines the surface and
+-- | is implemented by a compiler and its backends together
+-- | ([Prim and Base](../../../../docs/technical-references/06-Modules/02-Prim-and-Base.md)).
+-- | It is keyed to one ABI version, and it grows as the content of that version
+-- | is settled. Until the manifest exists, this is where a compiler reads it.
+module Dawn.Compiler.Abi
+  ( PrimOp(..)
+  , PrimEntry
+  , primTable
+  , lookupPrim
+  , entryOfOp
+  , arityOfOp
+  ) where
+
+import Prelude
+
+import Prim as P
+
+import Dawn.Compiler.TypedCore.Name (Ident(..), ModuleName(..), Qualified(..))
+import Data.Array as Array
+import Data.Generic.Rep (class Generic)
+import Data.Maybe (Maybe)
+import Data.Show.Generic (genericShow)
+
+-- | The operations `dawn-base-0.1` fixes.
+-- |
+-- | Each is a `Base` entry that returns no `IO`: a native leaf action names an
+-- | implementation and stays a `foreign`, as does anything of a target
+-- | namespace, whose meaning is one target's rather than the ABI's.
+data PrimOp
+  = IntAdd
+  | IntSub
+  | StringLength
+  | StringCodePointAt
+  | ArrayUnsafeIndex
+
+-- | What an operation realizes, and what a consumer owes it.
+-- |
+-- | `entry` is the `Base` name, which is what target validation reads: an
+-- | operation is how the entry is carried out and not a way of not using it, so
+-- | a backend still owes the entry at the profile that holds it.
+-- |
+-- | **The mapping between an operation and its entry has one definition**, in
+-- | `entryOfOp`. Carrying the two independently anywhere would let a reader
+-- | check one entry while a machine ran another operation.
+-- |
+-- | **Whether an operation may fault is not here, and is not the compiler's to
+-- | say.** It is fixed by the ABI specification, which is what obliges every
+-- | backend to the same observable meaning: were `Base.Int.add` to wrap, a
+-- | backend on a host that traps on overflow would owe the wrapping form of the
+-- | instruction, and were it to fault, every backend would owe the fault. Until
+-- | the specification settles it, a consumer treats an operation as one that may
+-- | ([Open Questions](../../../../docs/technical-references/07-Open-Questions/01-Open-Questions.md)).
+type PrimEntry =
+  { op :: PrimOp
+  , entry :: Qualified Ident
+  , arity :: P.Int
+  }
+
+-- | The `Base` entry an operation realizes. Total, and the one place the
+-- | correspondence is written.
+entryOfOp :: PrimOp -> Qualified Ident
+entryOfOp = case _ of
+  IntAdd -> base "Base.Int" "add"
+  IntSub -> base "Base.Int" "sub"
+  StringLength -> base "Base.String" "length"
+  StringCodePointAt -> base "Base.String" "codePointAt"
+  ArrayUnsafeIndex -> base "Base.Array" "unsafeIndex"
+  where
+  base moduleName name = Qualified (ModuleName moduleName) (Ident name)
+
+-- | How many arguments saturate an operation. Total, and the one place the
+-- | arity is written.
+arityOfOp :: PrimOp -> P.Int
+arityOfOp = case _ of
+  IntAdd -> 2
+  IntSub -> 2
+  StringLength -> 1
+  StringCodePointAt -> 2
+  ArrayUnsafeIndex -> 2
+
+primTable :: P.Array PrimEntry
+primTable = map (\op -> { op, entry: entryOfOp op, arity: arityOfOp op })
+  [ IntAdd
+  , IntSub
+  , StringLength
+  , StringCodePointAt
+  , ArrayUnsafeIndex
+  ]
+
+-- | The operation a `Base` entry is, where it is one.
+lookupPrim :: Qualified Ident -> Maybe PrimEntry
+lookupPrim name = Array.find (\e -> e.entry == name) primTable
+
+derive instance Eq PrimOp
+derive instance Ord PrimOp
+derive instance Generic PrimOp _
+
+instance Show PrimOp where
+  show = genericShow

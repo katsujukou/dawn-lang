@@ -4,8 +4,11 @@ import Prelude
 
 import Effect (Effect)
 import Test.Dawn.Compiler.TypedCore as TypedCore
+import Test.Dawn.Compiler.Abi as Abi
+import Test.Dawn.Compiler.Bytecode.Lower as BytecodeLower
 import Test.Dawn.Compiler.MidIR.Regression as MidRegression
 import Test.Dawn.Compiler.MidIR.Translate as MidTranslate
+import Test.Dawn.Compiler.MidIR.Verify as MidVerify
 import Test.Dawn.Compiler.TypedCore.Annotation as Annotation
 import Test.Dawn.Compiler.TypedCore.Check as Check
 import Test.Dawn.Compiler.TypedCore.Declare as Declare
@@ -28,6 +31,9 @@ main = runSpecAndExitProcess [ consoleReporter ] do
   Annotation.spec
   MidTranslate.spec
   MidRegression.spec
+  MidVerify.spec
+  Abi.spec
+  BytecodeLower.spec
   VerticalSlice.spec
   EffectSlice.spec
   RowProperties.spec
