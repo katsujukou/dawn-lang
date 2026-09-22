@@ -318,9 +318,10 @@ another by global name, so each is a closure over an empty capture list
 ## Handlers and continuations
 
 ```text
-handle h f [ā]
+handle h f [ā] @ [v̄]
 
 h ::= { key      : RowKey
+      , cells    : [RowKey]
       , return   : ClauseRef
       , clauses  : [ { op : OpName, form : full | fast, clause : ClauseRef } ]
       }
@@ -332,6 +333,26 @@ ClauseRef ::= { func : FuncId, captures : [atom] }
 whole because typing needs its payload to say which operations the clauses must
 exhaust; reduction consults `key(ent)` and nothing else, so erasure keeps the
 key ([Semantics](../03-Typed-Core/06-Semantics.md)).
+
+**A region is a frame of the continuation, not a store.** `cells` names the keys
+a handler's region declares and `[v̄]` gives their initial values, one per key;
+`readCell` and `writeCell` reach the innermost frame declaring the key, and a
+write replaces what that frame holds (D36).
+
+**A captured continuation carries the frame where the frame is inside it**, which
+is where the handler capturing it was installed *outside* the region. Two
+applications of such a continuation then begin from the same cell contents, and a
+write under the first is invisible to the second. A backend implementing a cell
+as a mutable location shared between resumptions would be non-conformant for
+that reason, exactly as a one-shot continuation is.
+
+Where the capturing handler is the one that owns the region, the frame stands
+outside what it captured and the cells stay live across its resumptions. That is
+the semantics, not a concession: a handler's cells are its state across the
+operations it handles.
+
+`cells` is empty for every handler that declares no region, and then no frame is
+installed and the form is the one it always was.
 
 ### Everything a handler runs is a function
 

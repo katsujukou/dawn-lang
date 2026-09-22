@@ -177,7 +177,7 @@ merge : forall (r : Row Type). forall (s : Row Type).
   ────────────────────────────────────────────────────
   Γ;Δ ⊢ perform k.op [σ̄] e : τ[ā := τ̄][b̄ := σ̄] ! ρ
 
-  h = { handles ent ; return (x : α) -> e_r ; cl_i }
+  h = { handles ent ; return (x : α) -> e_r ; cl_i }     ← no region
   Γ ⊢ ( ent | ρ ) : Row Effect                      ← the element the handle removes
   Γ;· ⊢ e : α ! ( ent | ρ )                         ← inside handle the row grows
   payload(ent) = E τ̄                                ← the key selects it, the payload names E
@@ -193,14 +193,63 @@ merge : forall (r : Row Type). forall (s : Row Type).
   ───────────────────────────────────────────────────────────────────────
   Γ;Δ ⊢ handle e with h : β ! ρ
 
+  h = { handles ent ; cells [r] ( k̄ : σ̄ ) ; return (x : α) -> e_r ; cl_i }
+  Γ ⊢ ( ent | ρ ) : Row Effect
+  Γ;· ⊢ e : α ! ( ent | ρ )                         ← no region: the handled code reaches no cell
+  payload(ent) = E τ̄
+  the k̄ are distinct      |ē| = |k̄|      ι = ( k̄ : σ̄ )      Γ ⊢ ι : Row Type
+  Γ ⊨ RegionKey ∉ ρ                                 ← the residual row carries no region
+  Γ' = Γ, r : Type          ρ' = ( region r ι | ρ ) ← sharp by that entailment
+  each j:  Γ;Δ ⊢ e_j : σ_j ! ρ                      ← initial values, before the handler stands
+  Γ, x : α; · ⊢ e_r : β ! ρ                         ← outside the region; no cell is in scope
+  each i:  Σ(E).op_i = forall (b̄_i : κ̄_i). σ_i ->* τ_i
+           σ_i' = σ_i[ā := τ̄]    τ_i' = τ_i[ā := τ̄]
+           if cl_i = full op_i [b̄_i] (x_i : σ_i', k_i : τ_i' -{ρ'}-> β) -> e_i
+              Γ', b̄_i : κ̄_i, x_i : σ_i', k_i : τ_i' -{ρ'}-> β; · ⊢ e_i : β    ! ρ'
+           if cl_i = fast op_i [b̄_i] (x_i : σ_i') -> e_i
+              Γ', b̄_i : κ̄_i, x_i : σ_i'                      ; · ⊢ e_i : τ_i' ! ρ'
+  { op_i } = dom(Σ(E))    and the op_i are distinct
+  r ∉ ftv(β) ∪ ftv(ρ)                               ← nothing of the region outlives it
+  ───────────────────────────────────────────────────────────────────────
+  Γ;Δ ⊢ handle e with h @ ( ē ) : β ! ρ
+
+  nf(ρ) = ⟨ F ; T ⟩      F(RegionKey) = region r ι      nf(ι) = ⟨ G ; T' ⟩      G(k) = σ
+  ──────────────────────────────────────────────────────────────────────────────────────
+  Γ;Δ ⊢ readCell k : σ ! ρ
+
+  nf(ρ) = ⟨ F ; T ⟩      F(RegionKey) = region r ι      nf(ι) = ⟨ G ; T' ⟩      G(k) = σ
+  Γ;Δ ⊢ e : σ ! ρ
+  ──────────────────────────────────────────────────────────────────────────────────────
+  Γ;Δ ⊢ writeCell k e : σ ! ρ
+
   Γ;Δ ⊢ e : τ1 -{r1}-> τ2 ! ρ    Γ ⊨ r1 # r'    Γ ⊢ r' : Row Effect
   ─────────────────────────────────────────────────────────────────
   Γ;Δ ⊢ openEff [r'] e : τ1 -{r1 ⊎ r'}-> τ2 ! ρ
 ```
 
-That handlers are deep (D15) shows in the type of the continuation `k_i`, namely `τ_i -{ρ}-> β`: calling it returns under the same handler, so the result type is `β`, the result of the `handle`, and the ambient row is `ρ`, the row outside it. A shallow handler would give `τ_i -{( ent | ρ )}-> α`.
+That handlers are deep (D15) shows in the type of the continuation `k_i`: calling it returns under the same handler, so the result type is `β`, the result of the `handle`, and the ambient row is the one a clause stands at — `ρ` where the handler owns no region and `ρ'` where it does, the region being open on both sides of a resumption. A shallow handler would give `τ_i -{( ent | ρ )}-> α`.
 
 A `fast` clause's premise names neither `k_i` nor `β`, and that absence is the whole content of the distinction (D28). Having no way to speak of the answer, such a clause cannot bypass the evaluation still to come in order to supply what the `handle` returns, and having no continuation it cannot invoke one zero or several times; its body is an ordinary computation at the residual row, of the type the continuation resumes with.
+
+**There are two rules for `handle` and a handler takes one of them** (D36). Without `cells` the rule is what it always was, and a clause stands at `ρ`. With `cells` the operation clauses stand at `ρ'`, and **three rows come apart**.
+
+| | Row | Why |
+| --- | --- | --- |
+| the handled computation | `( ent \| ρ )` | it may not reach the handler's cells |
+| an operation clause | `ρ'` | it may |
+| the return clause | `ρ` | it may not, so no cell reaches the answer |
+
+The return clause's row is the point at which "an ordinary return hands back no state" stops being a convention. Typed at `ρ`, it has no region to name, and reduction closes the region in the same step that runs it ([Semantics](06-Semantics.md)). A `full` clause stands at `ρ'` and may copy a cell's value into the answer where it means to; what the rules withhold is the automatic return, not the ability.
+
+**`ρ'` is sharp only under `RegionKey ∉ ρ`, and the rule requires it.** A handler polymorphic in its residual row cannot derive the absence of a region there, so the constraint is assumed — written in its type as any other is ([Kinds and Types](01-Kinds-and-Types.md)). What the premise rejects is a region opened where one is already open, which is what keeps `readCell` from having two regions to choose between.
+
+`readCell` and `writeCell` read the region out of the ambient row. **Neither says which region**, and neither needs to: a row holds at most one. `writeCell` evaluates to the value written, which is what lets a clause read back what it just set without a second `readCell`.
+
+**`r ∉ ftv(β) ∪ ftv(ρ)` is the whole of the escape discipline.** Every way to reach a cell mentions the region: a closure over a `readCell` carries `ρ'` in its own arrow, and `ρ'` mentions `r`. The condition therefore keeps such a closure out of the answer type and out of the residual row. There is no cell handle to leak, a cell being named by a key rather than held as a value, so these are the only routes there are. This is what a rank-2 quantifier would enforce for a `runST`-shaped function; `cells` being a binder, a side condition enforces it directly.
+
+**What the condition forbids is a reference into a region, not a region.** A term that carries the whole `handle … @ ( … )` — a closure over it, or a continuation an outer handler captured across it — carries the binder along with everything the binder scopes over, and its type mentions no `r` at all, that variable being bound within. Such a term is closed with respect to the region and may be passed anywhere; it is what the snapshot row of [Semantics](06-Semantics.md) describes. The condition is about references that would outlive what binds them, and those alone.
+
+**The layout is a written sequence, and the type is a row.** `cells [r] ( k̄ : σ̄ )` fixes finitely many cells with distinct keys, which is what lets `ē` give one initial value each and what makes the region a finite map at run time. The `ι` of a `region r ι` **type** is an ordinary row and may have a tail, which is what a helper polymorphic over the rest of a region needs; only a layout is closed.
 
 **What the rule establishes is about the clause, not about the program containing it.** The body may diverge, it may fault, and it may perform an operation of `ρ` whose own handler declines to resume, or resumes more than once and so runs the rest of the handled computation again ([Effects](03-Effects.md)). The two forms are otherwise alike, both binding the operation's own type variables `b̄_i` and both checked with `Δ` discarded ([Terms and Matching](04-Terms-and-Matching.md)).
 

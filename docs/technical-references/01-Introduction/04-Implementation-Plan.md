@@ -166,6 +166,19 @@ The heading of each group names the step of the plan that the group belongs to.
 | A handler mixing a `full` clause with a `fast` one | Accepted. The form is written per clause |
 | `fast abort1 [b] (_ : Unit) -> perform Abort2.abort2 [b] Prim.Unit` | Accepted. A polymorphic resume type rules out a pure terminating body, not a translation into another effect |
 | The handler interpreting `Partial` into `Maybe` | `full`. Its answer is `Maybe a` where the computation's is `a`, and only a `full` clause supplies an answer |
+| `readCell k` in the computation a handler handles | Rejected. The region stands in the row the operation clauses are typed at, not in that computation's (D36) |
+| `readCell k` in the return clause | Rejected. The return clause stands at `ρ`, which is what makes an ordinary return hand back no state |
+| `full next (_, k) -> let _ : Int = k Prim.Unit in readCell n`, the answer type being `Int` and the cell `Int` | Accepted. A `full` clause stands at `ρ'` and may make a cell's value its answer; what the rules withhold is the automatic return, not the ability |
+| `readCell k` for a key the region's layout does not declare | Rejected |
+| A clause returning `λ (_ : Unit). readCell k` as the answer | Rejected. The closure carries `( region r ι \| ρ )` in its arrow, so it mentions `r`, and `r ∉ ftv(β)` |
+| A continuation typed to carry the region, where the handle's residual row does not | Rejected by the same condition, `r ∉ ftv(ρ)` |
+| A handler owning a region whose residual row is not known to lack one | Rejected. `ρ'` is sharp only under `RegionKey ∉ ρ`, which the rule requires and an effect-polymorphic handler assumes |
+| A handler owning a region, installed inside another region's clause body | Rejected by that premise, there being a region in the ambient row already |
+| A handler owning a region, installed inside the computation another handler handles | Accepted. The handled computation carries no region, so the two never meet |
+| `handles` naming a region, or a `perform` naming one | Rejected. Both rules require the payload to be an effect application, and a region's is not |
+| A handler declaring no cells | Takes the rule it always took. **No region is opened and no `RegionKey` enters any row**, so a handler owning one may still be installed within it |
+| A layout writing one key twice | Rejected. The initial values are given one per key |
+| A `region r ι` type whose `ι` has a tail | Accepted. Only a layout is closed; a type is a row, which is what a helper polymorphic over the rest of a region needs |
 | `guard` whose consequent reaches no leaf and whose alternative does | Accepted, at the type the alternative gives |
 
 ### FFI and declarations (step 3)
@@ -202,7 +215,20 @@ The heading of each group names the step of the plan that the group belongs to.
 | `switchKey` on a value wrapped in `weaken` | Dispatches on the key actually injected. `weaken` is a value form and is looked through |
 | `bind x = o in guard (p x) …` | The substitution happens before descending, so the guard's condition has no free `x` |
 | That call, once it is evaluated | The innermost handler of the key is chosen: `Ev_k` lets no `handle` of that key stand between it and the hole |
-| `handle Ev_k[perform k.op v] with h` whose clause for `op` is `fast` | The body takes the place of the `perform` inside `Ev_k` with the handler still installed, and no continuation value is built. `openEffC [( ent )]` preserves the type and the ambient row exactly, and is discharged against the value the body produces |
+| `H Ev_k[perform k.op v] with h` whose clause for `op` is `fast` | Binds the body with a `let` and rebuilds the handler around `Ev_k` with that binding in the hole. No continuation value is built, and the `let` is what reconciles the clause's row with the handled computation's |
+| A `perform` reaching a handler whose `key(ent)` differs | Does not arise. Both rules require `key(ent) = k`; `Ev_k` says only that no nearer handler carries it |
+| `handle e with h @ ( v̄ )` where `h` declares cells | Steps to `region [r'] (k̄ ↦ v̄) in ( handleO e with h[r := r'] )` for a globally fresh `r'`. The region stands **outside** the handler, which is what a clause body — placed outside it too — needs in order to reach a cell |
+| The term after that step | Type checks. `handleO` is a run-time form with a rule of its own, at `ρ'`; without one, preservation fails at the first step |
+| The opening step where the outer context already binds a variable of the region's name, referred to by the handled computation or by an initial value | The step renames to a globally fresh `r'`. The region it creates scopes over both, where the handler's `cells` binder scoped over the operation clauses alone, so keeping the name would capture |
+| `h[r := r']` applied to a `full` clause | Renames the `r` of the continuation's annotation `τ' -{( region r ι \| ρ )}-> β` as well as the one in the body. Renaming bodies alone leaves the installed handler ill-scoped |
+| `region [r] θ in ( handleO v with h )` | Steps to `e_r[x := v]` in **one** step. Closing the region and running the return clause are not separable, which is what leaves no moment at which an answer and a cell both exist |
+| `handleI v with h`, a reinstatement finishing | Steps to `openEffC [( region r ι )] ( e_r[x := v] )`. The return clause runs and the owner's region is untouched, the widening reconciling the clause's `ρ` with the ambient `ρ'` |
+| `region [r] θ in v`, a `full` clause having produced the answer | Steps to `v`, the region closing with no return clause. Without this rule the `full` path reaches no value |
+| A continuation applied by any clause | Rebuilds `handleI`, never `handleO`. A region has one owner and it is not what a resumption reinstalls |
+| A `fast` clause of a handler owning a region | Its body is bound by a `let` and the value placed in the hole. Placing the body itself there does not typecheck, the body standing at `ρ'` and the hole at the handled computation's row |
+| A `full` clause of a handler installed **outside** a region, resuming twice | Each resumption begins from the cell contents at the capture, `Ev_k` containing the region. A write during the first is not seen by the second, which a store would not give |
+| A `full` clause of the handler **owning** the region, resuming twice | Both share the region, which stands outside what was captured. The cells stay live across the handler's own resumptions |
+| `writeCell k v` | Steps to `v`, not to `Prim.Unit`, so a clause has the new value in hand |
 | A saturated foreign whose `δ_f` faults | Steps to `fault φ`, which propagates out of every context including `handle`. It is not caught by a handler and is not the `Partial` effect |
 | A term at ambient row `()` reaching a `perform` with no enclosing handler | Does not arise. This is what effect safety asserts |
 
@@ -214,6 +240,7 @@ The heading of each group names the step of the plan that the group belongs to.
 | A term whose reduction faults | The erased term faults identically |
 | The number of run-time arguments a backend passes to `δ_f` | Determined by the arrow count of the **declared** type, not by the instantiated result type |
 | A handler carrying a `full` clause and a `fast` clause | Both markers survive erasure, Core having written each of them. They carry no type information, and a backend lowers the two differently |
+| A handler owning a region | The keys and the values survive; the region variable and the cells' types do not. Reduction pairs the keys with the initial values and `Ev_c` walks by them, so neither is an annotation (D36) |
 
 ### Translation to Mid IR (step 5)
 

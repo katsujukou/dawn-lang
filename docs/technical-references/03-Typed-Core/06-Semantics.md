@@ -15,6 +15,8 @@ Evaluation is strict and call-by-value. Because effect rows expose the points at
 | `jump j (e1 … en)` | `e1` → … → `en` → transfer |
 | `perform k.op [τ̄] e` | `e` → capture the continuation |
 | `handle e with h` | install the handler → `e` |
+| `handle e with h @ (e1 … en)` | `e1` → … → `en` → open the region → install the handler → `e` |
+| `writeCell k e` | `e` → replace the cell |
 
 **`e1 e2` evaluates the argument before the function** (D35). Application is the
 only construct of which that is true; every other row above reads left to right.
@@ -309,13 +311,16 @@ A **constructor spine is always a value**, saturated or not: a saturated one is 
 
 ### Run-time forms
 
-Four forms arise during reduction and are never produced by elaboration.
+Seven forms arise during reduction and are never produced by elaboration.
 
 ```text
 match θ dt            descending a decision tree
 openEffC [ρ] e        a computation whose effects are bounded by a wider row
 rec_i(x̄ : σ̄. v̄)       the i-th component of a local recursive binding group
 opaque ω [τ]          a value an implementation returned, typed above
+region [r] θ in e     an open region of cells, θ a finite map from key to value
+handleO e with h      the handler a region was opened for
+handleI e with h      the same handler reinstalled by a resumption
 ```
 
 The last is the only one a `δ_f` produces, and the only one that is a value rather than a step in progress; its rule is given with the values.
@@ -328,11 +333,44 @@ The last is the only one a `δ_f` produces, and the only one that is a value rat
   Γ' = Γ, x̄ : σ̄     each i: v_i is a FunVal (D14) and Γ'; Δ ⊢ v_i : σ_i ! ()
   ──────────────────────────────────────────────────────────────────────────
   Γ;Δ ⊢ rec_i(x̄ : σ̄. v̄) : σ_i ! ρ
+
+  nf(ι) = ⟨ G ; ∅ ⟩    dom(θ) = dom(G)    each k ∈ dom(θ) :  Γ;Δ ⊢ θ(k) : G(k) ! ()
+  Γ, r : Type; Δ ⊢ e : τ ! ( region r ι | ρ )      Γ ⊨ RegionKey ∉ ρ
+  r ∉ ftv(τ) ∪ ftv(ρ)
+  ─────────────────────────────────────────────────────────────────────────────────
+  Γ;Δ ⊢ region [r] θ in e : τ ! ρ
+
+  h = { handles ent ; cells [r] ( k̄ : σ̄ ) ; return (x : α) -> e_r ; cl_i }
+  r ∈ Γ                                             ← an occurrence, not a binder
+  ι = ( k̄ : σ̄ )      ρ' = ( region r ι | ρ )
+  Γ ⊢ ( ent | ρ ) : Row Effect      Γ;· ⊢ e : α ! ( ent | ρ )      payload(ent) = E τ̄
+  Γ ⊨ RegionKey ∉ ρ        Γ ⊢ ι : Row Type        the k̄ are distinct
+  Γ, x : α; · ⊢ e_r : β ! ρ
+  each i: the clause premises of the source rule, at ρ', under Γ
+  { op_i } = dom(Σ(E))    and the op_i are distinct
+  r ∉ ftv(β) ∪ ftv(ρ)
+  ─────────────────────────────────────────────────────────────────────────
+  Γ;Δ ⊢ handleO e with h : β ! ρ'
+  Γ;Δ ⊢ handleI e with h : β ! ρ'
 ```
+
+**`cells [r] ι` binds `r` in a source handler and refers to it in a run-time one.** The two forms above are reached only under an enclosing `region [r] θ in [ ]`, whose rule checks its body under `Γ, r : Type`; the `[r]` each carries is the occurrence that binding resolves. **The opening step is where the binder moves**, from the handler to the region the same step wraps around it, and it is the only step of the relation that moves one.
+
+**The move is capture-avoiding, and the rule says so rather than leaving it to be argued.** A handler's `cells` binder scopes over its operation clauses alone, while the region the step creates scopes over the initial values and the handled computation besides; a variable of that name occurring free in either — or in the context the term is checked under — would be captured were the name kept. The step therefore renames to a globally fresh `r'`, which is why the rule writes `h[r := r']` rather than `h`. Nothing else in the relation moves a binder, so this is the only place the question arises.
+
+**`h[r := r']` is binder-aware.** What it renames is the `[r]` token of `cells` and the occurrences of `r` within that binder's scope, which is **every operation clause entire — its type annotations as well as its body**. A `full` clause writes its continuation's type `τ_i' -{ρ'}-> β`, and `ρ'` is `( region r ι | ρ )`, so renaming bodies alone would leave the old `r` standing in an annotation and the installed handler ill-scoped. What lies outside the scope is `handles ent`, the layout, and the return clause; a variable of the same name standing in one of those is a different variable — free in `Γ` — and the renaming leaves it alone.
+
+Well-scopedness of the run-time forms is then a property of the region, not of the handler. A `handleO` or `handleI` mentioning `r` stands within the `region [r]` that binds it; what carries one elsewhere carries the region with it.
 
 `openEffC [ρ] e` widens the **ambient row of a computation**, where `openEff` widens the **effect row inside a function's type**. Both are needed and neither subsumes the other: `openEff` is what allows a pure function to be passed where a wider arrow type is expected, and `openEffC` is what allows the result of applying such a function to sit in a context whose ambient row is the wider one.
 
 `rec_i` carries the type annotations of the group it came from, which is what makes its typing rule derivable and hence what makes preservation hold for `letrec`. It is a **local** form only. A top-level `rec` group installs its right-hand sides into `G` directly, and its recursive references are global names.
+
+`region [r] θ in e` is a region whose initial values have been evaluated. It carries `θ` — **the cells themselves, by value** — together with the region variable and the conditions the source rule imposed, which is what makes its rule derivable and hence what makes preservation hold across a write (D36). The values live here and nowhere else: there is no store, no address, and no two ways to reach one cell.
+
+`handleO` and `handleI` are the same handler installed, and the two are kept apart because **a region has one owner and any number of reinstatements**. `handleO` is what the opening step puts inside the region; `handleI` is what a resumption rebuilds, standing wherever the clause that holds the continuation applied it, which is inside the owner's region and not adjacent to it. Both are typed at `ρ'`, both standing within the region. They differ in one rule alone, the one for a value, and that difference is the whole reason for the marker: **an owner finishing ends the region, a reinstatement finishing does not.**
+
+The return clause is typed at `ρ` and so is not usable at `ρ'` without widening; where it runs inside the region, the rule wraps it in `openEffC`.
 
 ### The spine cursor
 
@@ -460,7 +498,10 @@ Ev ::= []
      | letjoin j (x̄ : τ̄) : τ = e1 in Ev
      | jump j (v̄, Ev, ē)
      | perform k.op [τ̄] Ev
-     | handle Ev with h
+     | handle e with h @ ( v̄, Ev, ē )
+     | handle Ev with h  |  handleO Ev with h  |  handleI Ev with h
+     | writeCell k Ev
+     | region [r] θ in Ev
 ```
 
 ```text
@@ -469,14 +510,23 @@ Ev ::= []
   G ⊢ Ev[e] → Ev[e']                G ⊢ Ev[e] → fault φ
 ```
 
-That `handle Ev with h` is a context expresses evaluation proceeding **under** an installed handler. That `letjoin … in Ev` is one lets the body of a join point binding be evaluated normally. A fault propagates out of every context, including `handle`, since no handler can intercept it.
+That `handle Ev with h` is a context expresses evaluation proceeding **under** an installed handler, and it carries no `@ ( … )` because the step that opens the region consumes it: the initial values are evaluated first, in the context above it, and once they are values the whole form becomes a region wrapping an installed handler. That `letjoin … in Ev` is one lets the body of a join point binding be evaluated normally. A fault propagates out of every context, including `handle`, since no handler can intercept it.
 
 Capturing a continuation requires a second notion: a context installing no handler for the key in question.
 
 ```text
-Ev_k ::= an evaluation context in which every `handle _ with h'` on the path
-         to the hole has a key other than k
+Ev_k ::= an evaluation context in which every `handle _ with h'`, `handleO _ with h'`,
+         and `handleI _ with h'` on the path to the hole has a key other than k
 ```
+
+Reaching a cell requires the same notion once more, over regions rather than handlers.
+
+```text
+Ev_c ::= an evaluation context in which no `region [r] θ in _` on the path
+         to the hole has k in dom(θ)
+```
+
+`Ev_c` picks the **innermost** region declaring `k`, exactly as `Ev_k` picks the innermost handler of a key. Typing admits at most one region in a row, so in a well-typed term there is only ever one to pick; the context is written this way because reduction carries no types and must find it by walking.
 
 A `jump` appears only in tail position, so the position it may occupy is narrower than a general context.
 
@@ -583,25 +633,76 @@ The second rule discards a binding whose join point is no longer reachable.
 
 ### Operations and handlers
 
+`H` below stands for any of `handle`, `handleO`, and `handleI`: the two rules for a `perform` are the same whichever it is, neither of them reading a region or disturbing one.
+
+```text
+  H Ev_k[ perform k.op [σ̄] v ] with h    →  e_i[ b̄_i := σ̄,  x_i := v,
+                                                k_i := λ(y : τ_i'). H' Ev_k[y] with h ]
+                                            where h = { handles ent ; … }, key(ent) = k,
+                                              its clause for op is
+                                              full op [b̄_i] (x_i, k_i) -> e_i,
+                                              and H' is handleI where h owns a region
+                                              and handle where it does not
+
+  H Ev_k[ perform k.op [σ̄] v ] with h    →  let y : τ_i' = e_i[ b̄_i := σ̄,  x_i := v ] in
+                                              ( H Ev_k[y] with h )
+                                            where h = { handles ent ; … }, key(ent) = k,
+                                              and its clause for op is
+                                              fast op [b̄_i] (x_i) -> e_i
+```
+
+**Both rules require `key(ent) = k`.** `Ev_k` says only that no *nearer* handler carries the key; that the one chosen carries it is a separate condition, and without it a handler of some other effect declaring an operation of the same name would match. The key is read from `ent`, which is what the handler writes, and never from the clause's name.
+
+**A resumption rebuilds `handleI`, never `handleO`.** A region has one owner, and it is the handler the opening step installed; what a continuation reinstalls stands inside that region rather than owning one. This is the distinction the `handleO` marker exists to record, and the rules for a value below are where it is read.
+
+**A `fast` clause binds its body with a `let` rather than placing it in the hole.** The body is a computation of the clause's own row, and the hole is at the handled computation's, which carries no region; binding the value and putting *that* in the hole is what makes the two agree. No continuation is constructed either way (D28), and for a handler owning no region the two formulations agree, the clause's row lacking the handled key by sharpness in both.
+
+**That the region wraps the handler is what puts a cell where a clause can reach it.** Both rules place the clause body *outside* the handler — and the region stands outside that, so the body is still within it. Had the region been installed inside, a clause would run past its own cells and reach none.
+
+### Where a handler finishes
+
 ```text
   handle v with h                             →  e_r[x := v]
+                                                 no region; unchanged
 
-  handle Ev_k[ perform k.op [σ̄] v ] with h    →  e_i[ b̄_i := σ̄,  x_i := v,
-                                                     k_i := λ(y : τ_i'). handle Ev_k[y] with h ]
-                                                 where h = { handles ent ; … }, key(ent) = k,
-                                                   and its clause for op is
-                                                   full op [b̄_i] (x_i, k_i) -> e_i
+  handle e with h @ ( v̄ )                     →  region [r'] ( k̄ ↦ v̄ ) in
+                                                   ( handleO e with h[r := r'] )
+                                                 where h = { handles ent ; cells [r] ( k̄ : σ̄ ) ; … }
+                                                   and r' is globally fresh; the renaming is
+                                                   capture-avoiding and binder-aware
 
-  handle Ev_k[ perform k.op [σ̄] v ] with h    →  handle Ev_k[ openEffC [( ent )]
-                                                     ( e_i[ b̄_i := σ̄,  x_i := v ] ) ] with h
-                                                 where h = { handles ent ; … }, key(ent) = k,
-                                                   and its clause for op is
-                                                   fast op [b̄_i] (x_i) -> e_i
+  region [r] θ in ( handleO v with h )        →  e_r[x := v]
+                                                 the owner finishes: the region closes and the
+                                                 return clause runs outside it, in one step
+
+  handleI v with h                            →  openEffC [( region r ι )] ( e_r[x := v] )
+                                                 where h declares cells [r] ( k̄ : σ̄ ) and ι = ( k̄ : σ̄ );
+                                                 a reinstatement finishes: the return clause runs
+                                                 and the region it stands in is untouched
+
+  region [r] θ in v                           →  v
+                                                 a full clause's answer: the region closes with
+                                                 no return clause, that clause having already run
 ```
+
+Four paths reach a value and the four rules are what tell them apart.
+
+| Path | Rule | Return clause | Region |
+| --- | --- | --- | --- |
+| the owner's computation finishes | the third | runs, at `ρ` | closes |
+| a `full` clause produces the answer | the fifth | does not run, having run already or not at all | closes |
+| a resumption's computation finishes | the fourth | runs, widened to `ρ'` | stays open |
+| a `full` clause resumes off the tail, or more than once | the `full` rule above, then the fourth once per resumption | runs once per resumption | stays open throughout |
+
+**The third rule is compound, and that is what keeps the final state out of the answer of an ordinary return.** Closing the region and running the return clause are not two steps with a moment between them at which both a cell and an answer exist; and the return clause stands at `ρ`, so it could not name a cell even were one still open ([Typing Rules](05-Typing-Rules.md)).
+
+**The fifth rule is what the `full` path needs.** A `full` clause replaces the handler with its own body, so what the region comes to wrap is that body, and when the body reaches the answer the region has nothing left to serve. `r ∉ ftv(β)` is what makes discarding it sound: the answer's type cannot mention the region, so no part of the answer can be reaching into it.
+
+**The fourth rule widens, and that is not decoration.** A reinstatement's return clause runs where a region is open, so its row must be `ρ'` while the clause is typed at `ρ`; `openEffC` records the difference and erases (D8).
 
 Three things are visible in the `full` rule.
 
-**The handler is reinstalled.** The continuation `k_i` rebuilds `handle Ev_k[y] with h`, so resuming returns under the same handler. This is what makes handlers deep (D15).
+**The handler is reinstalled.** The continuation `k_i` rebuilds `H' Ev_k[y] with h`, so resuming returns under the same handler. This is what makes handlers deep (D15). `H'` is `handleI` where the handler owns a region and `handle` where it does not; either way the handler is the same one, and only its standing as a region's owner is not passed on.
 
 **Only the key of the handled element is consulted.** A handler writes the element whole, `handles ent`, because typing needs its payload; reduction reads `key(ent)` and nothing else, so an erased handler keeps the key alone.
 
@@ -609,17 +710,47 @@ Three things are visible in the `full` rule.
 
 `k_i` is an ordinary function value. Nothing in the rule restricts how often it may be applied, which is the sense in which the reference semantics is multi-shot (D18).
 
-**The `fast` rule constructs no continuation** (D28). The clause body takes the place of the `perform` within the same `Ev_k`, and the handler stays installed around it, so control reaches the handled computation again without a function value ever being made. The widening is what reconciles the two rows: the body is typed at the residual row `ρ`, while the hole of `Ev_k` stands at `( ent | ρ )`, and `openEffC [( ent )]` records the difference — admissible because `( ent | ρ )` is sharp, so `ρ # ( ent )`. Once the body reaches a value the widening is discharged against it, leaving that value where the operation was performed.
+**The `fast` rule constructs no continuation** (D28). The clause body is bound by a `let` and the handler rebuilt around the same `Ev_k` with that binding in the hole, so control reaches the handled computation again without a function value ever being made. The `let` is what reconciles the two rows: the body stands at the row a clause is typed at, the hole at the handled computation's, and a variable is at home in either.
 
-Whether the body runs inside or outside the `handle` is not observable. A clause body is typed at `ρ`, which lacks `key(ent)` by sharpness, so under neither rule can it perform on the key being handled.
+That the body runs outside the handler is not observable. A clause body's row lacks `key(ent)` by sharpness, so it cannot perform on the key being handled wherever it runs.
 
 A body that never reaches a value leaves the handled computation unfinished. The rule says what becomes of a value the body produces and requires no value of it; diverging, faulting, and performing an operation of `ρ` that is never resumed are the three ways that happens, the last of them recorded in the row ([Effects](03-Effects.md)).
 
-Since nothing is captured, the `fast` rule raises none of what D18 leaves open on its own account: it embeds the body once and holds no continuation that could be applied again. The construct able to demand a multi-shot continuation is therefore `full` alone, which is what confines the gap recorded above to `full` clauses.
+Since nothing is captured, the `fast` rule raises none of what D18 leaves open on its own account: it binds the body once and holds no continuation that could be applied again. The construct able to demand a multi-shot continuation is therefore `full` alone, which is what confines the gap recorded above to `full` clauses.
 
-**That is not the same as the program being one-shot.** Where the body performs an operation of `ρ` and that operation's `full` handler applies its continuation twice, that continuation rebuilds `handle Ev_k[…] with h` and so runs `Ev_k` twice — the computation after the original `perform` is duplicated, by the other handler's continuation rather than by this rule.
+**That is not the same as the program being one-shot.** Where the body performs an operation of `ρ` and that operation's `full` handler applies its continuation twice, that continuation rebuilds its own handler around `Ev_k` and so runs `Ev_k` twice — the computation after the original `perform` is duplicated, by the other handler's continuation rather than by this rule.
 
 `fail τ` reduces through these rules too, being derived notation for `perform Partial.abort [τ] Prim.Unit`; which of the two applies is settled by the form of the installed handler's clause for `abort`.
+
+### Cells
+
+```text
+  region [r] θ in Ev_c[ readCell k ]      →  region [r] θ in Ev_c[ θ(k) ]        k ∈ dom(θ)
+
+  region [r] θ in Ev_c[ writeCell k v ]   →  region [r] θ[k ↦ v] in Ev_c[ v ]    k ∈ dom(θ)
+```
+
+**A write rewrites the evaluation context.** Nothing is mutated and nothing is shared: the region is a part of the term, and the step replaces it with another region. This is what makes a cell a binder with a lifetime rather than a location (D36).
+
+What follows is the interaction with continuations, and **which continuations it holds of is the whole of it.** A continuation is `λ(y : τ_i'). H' Ev_k[y] with h`, so what it carries is whatever `Ev_k` contains — and whether that includes a region depends on where the capturing handler stands.
+
+| The capturing handler | Does `Ev_k` contain the region | What two resumptions see |
+| --- | --- | --- |
+| installed **outside** the region | yes | each begins from `θ` as it stood at the capture |
+| the handler **owning** the region | no, the region stands outside it | both share the region, so a write under the first is visible to the second |
+
+The second row is not an omission. A handler's own cells are its state across the operations it handles, and a `full` clause that resumes twice is resuming its own computation twice; the cells staying live through that is what makes them the handler's. The first row is what makes composition order observable, and it is the one that distinguishes this design from a store.
+
+```text
+-- runCounter owns a region whose cell n holds 0.
+-- Nd is handled OUTSIDE it, by  full flip (_, k) -> pair (k True) (k False).
+-- Ev_k for that flip contains runCounter's region, so each resumption
+-- begins with n at 0.
+```
+
+**That the snapshot is free where it matters is the point of the placement.** A `fast` clause captures nothing (D28), so the common path — a clause that reads and writes and hands control back — copies no cell at all; where a capture does happen, the values ride along in a context that was being copied regardless. This is what a store would not give: two resumptions would share one location whatever the composition order, and the first row of that table would read like the second.
+
+`writeCell` steps to the value written rather than to `Prim.Unit`, so a clause that sets a cell and continues has the new value already in hand.
 
 ## The runtime boundary
 
@@ -657,18 +788,25 @@ Erasure `⌊·⌋` removes the forms that carry no run-time content.
 
 ⌊letjoin j (x̄ : τ̄) : τ = e1 in e2⌋  = letjoin j (x̄) = ⌊e1⌋ in ⌊e2⌋
 
-⌊{ handles ent ; return (x : τ) -> e_r ; cl_i }⌋
-    = { key key(ent) ; return x -> ⌊e_r⌋ ; ⌊cl_i⌋ }
+⌊{ handles ent ; cells [r] ( k̄ : σ̄ ) ; return (x : τ) -> e_r ; cl_i }⌋
+    = { key key(ent) ; cells ( k̄ ) ; return x -> ⌊e_r⌋ ; ⌊cl_i⌋ }
 
 ⌊full op [b̄] (x : σ, k : τ) -> e⌋  = full op (x, k) -> ⌊e⌋
 ⌊fast op [b̄] (x : σ)        -> e⌋  = fast op (x)    -> ⌊e⌋
 
-⌊handle e with h⌋ = handle ⌊e⌋ with ⌊h⌋
+⌊handle e with h @ ( ē )⌋  = handle ⌊e⌋ with ⌊h⌋ @ ( ⌊ē⌋ )
+⌊handleO e with h⌋         = handleO ⌊e⌋ with ⌊h⌋
+⌊handleI e with h⌋         = handleI ⌊e⌋ with ⌊h⌋
+⌊region [r] θ in e⌋        = region ⌊θ⌋ in ⌊e⌋
+⌊readCell k⌋               = readCell k
+⌊writeCell k e⌋            = writeCell k ⌊e⌋
 ```
 
 This is **not** a reduction relation. `openEff`, `openEffC`, `weaken`, and `[[κ̄]]` change a term's type or its ambient row, and `[[κ̄]]` additionally discards an instantiation that the typed rules require. A backend erases first and then evaluates; the typed relation above evaluates without erasing.
 
 An erased handler carries the key alone: the payload of the element is what says which operations the clauses must exhaust, and that is settled before evaluation begins. The result type of a join point goes the same way, being written for the checker rather than for reduction.
+
+**A region keeps its keys and its values and loses everything else.** The region variable `r` and the types the layout assigns are annotations for the checker; the keys are not, since reduction pairs them with the initial values in order and `Ev_c` walks by them. So an erased handler carries the key sequence and an erased region carries `θ`, which is the run-time content there is (D36).
 
 **The `full` and `fast` markers survive erasure.** They carry no type information; they say what a clause binds and which reduction rule applies to it, and a backend lowers the two differently — a `fast` clause needs no representation of a continuation at all. Core writes the marker on every clause, so which rule applies is settled in the erased term as well.
 

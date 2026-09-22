@@ -30,8 +30,10 @@ e ::= x | M.x [[κ̄]]                    variable; `M.x` when κ̄ is empty
     | absurd [τ] e
     -- effects
     | perform k.op [τ̄] e
-    | handle e with h
+    | handle e with h @ ( ē )
     | openEff [ρ] e
+    | readCell k
+    | writeCell k e
 
 c ::= literals of Int, Number, String, Char, Boolean
 ```
@@ -86,7 +88,7 @@ The typing rules enforce this by **discarding** the join point context `Δ`.
 ```text
 λ (x : τ). e                 check e with Δ := ·
 Λ (a : κ). v                 check v with Δ := ·
-handle e with h              check e, the return clause, and every operation clause with Δ := ·
+handle e with h @ ( ē )      check e, the return clause, and every operation clause with Δ := ·
 ```
 
 This is why `Δ` is a context separate from `Γ`: their scoping rules differ. `Γ` extends into the body of a lambda; `Δ` is cut off there. A single context could not express the difference.

@@ -14,8 +14,9 @@ Row theory concerns **keyed, unordered, duplicate-free collections**. Where a ke
 | labelled variant | `SymbolKey`, the name written for it | the payload's type |
 | effect | `EffectKey`, derived from the effect at the head | the effect application |
 | labelled effect | `SymbolKey`, the instance name written for it | the effect application |
+| region | `RegionKey`, the one there is | the region variable and its row of cells |
 
-Six structures, one theory (D16). What changes between them is which key constructor the elements carry and what a payload is; normalization, equality, and entailment run the same algorithm over all of them and branch on none of it.
+Seven structures, one theory (D16). What changes between them is which key constructor the elements carry and what a payload is; normalization, equality, and entailment run the same algorithm over all of them and branch on none of it.
 
 **The table reads as the conventional interpretations, not as a restriction.** Kinding admits any structural key in a `Row Type`, so `Record ( #Ok : Int )` is well-kinded; which keys a structure uses is settled by surface syntax and the elaborator ([Kinds](01-Kinds-and-Types.md)).
 
@@ -23,12 +24,13 @@ Six structures, one theory (D16). What changes between them is which key constru
 
 ### Structural and nominal
 
-The four key constructors divide once more, and this division the checker does see.
+The key constructors divide once more, and this division the checker does see.
 
 | | Keys | Identity decided by | Needs `Σ` |
 | --- | --- | --- | --- |
 | **structural** | `SymbolKey`, `TagKey`, `PositionKey` | the syntax itself | no |
 | **nominal** | `EffectKey` | a declaration | yes |
+| **reserved** | `RegionKey` | nothing; there is one | no |
 
 A `#Ok` written in one module and a `#Ok` written in another are the same key, and neither requires anything to have been declared. That is what lets an open variant be shared between modules that know nothing of each other.
 
@@ -41,6 +43,8 @@ cache : State Int
 ```
 
 Here `SymbolKey cache` identifies the instance within the row, while `State` decides which operations may be performed on it. Collapsing the two would lose one or the other.
+
+A `RegionKey` is a third thing again, and sharpness is what it rests on. **There is exactly one such key**, so a row holds at most one region, and the innermost is the only one — which is what lets a cell be named by its own key with nothing to say which region is meant (D36). No syntax writes it, so nothing outside the `handle` that owns a region can put one in a row or take one out.
 
 Sharing one theory does not mean sharing one notation.
 

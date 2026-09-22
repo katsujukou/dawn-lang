@@ -131,17 +131,29 @@ Core requires no change, and destructuring in handler clauses is likewise surfac
 e ::= ...
     | perform k.op [τ̄] e              invoke an operation of the element keyed k
     | handle e with h                 apply a handler
+    | handle e with h @ ( ē )         apply one that owns a region, opening it
     | openEff [ρ'] e                  effect widening, erased
+    | readCell k                      read the cell keyed k of the region
+    | writeCell k e                   write it
 
-h  ::= { handles ent ; return (x : τ) -> e_r ; cl1 ; ... ; cln }
+h  ::= { handles ent ; lay ; return (x : τ) -> e_r ; cl1 ; ... ; cln }
 
-cl ::= full op [b̄] (x : σ, k : τ' -{ρ}-> β) -> e    binds the continuation
+lay ::=                               no region; the handler owns no cells
+      | cells [r] ( k1 : σ1, …, kn : σn )
+                                      a region, its variable and its layout
+
+cl ::= full op [b̄] (x : σ, k : τ' -{ρ̂}-> β) -> e    binds the continuation
      | fast op [b̄] (x : σ)                   -> e    does not
+
+  ρ̂ is the row a clause stands at: the row outside the handle where the handler
+  owns no region, and that row extended with the region where it owns one
 ```
 
 - `perform k.op [τ̄] e` invokes operation `op` of the element the ambient row keys with `k`. It requires that row to contain such an element, and the operation is looked up in the effect at the head of that element's **payload**, not in `k`.
 - `handle e with h` removes the element `ent` that `h` writes from `e`'s effect row and processes it with the clauses of `h`. The key of `ent` says which element; the effect at the head of its payload says which operations the clauses must exhaust. Handlers are **deep** (D15): after a resumption, control is under the same handler.
+- `handle e with h @ ( ē )` is the same where `h` owns a region, and `ē` are its cells' initial values, one per key of the layout and in the order the layout writes them. **The two forms are separate**, and a handler that declares no cells takes the first: a region is opened where one is declared and nowhere else.
 - `openEff [ρ'] e` turns `e : τ1 -{ρ}-> τ2` into `τ1 -{ρ ⊎ ρ'}-> τ2`. Effect containment is an explicit term rather than subtyping (D8). At run time it is the identity and disappears during lowering.
+- `readCell k` and `writeCell k e` reach the innermost region declaring `k`. Which region that is needs nothing written for it, a row holding at most one (D16).
 
 **A handler writes one element, and a `perform` names one key.** Where the key is an `EffectKey` the two read as they always have — `perform Console.log`, a handler that `handles Console` — and where it is a `SymbolKey` they name the instance instead.
 
@@ -164,7 +176,7 @@ A clause takes one of two forms, and what separates them is how much of the hand
 
 A **`full` clause** binds the continuation `k`. Its body has the type of the whole `handle`, so the clause decides what the `handle` returns: it may abandon the computation by never applying `k`, resume it once, or branch it by applying `k` more than once ([Semantics](06-Semantics.md)).
 
-A **`fast` clause** binds the operation's arguments and nothing else. Its body has the type the continuation resumes with, and a value the body produces is delivered to the point where the operation was performed. Such a clause is **tail-resumptive**: it translates one operation into a computation over the residual row and, where that computation returns, hands control back there.
+A **`fast` clause** binds the operation's arguments and nothing else. Its body has the type the continuation resumes with, and the value it produces is returned to the point where the operation was performed. Such a clause is **tail-resumptive**: it translates one operation into a computation over the row a clause stands at and, where that computation returns, hands control back there.
 
 ```text
 effect Console where log : String ->* Unit
@@ -177,7 +189,7 @@ fast log [] (msg : String)                    -> …    -- body : Unit ! ρ
 
 **The typing rule is what fixes the difference.** A `full` clause's body is checked at the answer type `β`; a `fast` clause's body is checked at the resume type, and `β` appears nowhere in its premise ([Typing Rules](05-Typing-Rules.md)). Naming neither a continuation nor the answer, a `fast` clause cannot bypass the evaluation still to come in order to supply what the `handle` returns, and has no continuation of the handled operation to invoke zero or several times.
 
-**What a `fast` clause guarantees is local to the clause.** Reduction embeds its body at the point of the `perform` once, and on each run in which the body returns a value, the original evaluation context continues from that value under the same handler. The clause does select that value, and so influences the result; what it cannot do is skip the rest of the computation and answer in its place.
+**What a `fast` clause guarantees is local to the clause.** Reduction binds its body once and returns the value it produces to the point of the `perform`, from which the original evaluation context continues under the same handler. The clause does select that value, and so influences the result; what it cannot do is skip the rest of the computation and answer in its place.
 
 A body need not return a value. It may diverge, it may fault, or it may perform an operation of the residual row `ρ` whose own handler declines to resume, and then the handled computation does not continue.
 
@@ -195,6 +207,59 @@ fast abort1 [b] (_ : Unit) -> perform Abort2.abort2 [b] Prim.Unit
 This translates one capability into another, which is what a `fast` clause is for. Interpreting `Partial` into `Maybe` is a different matter and takes a `full` clause — not because `abort` is polymorphic, but because that handler's answer is `Maybe a` where the computation's is `a`, and only a `full` clause supplies an answer ([Examples](08-Examples.md)).
 
 **The property is declared, not inferred.** Whether a `full` clause happens to resume exactly once, in tail position, cannot be read off its syntax. A single occurrence of `k` may sit under a lambda that is applied twice, and two occurrences in separate branches of a `case` may amount to one resumption. Marking the clause is what makes the property available to the type checker, to reduction, and to a backend.
+
+### A handler's region of cells
+
+A handler may declare a **region**: a region variable and a finite sequence of keys with their types, written `cells [r] ( k̄ : σ̄ )`, whose cells are installed when the handler is and disappear when it does (D36).
+
+```text
+handle e with
+  { handles Counter
+  ; cells [r] ( n : Int )
+  ; return (x : α) -> x
+  ; fast next (_ : Unit) ->
+      let m : Int = readCell n in
+      let _ : Int = writeCell n ( Base.Int.add m 1 ) in
+      m
+  } @ ( 0 )
+```
+
+**The layout is written and therefore closed.** It is a sequence of pairs, not a row with a tail, which is what lets the initial values be given one per cell and what makes the region a finite map at run time. The *type* `region r ι` is an ordinary type and its `ι` may be open, which is what a helper polymorphic over the cells a region holds besides the one it uses needs; only a handler's own layout is closed.
+
+**`r` is bound by `cells`.** It is written rather than generated, as every other binder of Core is (D11, D12), and it scopes over the operation clauses entire, their type annotations as well as their bodies — a `full` clause writes `ρ'` in the type of its continuation, so the annotation mentions `r` as readily as the body does. `handles ent`, the layout, and the return clause lie outside that scope; the layout in particular is kinded without `r`, so no cell holds a value typed by the region.
+
+**A cell is a binder with a lifetime, not a location.** It has no address and no identity; `readCell n` names it by its key, and there is no value standing for it that could be held, passed, or stored. A write replaces what the binder holds, so a continuation whose captured context contains the region carries the values it was captured with and each of its resumptions proceeds from its own; which continuations those are is settled in [Semantics](06-Semantics.md).
+
+**The region is visible to the operation clauses and to nothing else.** It stands in the row they are typed at, `( region r ι | ρ )`, and in neither the row of the handled computation nor that of the return clause, both of which are as they were. So the code a handler handles can neither read nor write the handler's cells, a handler installed inside that code may own a region of its own, and **the return clause cannot read a cell** — which is where the state would otherwise leak into the answer.
+
+**A handler that owns a region requires its residual row to have none.** `( region r ι | ρ )` is sharp only under `RegionKey ∉ ρ`, which a handler effect-polymorphic in `ρ` assumes rather than derives; the constraint is written in its type like any other ([Typing Rules](05-Typing-Rules.md)). That is what rejects a region opened inside another region's clause body.
+
+**What cannot outlive a region is a reference into it.** `r` is the region variable the `handle` binds, and the rule requires it to occur in neither the answer type nor the residual row ([Typing Rules](05-Typing-Rules.md)). A closure built in a clause over a `readCell` carries `( region r ι | ρ )` in its own arrow, so it mentions `r` and can be neither the answer nor anything the residual row admits. Core needs no rank-2 quantifier for this: `cells` is a binder, and what a rank-2 `forall` would enforce, a side condition on a binder enforces directly.
+
+**A term carrying the whole `handle` is a different matter and is unrestricted.** A closure over it, or a continuation an outer handler captured across it, contains the binder along with everything the binder scopes over; its type mentions no `r`, and it may be stored and applied wherever its type allows. That is not a hole in the discipline but the case the discipline is for: what travels is a region entire, and the cells it carries are the ones it was closed over ([Semantics](06-Semantics.md)).
+
+### This is `ST`, and the state monad is the other handler
+
+**An ordinary return hands back no state.** The return clause is typed at `ρ`, where no region stands, so `readCell` has nothing to name there; and reduction closes the region in the same step that runs it, so there is no moment at which an answer and a cell both exist ([Semantics](06-Semantics.md)).
+
+That is a statement about the return path and not about every path. A `full` clause is typed at `ρ'` and may therefore read a cell and make the value its answer. With a handler whose answer type is `Int` and a cell `n : Int`:
+
+```text
+full next (_ : Unit, k : Int -{ρ'}-> Int) ->
+  let _ : Int = k Prim.Unit in
+  readCell n
+```
+
+The clause resumes, discards what came back, and answers with the cell as it stands afterwards — the state, deliberately copied out. **What a cell-backed handler does not do is return its final state on its own**; a value a cell held is an ordinary value of an ordinary type, and a clause that means to return one may.
+
+That is the reading of a cell, not a gap. Wanting the final state is wanting a state *monad*, which is the parameter-passing handler: `full` clauses, an answer type of `s -{ρ}-> ( α, s )`, and a continuation captured per operation. The two coexist deliberately.
+
+| | Answer type | Clauses | What it buys |
+| --- | --- | --- | --- |
+| cells | `α` | `fast` | tail resumption; no continuation is built. A `full` clause may still copy a cell into the answer |
+| parameter passing | `s -{ρ}-> ( α, s )` | `full` | the final state, in the answer |
+
+The second is written with what Core already has and needs no region. The first is what a region is for, and it composes where the second does not: an answer type of `α` is what the `~>` shorthand of the surface describes ([Effect Handlers](../02-Surface-Language/02-Effect-Handlers.md)).
 
 ### `perform` does not require a handler to exist
 
