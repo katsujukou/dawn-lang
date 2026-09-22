@@ -209,6 +209,7 @@ written by the name of the table.
 | `CTOR d, ctor, n, r…` | A saturated constructor; `n` is its arity |
 | `CALLK d, global, n, r…` | Call the closure in a global slot; `n` is its arity |
 | `CALLU d, s, n, r…` | Call the value in `s` with `n` arguments |
+| `PRIM d, prim, n, r…` | Carry out a `Base` ABI operation. **May fault** |
 | `FFI d, foreign, n, r…` | Call a foreign implementation; `n` is its arity. **May fault** |
 
 `CLOSN` and `SETCAP` exist for a recursive group, whose members capture one
@@ -336,25 +337,32 @@ The `sum` of [Translation](../04-MiddleEnd/02-Translation.md), lowered:
 
 ```text
 function Main.sum   nparams 1   captures []   joins []
-  regs  [ Data Main.List, Int, Int, Data Main.List, Int ]
+  regs  [ Data Main.List, Int, Data Main.List, Int, Int, Val ]
 
   body
     tail  BRC r0, [ Main.Nil -> A, Main.Cons -> B ]      no default; the two exhaust
 
-      A   code  LOADK r1, #0
-          tail  RET r1
+      A   code  LOADK r4, #0
+          tail  RET r4
 
-      B   code  FIELD r2, r0, Main.Cons, 0
-                FIELD r3, r0, Main.Cons, 1
-                CALLK r4, Main.sum, 1, [r3]
-          tail  TAILFFI Base.Int.add, 2, [r2, r4]
+      B   code  FIELD r1, r0, Main.Cons, 0
+                FIELD r2, r0, Main.Cons, 1
+                CALLK r3, Main.sum, 1, [r2]
+                PRIM  r5, IntAdd, 2, [r1, r3]
+          tail  RET r5
 ```
 
-`r0` is the parameter, `r2` to `r4` are the three Mid IR locals of the `Cons`
-branch, and `r1` is a slot lowering introduced for itself: an atom that is a
-literal has to reach a register before an instruction can take it, and `LOADK`
-is what puts it there. Slots are never shared, not even between branches that
-cannot both run, there being no register allocation here.
+`r0` is the parameter and `r1` to `r3` are the three Mid IR locals of the `Cons`
+branch, the numbering of a register being the numbering of the local it stands
+for. `r4` and `r5` are slots lowering introduced for itself, which is why they
+come after every local: an atom that is a literal has to reach a register before
+an instruction can take it, and a computation in tail position that is not a
+call takes one on the way to returning. Slots are never shared, not even between
+branches that cannot both run, there being no register allocation here.
+
+`r5` carries `Val` because a Mid IR `tail` holds no `Rep`: a call returns its
+value and wants none, and the class of the register a non-call takes there has
+nowhere to come from ([Mid IR](../04-MiddleEnd/01-Mid-IR.md)).
 
 `A` and `B` are not blocks the function holds and jumps to. They are the two
 branches of the `BRC`, written out here because a nested `Node` does not fit on
@@ -362,33 +370,41 @@ one line, and a JavaScript backend emits them as the two arms of a `switch`.
 
 The rest of the function follows from that shape. The `FIELD`s stand inside `B`
 and nowhere else, that being the only branch in which the fields exist. The
-recursive `CALLK` is an ordinary call because its value is an argument, and the
-addition is a `TAILFFI` because it stands where the function returns. Nothing is
-shared between the branches, so the function has no join points at all.
+recursive `CALLK` is an ordinary call because its value is an argument. The
+addition is a `PRIM` followed by `RET` rather than a tail call: `Base.Int.add`
+is classified as the operation `IntAdd`, and an operation is not a transfer of
+control, so only a call has a `Tail` of its own. Nothing is shared between the
+branches, so the function has no join points at all.
 
 A shared branch is what produces one. Where a decision tree reaches one body from
 two leaves, Core lifts that body into a `letjoin`, and the two leaves become
 `JMP`s naming it.
 
 ```text
-function …   joins [ alt0 params [r3] ]
+function …   joins [ alt0 params [r1] ]
 
   body
     tail  BRC r0, [ Main.Nil  -> A, Main.Cons -> B ]
 
-      A   code  LOADK r1, #0
-          tail  JMP alt0, 1, [r1]
+      A   code  LOADK r3, #0
+          tail  JMP alt0, 1, [r3]
 
       B   code  FIELD r2, r0, Main.Cons, 0
           tail  JMP alt0, 1, [r2]
 
-  join alt0 params [r3]
+  join alt0 params [r1]
     …
 ```
 
-The body is held once, and the name is what both leaves carry. `r3` is where a
+The body is held once, and the name is what both leaves carry. `r1` is where a
 `JMP` writes its argument, and the `Join` names it so that a consumer can
 perform the transfer at all.
+
+It takes `r1` because **a join point's parameter is a Mid IR local, numbered
+where the `letjoin` stands**. The `letjoin` encloses the dispatch, so its
+parameter is numbered before anything the branches bind — here before `r2`, the
+field the `Cons` branch projects — and every local is numbered before `r3`, a
+slot lowering introduced for itself.
 
 ## Handlers, `perform`, and continuations
 
@@ -455,13 +471,19 @@ a machine state carries no types, so those two stay with the Core evaluator
 
 ## Faults
 
-A foreign implementation may fail, and the failure is a **fault**: not an
-effect, intercepted by no handler, absent from every row, and distinct from the
-`Partial` effect ([Semantics](../03-Typed-Core/06-Semantics.md)).
+A foreign implementation may fail, and so may a `Base` ABI operation: the failure
+is a **fault** — not an effect, intercepted by no handler, absent from every row,
+and distinct from the `Partial` effect
+([Semantics](../03-Typed-Core/06-Semantics.md)).
 
 A fault discards the whole continuation, handler markers included, and ends
-execution. The machine reports it; nothing in the bytecode catches it, and no
-instruction produces one but `FFI` and `TAILFFI`.
+execution. The machine reports it; nothing in the bytecode catches it, and the
+instructions that produce one are `FFI`, `TAILFFI`, and `PRIM`.
+
+**Which entries fault, and on which inputs, belongs to the ABI specification**
+and is not something a lowering decides ([Open Questions](../07-Open-Questions/01-Open-Questions.md)).
+The ABI fixes one observable meaning for every backend, so the question is
+settled once for all of them rather than per target.
 
 ## Executing an `IO` is outside the machine's reduction
 
@@ -495,12 +517,14 @@ section  id | length | payload           repeated to the end of the file
 | `CTORS` | Per constructor: name, owning type, tag, arity, and whether its type is a `newtype` |
 | `EFFECTS` | Per effect: name and the operations it declares |
 | `FOREIGNS` | Per foreign: qualified name and arity |
-| `CALLEES` | Per partial-application target: what kind it is, which entry, and its arity |
+| `CTORREFS`, `FOREIGNREFS`, `GLOBALREFS` | The constructors, foreigns, and top-level values this module's **code names** — its own and those of the modules it imports. Every `ctor`, `foreign`, and `global` operand is an index into one of these |
+| `CALLEES` | Per partial-application target: a value, a foreign, or a constructor with its qualified name, or an operation. **An operation carries no name**: what it realizes comes from the ABI version, so no entry can name one operation and an unrelated entry |
+| `PRIMS` | The operations the module carries out, saturated or waiting in a partial application. It holds the operations alone: **what each realizes is derived from the ABI version** the header carries |
 | `HANDLERS` | Per handler: its key, and per clause the operation and its form |
 | `FUNCTIONS` | Per function: `nparams`, the `Rep` of each register and of each capture slot, its join points with the registers each takes its arguments in, and its body |
 | `GLOBALS` | Per top-level value: its name, whether it is run or installed, and which function |
 | `EXPORTS` | The globals this module exports |
-| `DEBUG` | Source spans, function names, and local names, from the debug table translation produces beside the module ([Mid IR](../04-MiddleEnd/01-Mid-IR.md)) |
+| `DEBUG` | Source spans, function names, and local names, keyed by function index and register. Translation produces this table beside the module and lowering carries it across, rewriting the keys ([Mid IR](../04-MiddleEnd/01-Mid-IR.md)) |
 
 `DEBUG` is the one section a reader may skip. Everything else is required, and a
 machine rejects a file missing any of it rather than guessing.
@@ -512,16 +536,56 @@ per instruction is not among them ([Mid IR](../04-MiddleEnd/01-Mid-IR.md)).
 equality and for nothing else, so the machine replaces each with an integer
 identifying it across every module it has loaded.
 
+### What a module declares, and what its code names
+
+The two are not the same set, and the container keeps them apart.
+
+`CTORS`, `EFFECTS`, `FOREIGNS`, and `GLOBALS` are what **this module declares**,
+with the tag, the arity, and the rest that only a declaration carries.
+`CTORREFS`, `FOREIGNREFS`, and `GLOBALREFS` are what **its code names**, which
+includes what it imports: a module summing a list calls `Base.Int.add`, whose
+arity is recorded where that foreign is declared and not here.
+
+**A reference is a qualified name and is resolved where the module it belongs to
+is loaded.** Nothing is resolved against a closed set of modules, which is what
+lets modules arrive one at a time. It is also why a `CALLEES` entry carries no
+arity: a partial application's callee may belong to another module, and the
+arity is that module's to state.
+
 **A join point's name is resolved on load too**, to whatever the machine reaches
 a `Join` by. A name is what the file holds so that the structure survives the
 format; nothing looks a name up while the function is running, and a name is
 never compared at run time.
 
+**A loader verifies a reference before it resolves one.** A qualified name must
+belong to this module or to one of its `IMPORTS`, and what it resolves to must
+be the kind of declaration the table it stands in calls for — a `CTORREFS` entry
+a constructor, a `FOREIGNREFS` entry a foreign, a `GLOBALREFS` entry a top-level
+value. A file naming something no import declares is rejected rather than
+resolved to whatever else is loaded.
+
+### The operations a module carries out
+
+`PRIMS` holds operations and nothing else. Which `Base` entry an operation
+realizes is fixed by the ABI manifest at the version the header names, so a
+reader derives it rather than reading a copy: were the correspondence written
+twice, target validation could check one entry while the machine ran another
+operation.
+
+**An operation is how an entry is carried out, not a way of not using it.** A
+module whose `PRIMS` names `Base.Int.add`'s operation owes that entry at the
+profile holding it exactly as one calling it through `FOREIGNREFS` would, so
+`PRIMS` is the use set target validation reads alongside `FOREIGNREFS`
+([Mid IR](../04-MiddleEnd/01-Mid-IR.md)).
+
 ### Initialization
 
 `GLOBALS` is ordered, and initialization runs it in order: a `run` entry
 evaluates its function once and stores the result, and a `func` entry installs a
-closure over an empty capture list without evaluating anything. A module's
+closure over an empty capture list without evaluating anything. Which one a
+value gets follows the shape of its right-hand side: a top-level lambda is a
+`func` and everything else a `run`, so a global a `CALLK` reaches holds a
+function of the arity that call supplies ([Mid IR](../04-MiddleEnd/01-Mid-IR.md)). A module's
 imports are initialized before it is.
 
 A right-hand side that diverges hangs initialization whether or not anything
@@ -546,6 +610,11 @@ nothing now and is expensive to retrofit.
 - **No register allocation.** One slot per Mid IR local, and one more wherever an atom has to reach a register before an instruction can take it
 - **No totality or arity checking.** The Core type checker established the first and Mid IR's invariants the second
 - **No typing.** `Rep` is carried through to the file, and nothing re-derives or checks it. Core's types, rows, and effect rows are gone by the time Mid IR exists
+
+What it does do first is **verify the invariants it rests on**. A register is a
+local's number, so lowering a module whose locals are not what Mid IR says they
+are would place a caller's argument in one slot and the body's read in another
+([Mid IR](../04-MiddleEnd/01-Mid-IR.md)).
 
 ## What a consumer owes
 

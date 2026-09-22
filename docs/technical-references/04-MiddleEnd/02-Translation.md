@@ -244,7 +244,8 @@ The head then decides which computation is emitted.
 | Head, after erasure | Arity `n` from | `\|args\| = n` | `\|args\| < n` | `\|args\| > n` |
 | --- | --- | --- | --- | --- |
 | A top-level value `M.x` | its definitional arity | `callk` | `pap` | `callk` with the first `n`, then `callu` with the rest |
-| A `foreign` `M.f` | arrows on its declared type's spine | `ffi` | `pap` | `ffi` with the first `n`, then `callu` with the rest |
+| A `foreign` `M.f` the ABI manifest holds as an **operation** | arrows on its declared type's spine | `prim` | `pap` over the operation | `prim` with the first `n`, then `callu` with the rest |
+| Any other `foreign` `M.f` | arrows on its declared type's spine | `ffi` | `pap` | `ffi` with the first `n`, then `callu` with the rest |
 | A constructor `M.Ctor` | its arity in `Σ` | `ctor` | `pap` | does not arise |
 | Anything else | not known | — | — | `callu` |
 
@@ -265,8 +266,15 @@ the order the nested applications put them in.
 A head with no arguments at all is the degenerate case of the same table: a
 top-level value becomes the atom `global M.x`, a constructor of arity 0 the atom
 `const M.Ctor`, a constructor of greater arity a `pap`, a `foreign` of arity 0 an
-`ffi` with no arguments — **which calls its implementation**, the spine being
+`ffi` or a `prim` with no arguments — **which carries it out**, the spine being
 saturated as soon as it is formed — and a `foreign` of greater arity a `pap`.
+
+**Both paths read the manifest at the same point.** Whether an entry is an
+operation is settled where the head is classified, so the bare reference and the
+saturated call cannot disagree, and a declaration whose arity the manifest does
+not give that entry is reported rather than fallen back from: an operation run
+with the wrong number of operands is not something a consumer can detect
+([Mid IR](01-Mid-IR.md)).
 
 ## Decision trees
 
@@ -414,14 +422,25 @@ group to be allocated before any capture list is filled.
 | `DeclData` | One constructor table entry per constructor: its reference, owner, tag, and arity. `isNewtype` is carried through for a backend that erases the representation |
 | `DeclEffect` | One effect table entry, listing the operations |
 | `DeclForeign` | One foreign table entry, with the arity counted off the declared type's spine |
-| `DeclNonRec` | A function of no parameters holding the translated right-hand side, and a `run` entry in `globals` |
-| `DeclRec` | One function per member and a `func` entry each |
+| `DeclNonRec`, `DeclRec` | One function per binding, and one entry in `globals` per binding: `func` where the right-hand side is a lambda, `run` otherwise |
 
-The right-hand side of a `nonrec` is an arbitrary pure expression, so it becomes
-a function that initialization evaluates once, in declaration order. A `rec`
-group's members are function values already, and its recursive references are
-global names, so each member is a closure over an empty capture list and nothing
-is evaluated to install it ([Semantics](../03-Typed-Core/06-Semantics.md)).
+**Which entry a binding gets is decided by the shape of its right-hand side and
+not by the form of its declaration**, the shape being what is left once erasure
+has looked through the wrappers. A right-hand side that is a lambda becomes that
+function, installed as a closure over an empty capture list: at the top level
+every free name is a global, so there is nothing to capture and nothing to
+evaluate. Anything else becomes a function of no parameters that initialization
+evaluates once, in declaration order
+([Semantics](../03-Typed-Core/06-Semantics.md)).
+
+A `rec` group's members are function values already (D14), so each is a `func`.
+A `nonrec` is one or the other according to what it holds.
+
+**This is the same test the definitional arity is read by**, and the two have to
+agree: a `nonrec` holding a lambda has a definitional arity, so a call to it is
+`callk`, and the global that call reaches has to hold the function whose arity
+it supplied rather than the result of evaluating a thunk. Reading one property
+off the declaration and the other off the term is what lets them disagree.
 
 The order of `globals` is the dependency order Core required of value
 declarations, preserved rather than recomputed.
@@ -454,7 +473,6 @@ and in Mid IR:
 ```text
 ctors    Main.Nil  of Main.List  tag 0  arity 0
          Main.Cons of Main.List  tag 1  arity 2
-foreigns Base.Int.add  arity 2
 
 function #0 params [ xs : Data Main.List ] captures []
   switchCtor (local xs) {
@@ -462,7 +480,7 @@ function #0 params [ xs : Data Main.List ] captures []
     Main.Cons -> let x  : Int            = field (local xs) Main.Cons 0 in
                  let ys : Data Main.List = field (local xs) Main.Cons 1 in
                  let s  : Int            = callk Main.sum [ local ys ] in
-                 tail (ffi Base.Int.add [ local x, local s ])
+                 tail (prim IntAdd [ local x, local s ])
   }
 
 function #1 params [] captures []
@@ -475,10 +493,11 @@ globals  Main.sum    func #0
          Main.result run  #1
 ```
 
-Six things in that output are worth naming.
+Seven things in that output are worth naming.
 
 - **`Main.Nil [Int]` became the atom `const Main.Nil`.** The type application erased, and a saturated constructor of arity 0 is a constant.
-- **`Base.Int.add x (Main.sum ys)` folded into one `ffi`.** Core applies it one argument at a time, and the spine collapsed to a single saturated call.
+- **`Base.Int.add x (Main.sum ys)` folded into one `prim`.** Core applies it one argument at a time, and the spine collapsed to a single saturated call.
+- **The head classified as the operation `IntAdd`, and the operand is that operation and not a name.** The manifest holds `Base.Int.add` as an operation, and what the term carries is the operation alone: the entry it realizes is derived from it and written in one place, so nothing downstream can check one entry while running another. `Main` declares no foreign either — the entry is `Base.Int`'s, and that `Main` carries the operation out is recorded where lowering interns the use ([Bytecode](../05-Backend/01-Bytecode.md)).
 - **`Main.sum ys` is emitted before `x` is read, because arguments are evaluated right to left** (D35). Nothing is visible here, `x` being a local and `Base.Int.add` a head that no binding names, but the order is what makes the fold on the line above sound.
 - **`Main.sum ys` is not a tail call and `Base.Int.add` is.** The recursive call's value is an argument, so it is named; the addition stands at the function's `Dest` and so is emitted as `tail`.
 - **The fields of `Main.Cons` are projected inside the branch that selected it**, and nowhere else.

@@ -141,7 +141,8 @@ place an effect, an allocation, or a call occurs.
 ```text
 comp ::= pure atom                                 name a value
 
-       -- calls
+       -- operations and calls
+       | prim  op [ā]                             a `Base` ABI operation, saturated
        | callk M.x [ā]                             |ā| equals M.x's arity
        | callu a [ā]                               the callee is not known statically
        | ffi   M.f [ā]                             a saturated foreign; may fault
@@ -166,13 +167,22 @@ comp ::= pure atom                                 name a value
        | perform k.op a                            invoke an operation of the element keyed k
        | handle h f [ā] @ [v̄]                      install h and call the body
 
-callee ::= M.x | M.f | M.Ctor
+callee ::= M.x | M.f | M.Ctor | prim op
 ```
 
 **`handle` is a computation, and its body is a function of no parameters.** Its
 value is what the handler's return clause produces, so binding it with a `let`
 is all that is needed to use it, and no other form has to carry a destination
 for it.
+
+`[ā]` is what the body closure captures and `[v̄]` the initial value of each cell
+of the handler's region, one per key of its `cells` and in that order. **The two
+are separate fields because they are neither the same values nor evaluated at
+the same time**: a capture list holds what the body names, so mixing the initial
+values into it would have the body capture what it never names, and the initial
+values are evaluated before the handler is installed while a capture list is
+collected when the closure is built. Both are empty for a handler declaring no
+region.
 
 **`recExtend` and `recUpdate` take their operands the other way about**, as Core
 writes them: the value first for one and the record first for the other
@@ -215,9 +225,48 @@ Retaining this form is what keeps a partially applied constructor representable
 lowers a `pap` to a curried function or to an object carrying the callee, the
 arity, and the arguments collected so far, as it prefers.
 
+### Primitive operations
+
+**A `Base` ABI entry whose meaning the ABI fixes is an operation, not an
+implementation.** A consumer carries one out directly rather than calling
+something a backend supplied separately, which is what lets a machine add two
+integers in its dispatch loop and a JavaScript backend emit `a + b` — neither of
+them recognizing a qualified name to find out what it was handed.
+
+What divides the two is what the name means rather than what it costs. A `Base`
+entry returning no `IO` has a meaning the ABI fixes for every backend
+([Prim and Base](../06-Modules/02-Prim-and-Base.md)), so naming the operation
+loses nothing. A native leaf action returns `IO` and names an implementation, as
+does an entry of a target namespace, whose meaning is one target's rather than
+the ABI's; both stay `ffi`.
+
+**Which entries are operations is the ABI manifest's to say**, fixed by an ABI
+version alongside the surface and the profiles. Nothing in Core or in this stage
+privileges a name of its own choosing.
+
+**Whether an operation may fault is the ABI specification's to say as well**, and
+is not read off the operation. The ABI fixes one observable meaning for every
+backend, so if `Base.Int.add` wraps then a backend on a host that traps on
+overflow owes the wrapping form, and if it faults then every backend owes the
+fault. Until that is settled, a consumer treats an operation as one that may
+([Open Questions](../07-Open-Questions/01-Open-Questions.md)).
+
+**An operation is how an entry is carried out, not a way of not using it.** A
+backend still owes the entry at the profile that holds it, so a `.dmo` records
+which entries its operations realize and target validation reads them
+([Bytecode](../05-Backend/01-Bytecode.md)).
+
+**An operation stays an operation through a partial application.** A `Base`
+entry applied to fewer arguments than its arity produces a `pap` whose callee is
+the operation, so saturating that `pap` carries the operation out. Were the
+callee the qualified name instead, the same entry would run as an operation
+where it was saturated at once and as an implementation where it was not, and a
+backend supplying only what the ABI obliged it to would have nothing to call.
+
 ### Faults
 
-`ffi` is the only computation that may produce a fault. A fault is not an effect:
+`ffi` and `prim` are the computations that may produce a fault. A fault is not
+an effect:
 no handler intercepts it, it appears in no row, and it is not the `Partial`
 effect ([Semantics](../03-Typed-Core/06-Semantics.md)). It propagates out of every
 construct including a handler, and a backend implements it as an abrupt
@@ -247,6 +296,13 @@ expr ::= ret a                                     the value of the enclosing fu
 obligation to transfer control rather than to push a frame. Whether it can
 honour that obligation for a given target is the backend's affair, but Mid IR
 never hides which calls are in tail position.
+
+**`tail` carries no `Rep`.** A call returns its value and wants no register for
+it, so for the calls this form exists to mark there is nothing to record. A
+computation that is not a call does take a register on the way to returning, and
+the class of that register has nowhere to come from: a consumer gives it `Val`,
+which every consumer already handles and which costs precision rather than
+correctness.
 
 `if` is `guard` with its condition already named. Core's `guard` is the one
 sequential test in a decision tree; every `switch*` is a single dispatch whose
@@ -463,12 +519,25 @@ ambient effect row: the row is erased, and the key at a `perform` site does not
 by itself say which effect the element carries.
 
 **`globals` is an ordered list, and the order is the dependency order Core
-required.** A `run` entry is a `nonrec` declaration, whose right-hand side is
-evaluated once when the module is initialized; a `func` entry is a member of a
-top-level `rec` group, installed without evaluating anything. Evaluating eagerly
-in declaration order is observable, a divergent right-hand side hanging
-initialization whether or not anything refers to it, and Mid IR preserves that
-rather than deferring to first reference ([Semantics](../03-Typed-Core/06-Semantics.md)).
+required.** Evaluating eagerly in declaration order is observable, a divergent
+right-hand side hanging initialization whether or not anything refers to it, and
+Mid IR preserves that rather than deferring to first reference
+([Semantics](../03-Typed-Core/06-Semantics.md)).
+
+**Which entry a value gets is decided by the shape of its right-hand side and
+not by the form of its declaration.** A right-hand side that is a lambda once
+erasure has looked through the wrappers becomes that function, installed as a
+`func`: at the top level every free name is a global, so there is nothing to
+capture and nothing to evaluate. Anything else becomes a `run`, evaluated once.
+A member of a top-level `rec` group is a function value and therefore always a
+`func`; a `nonrec` is one or the other according to what it holds.
+
+This is the same test the **definitional arity** is read by, and the two have to
+agree. A `nonrec` holding a lambda has a definitional arity, so a call to it is
+`callk`; were it installed as a `run` instead, the global reached by that
+`callk` would be the result of evaluating a thunk rather than the function whose
+arity the call supplied. Reading one property off the declaration and the other
+off the term is what lets them disagree.
 
 ## The debug table
 
@@ -501,8 +570,10 @@ keeps the outer node for this.
 
 **A local is named where one was created for a name.** A `let` whose right-hand
 side is already an atom binds an alias and makes no local, so `let z = y` leaves
-`y`'s own name in place rather than renaming it. A local holding a projection, or
-an intermediate result of a folded spine, was created for no name at all.
+`y`'s own name in place rather than renaming it, and a pattern binding an
+occurrence an earlier one already materialized aliases that local the same way.
+A local holding an intermediate result of a folded spine, or a projection no
+pattern gave a name to, was created for no name at all.
 
 **It is a side table and not an annotation on the terms.** A Mid IR node has no
 identity of its own, and most nodes come from no single Core node: one
@@ -536,22 +607,73 @@ says what became of it.
 
 ## Invariants
 
-A verifier over Mid IR checks the following. None of it re-derives anything the
-Core type checker established; each is a property translation is obliged to
-produce and a later pass is obliged to preserve.
+**A lowering verifies these rather than accommodating a breach**, because the
+numbering is what it reads: a register is a local's number, and a function is
+reached by its place in the table. A gap displaces every slot after it, a
+parameter out of place has the caller write one slot and the body read another,
+and an entry out of place is reached under another's name. Filling a hole would
+produce a module that runs and computes something else.
 
-1. Every argument of every computation is an atom
-2. Every `local` is bound by a parameter, a capture, a `let`, a `letrec`, or a join point parameter of an enclosing scope, and no local is bound twice in one function
-3. Every `jump` names a join point of an enclosing scope in the same function, with matching arity, and stands in tail position
-4. Every function a `handle` names — its body, its clauses, its return clause — is an entry of the function table, so no join point of the `handle`'s own scope reaches any of them
-5. Every branch of every `switch*` and `if` ends in `ret`, `tail`, `jump`, or another control construct
-6. `switchLit` has a default; `switchCtor` and `switchKey` have one or exhaust
-7. `callk` supplies exactly the callee's arity, as do `ffi` and `ctor`; `pap` supplies fewer
-8. Every `closure f [ā]` supplies exactly the captures of `f`
-9. Every `FuncId`, `CtorRef`, `QEffName`, and operation index resolves in the module's tables
-10. A handler names no operation twice, and each clause function has the arity its form requires: two parameters for a `full` clause, one for a `fast` clause and for the return clause
+None of it re-derives anything the Core type checker established; each is a
+property translation is obliged to produce and a later pass is obliged to
+preserve.
+
+### What the representation already holds
+
+Four of them need no check, there being no term of Mid IR in which they fail:
+every argument of every computation is an atom, every branch of every `switch*`
+and `if` ends in a transfer, `switchLit` has a default, and a `jump` stands in
+tail position.
+
+### What a verifier checks
+
+**The function table.** Each function stands at its own identifier, so the table
+is `0 … n-1` and holds no identifier twice. Every global names a function the
+table holds, and that function takes no captures — initialization installs one
+over an empty capture list — and takes no parameters where initialization
+evaluates it.
+
+**Join points.** Every `jump` names a join point of an enclosing scope in the
+same function and supplies the number of arguments that join point takes. A join
+point is in scope in its own definition, which is what lets one stand for a
+loop, and is declared once in a function: scope alone would let an inner one
+shadow an outer, but a lowering puts them in one flat table, so a second
+declaration would leave a jump with two destinations. Nothing requires the
+numbering to be dense.
+
+**Registers.** No local is bound twice in one function. The locals are numbered
+`0 … n-1` without a gap, the parameters first and the captures immediately after
+them, each in declaration order. Every local a term reads is bound at the point
+that reads it: one never bound and one bound in a branch that does not enclose
+the read are both rejected, and the second passes every check of layout alone.
+
+**Functions a term names.** Every `closure`, `letrec` binding, `handle` body,
+and handler clause names a function of the table and supplies exactly the
+captures that function takes. Each function a handler reaches has the arity its
+form gives it: none for the body, two for a `full` clause, one for a `fast`
+clause and for the return clause. A handler names no operation twice.
+
+**Arities and fields.** A saturated `prim` supplies the arity the ABI manifest
+fixes, and a `pap` over one supplies fewer. A saturated `callk`, `ctor`, or
+`ffi` naming something **this module declares** supplies that declaration's
+arity, and a `pap` over one supplies fewer. A `callk`, and a `pap` over a
+top-level value, names a global installed as a function rather than one
+evaluated at initialization, an absent definitional arity not being zero. A
+`field` names a field the constructor has.
+
+**Dispatch.** A `switchCtor`'s branches name constructors of one type, each
+once, and where there is no default they leave no constructor of that type
+without a destination.
+
+### What one module cannot decide
+
+The arity of a constructor, foreign, or global **another module declares** is
+that module's to state, and a `.dmo` deliberately carries no copy of it
+([Bytecode](../05-Backend/01-Bytecode.md)). Those references are checked where
+the modules are together, which is what a loader does. Everything a module does
+declare is checked here.
 
 That a handler's clauses **exhaust** the operations of the effect its element
-carried is not among them. The element's payload is what said which operations
-those are, and it was erased; the Core type checker established exhaustiveness
-while the payload was still there ([Typing Rules](../03-Typed-Core/05-Typing-Rules.md)).
+carried is not checked at all. The element's payload is what said which
+operations those are, and it was erased; the Core type checker established
+exhaustiveness while the payload was still there ([Typing Rules](../03-Typed-Core/05-Typing-Rules.md)).

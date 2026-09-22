@@ -276,6 +276,10 @@ The heading of each group names the step of the plan that the group belongs to.
 | The `source` of a lifted function | The annotation of the term the function was made from, wrappers included — not that of the body left once the lambdas come off, and not that of the lambda left once the wrappers come off. A lambda annotated 10 over a body annotated 11 records 10; an `openEff` annotated 30 over that lambda records 30 |
 | Where the wrappers erasure removes are looked through | Dispatch reads what erasure leaves; the node as it stands is what supplies the type and the annotation. Recursing into the inner term instead loses the span of the whole and narrows the type a `[τ]` had settled |
 | `weaken k [τ] (f x)` | One `callk`. Peeling a spine looks through **every** wrapper erasure removes, not only the four that can wrap a function: a peel stopping at `weaken` returns the term it was given with no argument taken off, and naming that head reaches the same term again |
+| A saturated call to a `Base` entry the ABI fixes the meaning of | `prim`, not `ffi`. What divides them is what the name means: an entry returning no `IO` is an operation every consumer carries out, and one returning `IO`, or one of a target namespace, names an implementation |
+| The same entry applied below its arity | `pap` over the foreign. Only a saturated one is an operation |
+| A program using an operation | The entry it realizes is recorded all the same. An operation is how an entry is carried out and not a way of not using it, so target validation still finds it |
+| A `tail` of an operation | The instruction followed by `RET`. An operation is not a transfer of control, so it has no `Tail` of its own |
 | `let z = y in …`, where `y` is already a local | No local is created and the debug table is untouched. Recording `z` against `y`'s local would rename `y` |
 | A local holding a projection, or an intermediate result of a folded spine | Named nowhere. It was created for no name |
 
@@ -296,6 +300,15 @@ The heading of each group names the step of the plan that the group belongs to.
 | A `JMP` read from a file | The destination's parameter registers come from the `Join`, which names them. A count alone leaves a consumer unable to perform the transfer |
 | A tail call in the body of a `handle` | The marker and the path to the return clause survive it. The marker stands below the body's activation, which is the one a tail call replaces |
 | `RET` at the end of a `handle` body | The return clause runs and its own value goes to the `HNDL`. `RET` itself has no case for a handler; where the marker stands is what produces this |
+| A `Base` operation applied short of its arity | A `pap` whose callee is the operation, and the operation in `PRIMS`. A callee naming the entry instead would have a backend supply what the ABI never obliged it to |
+| A `Base` entry declared at an arity the manifest does not give it | Rejected, wherever it is named — called, partially applied, or referred to bare at no arity |
+| A Mid IR module whose locals are not dense from zero, or whose parameters are out of place | Rejected before any lowering. A register is a local's number, so a gap displaces every slot after it |
+| A module lowered with its debug table | `DEBUG` keyed by function index and register, holding what translation recorded |
+| A function table whose entries do not stand at their own identifiers | Rejected. A consumer reaches a function by index, so an entry out of place is reached under another's name |
+| A `nonrec` whose right-hand side is a lambda | Installed as a function, not evaluated. Its definitional arity and its initialization are read off the same term, so a known call reaches a function of the arity it supplied |
+| Two join points of one identifier in one function | Rejected. A lowering puts them in one flat table, so the second leaves a jump with two destinations |
+| A local read in a branch that does not bind it | Rejected. It passes every check of layout alone, the numbering across a function being dense and unique either way |
+| A partial application of an operation, read back from a file | The operation alone. The entry it realizes comes from the ABI version, so no reader can find the two disagreeing |
 | `isNewtype` on a constructor | Carried from Core through Mid IR into `CTORS`. A `newtype` and a data type of one constructor with one field have the same shape, so a backend erasing the representation cannot tell them apart without the flag |
 
 ### Handler declarations and implicit insertion (step 7)
