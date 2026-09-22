@@ -1,7 +1,10 @@
 # Translation: Typed Core to Mid IR
 
-`translate` takes a type-checked Core module and the signature `Σ` it was
-checked against, and produces a Mid IR module. It performs the erasures of
+`translate` takes a Core module together with what checking made of it — the
+signature it contributes and its value declarations, annotated — and produces a
+Mid IR module. The module supplies the header and the type-level declarations,
+which checking does not annotate because a data declaration has no type; the
+value groups supply the terms. It performs the erasures of
 [Semantics](../03-Typed-Core/06-Semantics.md), names every intermediate result,
 folds application spines, materializes occurrences, and lifts every function
 body out of its nesting.
@@ -103,26 +106,24 @@ the term's own source annotations as they were.
 occurrence is a path, and `DecisionTree` holds paths rather than `Expr`s
 ([Terms and Matching](../03-Typed-Core/04-Terms-and-Matching.md)), so annotating
 expressions alone gives the `field`, `payload`, and `recSelect` computations
-derived from one no type at all. Either of two arrangements supplies it, and the
-first is preferred for the same reason as above — the checker holds these types
-already, having established them branch by branch.
+derived from one no type at all. **The checker emits `Ω` instead**, for the same
+reason as above: it built one to check the tree with, and deriving a second from
+the scrutinee and `Σ` would repeat the work.
 
-1. **The checker emits its occurrence types**, per branch, beside the expression annotations
-2. **Translation derives them** from the typed scrutinee and `Σ`, under this contract, which is the typing rule for each dispatch read as a function
+`Ω` is carried at the `Case` and not at each node of the tree. A decision tree
+has no annotation of its own — it carries no source span either, an error inside
+one being reported at the `case` that contains it
+([Kinds and Types](../03-Typed-Core/01-Kinds-and-Types.md)) — and one map per
+`case` loses nothing, because within one tree a path has one type.
 
-```text
-under switchCtor o, in the branch for Ctor_i, where the annotation gives o : T σ̄
-    o ! Ctor_i . j   has   τ_ij[ā := σ̄]      τ̄_i and ā from Σ(Ctor_i)
+**The one exception is not recorded.** In the default branch of a `switchKey`
+the occurrence stands at the residual variant rather than the whole, and what
+`Ω` holds is the type it has elsewhere. The two differ in the row alone, so they
+have the same representation type, and a payload the tree goes on to project
+from either is `F(k)` of the same payload — the residual row removes keys and
+rewrites none.
 
-under switchKey o, in the branch for k_i, where the annotation gives o : Variant r
-    o ? k_i          has   F(k_i)            where nf(r) = ⟨F ; T⟩
-
-wherever o : Record r is available
-    o . k            has   F(k)              where nf(r) = ⟨F ; T⟩
-```
-
-Whichever arrangement is taken, an occurrence whose type is not available takes
-`Val`, as any other binding does.
+An occurrence the map does not hold takes `Val`, as any other binding does.
 
 ## Erasure
 
@@ -210,12 +211,16 @@ the whole chain at once.
 ```text
 peel : Core.Expr -> { head : Core.Expr, args : [Core.Expr] }
 
-peel (App e1 e2)        = let h = peel e1 in { head: h.head, args: h.args <> [e2] }
-peel (TyApp e _)        = peel e
-peel (ConstraintApp e)  = peel e
-peel (OpenEff _ e)      = peel e
-peel e                  = { head: e, args: [] }
+peel e  |  erased(e) = App e1 e2  =  let h = peel e1 in { head: h.head, args: h.args <> [e2] }
+        |  otherwise            =  { head: e, args: [] }
+
+erased   removes every wrapper erasure removes: Λ, [τ], [•], openEff, weaken
 ```
+
+**All six go, not the four that wrap a function.** `weaken k [τ] (f x)` produces a
+variant rather than a function, so nothing else in the translation strips it,
+and a peel stopping there hands back the term it was given with no argument
+taken off — leaving the head to be named, which is the same term again.
 
 **Peeling looks through `OpenEff`**, which matters more than it appears to.
 Effect widening is inserted once per argument consumed, because currying makes

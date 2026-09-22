@@ -500,10 +500,13 @@ section  id | length | payload           repeated to the end of the file
 | `FUNCTIONS` | Per function: `nparams`, the `Rep` of each register and of each capture slot, its join points with the registers each takes its arguments in, and its body |
 | `GLOBALS` | Per top-level value: its name, whether it is run or installed, and which function |
 | `EXPORTS` | The globals this module exports |
-| `DEBUG` | Source spans, function names, and local names |
+| `DEBUG` | Source spans, function names, and local names, from the debug table translation produces beside the module ([Mid IR](../04-MiddleEnd/01-Mid-IR.md)) |
 
 `DEBUG` is the one section a reader may skip. Everything else is required, and a
 machine rejects a file missing any of it rather than guessing.
+
+What it can hold is what has an identity in Mid IR — a function, a local. A span
+per instruction is not among them ([Mid IR](../04-MiddleEnd/01-Mid-IR.md)).
 
 **Keys and operation names are interned on load.** They are compared for
 equality and for nothing else, so the machine replaces each with an integer

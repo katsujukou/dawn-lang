@@ -104,6 +104,12 @@ them onto a flat frame without renaming. Core's names are already unique up to
 α-equivalence ([Kinds and Types](../03-Typed-Core/01-Kinds-and-Types.md)), and
 translation preserves that.
 
+**A `Local` and a `JoinId` are identities and not names.** Nothing compares one
+for anything but equality, and a Core name reaching this stage carries no
+meaning a backend needs, so translation issues them in sequence. The examples in
+these documents write them as the source called them, which is legible and is
+not what the representation holds.
+
 ## Atoms
 
 An atom denotes a value without computing, allocating, or performing anything.
@@ -149,8 +155,8 @@ comp ::= pure atom                                 name a value
 
        -- records
        | recEmpty
-       | recExtend k a1 a2   | recSelect k a
-       | recRestrict k a     | recUpdate k a1 a2
+       | recExtend k a_value a_record     | recSelect k a
+       | recRestrict k a                  | recUpdate k a_record a_value
        | recMerge a1 a2
 
        -- variants
@@ -167,6 +173,12 @@ callee ::= M.x | M.f | M.Ctor
 value is what the handler's return clause produces, so binding it with a `let`
 is all that is needed to use it, and no other form has to carry a destination
 for it.
+
+**`recExtend` and `recUpdate` take their operands the other way about**, as Core
+writes them: the value first for one and the record first for the other
+([Typing Rules](../03-Typed-Core/05-Typing-Rules.md)). The order is not a
+spelling — it is the order the two are evaluated in, so an implementation that
+reads either the wrong way about reverses the effects of the two operands.
 
 ### Calls
 
@@ -436,6 +448,53 @@ top-level `rec` group, installed without evaluating anything. Evaluating eagerly
 in declaration order is observable, a divergent right-hand side hanging
 initialization whether or not anything refers to it, and Mid IR preserves that
 rather than deferring to first reference ([Semantics](../03-Typed-Core/06-Semantics.md)).
+
+## The debug table
+
+A `.dmo` carries source spans, function names, and local names in a `DEBUG`
+section that a consumer may strip ([Bytecode](../05-Backend/01-Bytecode.md)).
+Nothing in the terms above holds any of it, so translation produces a **side
+table** beside the module and `lower` reads both.
+
+```text
+Debug ::= { functions : FuncId ⇀ { name : QIdent?, source : span? }
+          , locals    : FuncId ⇀ ( Local ⇀ Ident )
+          }
+```
+
+**A local is named within its function**, a `Local` being unique within one and
+not beyond it. Nothing but a function and a local together identifies a binding,
+so the table is keyed by both.
+
+Three things decide what a name means here.
+
+**A function's `name` is the global it is installed from**, and a lambda lifted
+out of a body has none.
+
+**A function's `source` is the term the function was made from** — the node as it
+stands, wrappers included. Not the body left once the lambdas come off, which
+would put the span at the first expression rather than at the definition; and
+not the lambda left once the wrappers come off, which would start it inside what
+it belongs to. A translation looks through the wrappers to find the lambda and
+keeps the outer node for this.
+
+**A local is named where one was created for a name.** A `let` whose right-hand
+side is already an atom binds an alias and makes no local, so `let z = y` leaves
+`y`'s own name in place rather than renaming it. A local holding a projection, or
+an intermediate result of a folded spine, was created for no name at all.
+
+**It is a side table and not an annotation on the terms.** A Mid IR node has no
+identity of its own, and most nodes come from no single Core node: one
+application folds a whole spine, and a projection is emitted where a branch
+first needs it. A function and a local do have identities, and those are what
+can be named.
+
+A span finer than a function therefore has nowhere to go. **Instruction-level
+spans, which a source map wants, would need Mid IR nodes to carry identities**,
+and nothing here gives them one; that is open.
+
+The table is the one part of Mid IR a consumer may discard, and nothing about
+the module depends on it.
 
 ## What Mid IR does not have
 

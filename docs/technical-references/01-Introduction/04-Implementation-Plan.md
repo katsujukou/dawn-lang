@@ -241,6 +241,14 @@ The heading of each group names the step of the plan that the group belongs to.
 | `λx. λy. e` | **One** function table entry of two parameters, so that the entry's arity and the definitional arity agree. Two entries of one parameter each would have `callk f [a, b]` supply two arguments to a function of one |
 | `Λa. λx. Λb. λy. e` | The same entry of two parameters. The run of lambdas is taken after erasure, so a type abstraction between two of them does not break it |
 | A `Handle` whose value is consumed by a surrounding expression | A `let` binding a `handle` computation. Its body is a function, so the return clause — entered later, and a function itself — has an ordinary call's result to give back rather than a join point it cannot reach |
+| `update k e1 e2` where both operands are computations | `e1`, the **record**, is evaluated and passed first. `extend` takes them the other way about, so a translation reading one convention for both reverses the effects of the two operands |
+| A right-hand side that is a lambda under `openEff`, `[τ]`, or `[•]` | Its definitional arity is the lambda's. A run of lambdas is taken after erasure, so stopping at a wrapper reads the definition as taking no argument and degrades every call to it to `callu` |
+| The locals of two functions | Numbered from zero in each. A `Local` is unique within a function and not beyond one, so numbering across the module would leave a backend renaming before it could use one as a frame slot |
+| The `source` of a lifted function | The annotation of the term the function was made from, wrappers included — not that of the body left once the lambdas come off, and not that of the lambda left once the wrappers come off. A lambda annotated 10 over a body annotated 11 records 10; an `openEff` annotated 30 over that lambda records 30 |
+| Where the wrappers erasure removes are looked through | Dispatch reads what erasure leaves; the node as it stands is what supplies the type and the annotation. Recursing into the inner term instead loses the span of the whole and narrows the type a `[τ]` had settled |
+| `weaken k [τ] (f x)` | One `callk`. Peeling a spine looks through **every** wrapper erasure removes, not only the four that can wrap a function: a peel stopping at `weaken` returns the term it was given with no argument taken off, and naming that head reaches the same term again |
+| `let z = y in …`, where `y` is already a local | No local is created and the debug table is untouched. Recording `z` against `y`'s local would rename `y` |
+| A local holding a projection, or an intermediate result of a folded spine | Named nowhere. It was created for no name |
 
 ### Lowering to bytecode (step 5)
 
