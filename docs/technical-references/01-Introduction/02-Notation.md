@@ -76,6 +76,8 @@ x̄, ē, v̄                   sequences of value variables, terms, and values
 | `Σ ⊢ decl ⊣ Σ'` | declaration checking, extending the signature | [Modules](../06-Modules/01-Modules.md) |
 | `G ⊢ e → c` | reduction to a configuration: a term or a fault | [Semantics](../03-Typed-Core/06-Semantics.md) |
 | `cursorΣ(M.g, ς)` | the unconsumed declared type and accumulated substitution of a spine | [Semantics](../03-Typed-Core/06-Semantics.md) |
+| `ftv(τ)` | the type variables occurring free in `τ`, and likewise of a row | [Typing Rules](../03-Typed-Core/05-Typing-Rules.md) |
+| `dom(F)` | the keys a finite map is defined on | [Rows](../03-Typed-Core/02-Rows.md) |
 | `·` | the empty context | [Typing Rules](../03-Typed-Core/05-Typing-Rules.md) |
 | `⟹` | desugaring of surface syntax | [Rows](../03-Typed-Core/02-Rows.md) |
 | `∈ ∪ ∩ ∖ ∅` | ordinary set operations | — |
