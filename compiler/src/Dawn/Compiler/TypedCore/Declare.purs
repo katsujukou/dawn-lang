@@ -32,7 +32,7 @@ import Dawn.Compiler.TypedCore.Name (EffName, Ident, KindVar, ModuleName, OpName
 import Dawn.Compiler.TypedCore.Prim (asFunction, primModule, primSignature, pureFn)
 import Dawn.Compiler.TypedCore.Row (nf)
 import Dawn.Compiler.TypedCore.Signature (CtorInfo, EffectInfo, Signature, TyConInfo(..), ValueInfo, tyConKind)
-import Dawn.Compiler.TypedCore.Term (DecisionTree(..), Expr(..), Handler)
+import Dawn.Compiler.TypedCore.Term (DecisionTree(..), Expr(..), Handler, opClauseBody)
 import Dawn.Compiler.TypedCore.Type (RowEntry(..), TyBinder, Type(..), TypeScheme)
 import Data.Array as Array
 import Data.Either (Either(..))
@@ -545,7 +545,7 @@ treeGlobals = case _ of
 
 handlerGlobals :: forall a. Handler a -> Set (Qualified Ident)
 handlerGlobals handler =
-  globalsOf handler.returnClause.body <> foldMap (globalsOf <<< _.body) handler.opClauses
+  globalsOf handler.returnClause.body <> foldMap (globalsOf <<< opClauseBody) handler.opClauses
 
 insertUnique :: forall k v e. Ord k => (k -> e) -> k -> v -> Map k v -> Either e (Map k v)
 insertUnique onDuplicate key value table

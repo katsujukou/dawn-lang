@@ -33,8 +33,8 @@ import Dawn.Compiler.TypedCore.Name (EffName, Ident, JoinName, OpName, Qualified
 import Dawn.Compiler.TypedCore.Prim (asFunction, booleanTy, fn, litType, recordTy, variantTy)
 import Dawn.Compiler.TypedCore.Row (RowError, RowNormalForm, fromNormalForm, nf)
 import Dawn.Compiler.TypedCore.Signature (CanonicalClass(..), CtorInfo, EffectInfo, Signature, TyConInfo(..), lookupCtor, lookupEffect, lookupOperation, lookupTyCon, lookupValue)
-import Dawn.Compiler.TypedCore.Term (Binding, DecisionTree(..), Expr(..), Handler, OpClause, Occurrence(..), Param, exprAnnotation)
-import Dawn.Compiler.TypedCore.Type (Constraint(..), RowEntry(..), RowKey, RowPayload(..), Type(..), TypeScheme, rowEntryKey, rowEntryPayload, substituteKindsInType, substituteType)
+import Dawn.Compiler.TypedCore.Term (Binding, DecisionTree(..), Expr(..), Handler, OpClause(..), Occurrence(..), Param, exprAnnotation, opClauseOp)
+import Dawn.Compiler.TypedCore.Type (Constraint(..), RowEntry(..), RowKey, RowPayload(..), TyBinder, Type(..), TypeScheme, rowEntryKey, rowEntryPayload, substituteKindsInType, substituteType)
 import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Foldable (foldl, traverse_)
@@ -446,17 +446,23 @@ checkClauses
   -> P.Array (OpClause a)
   -> Either (CheckFailure a) Unit
 checkClauses at env rho beta payload info clauses = do
-  distinct at (map _.op clauses)
+  distinct at (map opClauseOp clauses)
   traverse_ declared (Array.fromFoldable (Map.keys info.operations))
   traverse_ (checkClause at env rho beta payload info) clauses
   where
   declared op =
-    when (not (Array.elem op (map _.op clauses)))
+    when (not (Array.elem op (map opClauseOp clauses)))
       (Left { at, error: MissingClause payload.name op })
 
 -- | One clause, with the operation's own type binders α-aligned to those the
--- | declaration writes. The continuation is `τ' -{ρ}-> β`: resuming returns
--- | under the same handler, which is what makes handlers deep (D15).
+-- | declaration writes.
+-- |
+-- | The two forms share the operation, its type binders, and its argument, and
+-- | differ in the tail (D28). A `FullClause` binds a continuation `τ' -{ρ}-> β`
+-- | — resuming returns under the same handler, which is what makes handlers
+-- | deep (D15) — and its body is checked at `β`. A `FastClause` binds none, and
+-- | its body is checked at `τ'`, the type the operation resumes with; `β` takes
+-- | no part in checking it.
 checkClause
   :: forall a
    . a
@@ -468,32 +474,42 @@ checkClause
   -> OpClause a
   -> Either (CheckFailure a) Unit
 checkClause at env rho beta payload info clause = do
-  decl <- case Map.lookup clause.op info.operations of
+  decl <- case Map.lookup shared.op info.operations of
     Just decl -> Right decl
-    Nothing -> Left { at, error: MissingClause payload.name clause.op }
-  when (Array.length decl.tyBinders /= Array.length clause.tyBinders)
-    (Left { at, error: ClauseTypeBinders clause.op })
-  traverse_ (\(Tuple declared written) -> when (declared.kind /= written.kind) (Left { at, error: ClauseTypeBinders clause.op }))
-    (Array.zip decl.tyBinders clause.tyBinders)
+    Nothing -> Left { at, error: MissingClause payload.name shared.op }
+  when (Array.length decl.tyBinders /= Array.length shared.tyBinders)
+    (Left { at, error: ClauseTypeBinders shared.op })
+  traverse_ (\(Tuple declared written) -> when (declared.kind /= written.kind) (Left { at, error: ClauseTypeBinders shared.op }))
+    (Array.zip decl.tyBinders shared.tyBinders)
   let
     substitution =
       Map.union
-        (Map.fromFoldable (Array.zip (map _.name decl.tyBinders) (map (TVar <<< _.name) clause.tyBinders)))
+        (Map.fromFoldable (Array.zip (map _.name decl.tyBinders) (map (TVar <<< _.name) shared.tyBinders)))
         (Map.fromFoldable (Array.zip (map _.name info.params) payload.args))
-  equalTypes at (substituteType substitution decl.argument) clause.argBinder.ty
-  equalTypes at (fn (substituteType substitution decl.resumesWith) rho beta) clause.contBinder.ty
-  check (clauseEnv env clause) rho beta clause.body
+    resumesWith = substituteType substitution decl.resumesWith
+    inner = clauseEnv env shared.tyBinders shared.argBinder
+  equalTypes at (substituteType substitution decl.argument) shared.argBinder.ty
+  case clause of
+    FullClause c -> do
+      equalTypes at (fn resumesWith rho beta) c.contBinder.ty
+      check (bound inner c.contBinder.name c.contBinder.ty) rho beta c.body
+    FastClause c ->
+      check inner rho resumesWith c.body
+  where
+  shared = case clause of
+    FullClause c -> { op: c.op, tyBinders: c.tyBinders, argBinder: c.argBinder }
+    FastClause c -> { op: c.op, tyBinders: c.tyBinders, argBinder: c.argBinder }
 
-clauseEnv :: forall a. Env -> OpClause a -> Env
-clauseEnv env clause =
-  bound (bound quantified clause.argBinder.name clause.argBinder.ty)
-    clause.contBinder.name
-    clause.contBinder.ty
+-- | `Γ` a clause body is checked in: the operation's own type binders, then its
+-- | argument. A continuation is bound on top of this where the form has one.
+clauseEnv :: Env -> P.Array TyBinder -> Param -> Env
+clauseEnv env tyBinders argBinder =
+  bound quantified argBinder.name argBinder.ty
   where
   quantified =
     foldl (\acc binder -> acc { context = bindTyVar acc.context binder.name binder.kind })
       (abstracted env)
-      clause.tyBinders
+      tyBinders
 
 sameConstraint :: forall a. a -> Constraint -> Constraint -> Either (CheckFailure a) Unit
 sameConstraint at expected actual = case constraintEquiv expected actual of

@@ -2,14 +2,15 @@
 -- |
 -- | The cases the Implementation Plan singles out are here: an arrow's row
 -- | against the ambient row, the value restriction, what a `perform` reads its
--- | signature from, and the local totality of a dispatch.
+-- | signature from, which type a clause body is checked at given its form, and
+-- | the local totality of a dispatch.
 module Test.Dawn.Compiler.TypedCore.Check (spec) where
 
 import Prelude
 
 import Prim as P
 
-import Dawn.Compiler.TypedCore (Decl(..), DecisionTree(..), EffName(..), Expr(..), Handler, Ident(..), JoinName(..), Kind(..), Literal(..), Module, ModuleName(..), Occurrence(..), OpName(..), Qualified(..), RowElemKind(..), RowEntry(..), RowKey(..), Symbol(..), TyName(..), TyVar(..), Type(..))
+import Dawn.Compiler.TypedCore (Decl(..), DecisionTree(..), EffName(..), Expr(..), Handler, Ident(..), JoinName(..), Kind(..), Literal(..), Module, ModuleName(..), OpClause(..), Occurrence(..), OpName(..), Qualified(..), RowElemKind(..), RowEntry(..), RowKey(..), Symbol(..), TyName(..), TyVar(..), Type(..))
 import Dawn.Compiler.TypedCore.Check (CheckError(..), Env, check, envOf, infer)
 import Dawn.Compiler.TypedCore.Kinding (KindError(..))
 import Dawn.Compiler.TypedCore.Context (bindVar, emptyContext)
@@ -107,6 +108,20 @@ fixtures =
               ]
           , attributes: []
           }
+      -- a second abort-shaped effect, so that one can be translated into the
+      -- other by a clause that resumes at neither
+      , DeclEffect unit
+          { name: EffName "Fail2"
+          , params: []
+          , operations:
+              [ { name: OpName "abort"
+                , tyBinders: [ { name: TyVar "a", kind: KType } ]
+                , argument: unitT
+                , resumesWith: TVar (TyVar "a")
+                }
+              ]
+          , attributes: []
+          }
       , DeclData unit
           { name: TyName "Void"
           , kindVars: []
@@ -184,6 +199,13 @@ emptyRecord = RecordEmpty unit
 failEff :: Qualified EffName
 failEff = Qualified main (EffName "Fail")
 
+fail2Eff :: Qualified EffName
+fail2Eff = Qualified main (EffName "Fail2")
+
+-- | `( Fail2 )`
+fail2Row :: Type
+fail2Row = TRowExtend (RowEffectEntry fail2Eff []) TRowEmpty
+
 -- | `handle (perform Fail.abort [Int] ()) with { handles Fail ; … }`, with the
 -- | binders and the continuation type of the clause supplied.
 aborting :: P.Array { name :: TyVar, kind :: Kind } -> Type -> Expr Unit
@@ -192,30 +214,64 @@ aborting tyBinders contType =
     { element: RowEffectEntry failEff []
     , returnClause: { binder: Ident "x", ty: int, body: oneLit }
     , opClauses:
-        [ { op: OpName "abort"
-          , tyBinders
-          , argBinder: { name: Ident "u", ty: unitT }
-          , contBinder: { name: Ident "k", ty: contType }
-          , body: oneLit
-          }
+        [ FullClause
+            { op: OpName "abort"
+            , tyBinders
+            , argBinder: { name: Ident "u", ty: unitT }
+            , contBinder: { name: Ident "k", ty: contType }
+            , body: oneLit
+            }
         ]
     }
 
--- | `{ handles Console ; return (x : α) -> e ; log (s, k) -> 1 }`, with the
+-- | `{ handles Console ; return (x : α) -> e ; full log (s, k) -> 1 }`, with the
 -- | return type, the return body, and the continuation type supplied.
 consoleHandler :: Type -> Expr Unit -> Type -> Handler Unit
 consoleHandler alpha returned contType =
   { element: RowEffectEntry consoleEff []
   , returnClause: { binder: Ident "x", ty: alpha, body: returned }
   , opClauses:
-      [ { op: OpName "log"
-        , tyBinders: []
-        , argBinder: { name: Ident "s", ty: string }
-        , contBinder: { name: Ident "k", ty: contType }
-        , body: returned
-        }
+      [ FullClause
+          { op: OpName "log"
+          , tyBinders: []
+          , argBinder: { name: Ident "s", ty: string }
+          , contBinder: { name: Ident "k", ty: contType }
+          , body: returned
+          }
       ]
   }
+
+-- | `handle (perform Console.log "x") with { handles Console ; return (x : Unit) -> 1 ; … }`,
+-- | with the clause supplied. The handle stands at `Int`.
+logging :: OpClause Unit -> Expr Unit
+logging clause =
+  Handle unit (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (LitString "x")))
+    { element: RowEffectEntry consoleEff []
+    , returnClause: { binder: Ident "x", ty: unitT, body: oneLit }
+    , opClauses: [ clause ]
+    }
+
+-- | `fast log (msg : String) -> e`, with the body supplied. `log` resumes with
+-- | `Unit`, so that is the type the body is checked at.
+fastLog :: Expr Unit -> OpClause Unit
+fastLog body =
+  FastClause
+    { op: OpName "log"
+    , tyBinders: []
+    , argBinder: { name: Ident "s", ty: string }
+    , body
+    }
+
+-- | `full log (s : String, k : Unit -{()}-> Int) -> e`, over the same handler.
+fullLog :: Expr Unit -> OpClause Unit
+fullLog body =
+  FullClause
+    { op: OpName "log"
+    , tyBinders: []
+    , argBinder: { name: Ident "s", ty: string }
+    , contBinder: { name: Ident "k", ty: pureFn unitT int }
+    , body
+    }
 
 spec :: Spec Unit
 spec = describe "TypedCore.Check" do
@@ -384,21 +440,7 @@ spec = describe "TypedCore.Check" do
     it "removes the element the handler writes" do
       -- effect safety is not "no operation is performed": the row outside the
       -- handle carries nothing
-      inferAt TRowEmpty
-        ( Handle unit (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (LitString "x")))
-            { element: RowEffectEntry consoleEff []
-            , returnClause: { binder: Ident "x", ty: unitT, body: oneLit }
-            , opClauses:
-                [ { op: OpName "log"
-                  , tyBinders: []
-                  , argBinder: { name: Ident "s", ty: string }
-                  , contBinder: { name: Ident "k", ty: pureFn unitT int }
-                  , body: oneLit
-                  }
-                ]
-            }
-        )
-        `shouldEqual` Right int
+      inferAt TRowEmpty (logging (fullLog oneLit)) `shouldEqual` Right int
 
     it "requires a clause for every operation of the effect" do
       inferAt TRowEmpty
@@ -413,18 +455,15 @@ spec = describe "TypedCore.Check" do
     it "gives the continuation the row outside the handle and the result of it" do
       -- a shallow handler would resume at the inner row and the inner result
       inferAt TRowEmpty
-        ( Handle unit (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (LitString "x")))
-            { element: RowEffectEntry consoleEff []
-            , returnClause: { binder: Ident "x", ty: unitT, body: oneLit }
-            , opClauses:
-                [ { op: OpName "log"
-                  , tyBinders: []
-                  , argBinder: { name: Ident "s", ty: string }
-                  , contBinder: { name: Ident "k", ty: pureFn unitT string }
-                  , body: oneLit
-                  }
-                ]
-            }
+        ( logging
+            ( FullClause
+                { op: OpName "log"
+                , tyBinders: []
+                , argBinder: { name: Ident "s", ty: string }
+                , contBinder: { name: Ident "k", ty: pureFn unitT string }
+                , body: oneLit
+                }
+            )
         )
         `shouldEqual` Left (TypeMismatch (pureFn unitT int) (pureFn unitT string))
 
@@ -438,18 +477,87 @@ spec = describe "TypedCore.Check" do
             { element: RowLabelledEffectEntry (Symbol "cache") stateEff [ int ]
             , returnClause: { binder: Ident "x", ty: int, body: oneLit }
             , opClauses:
-                [ { op: OpName "get"
-                  , tyBinders: []
-                  , argBinder: { name: Ident "u", ty: unitT }
-                  , contBinder: { name: Ident "k", ty: fn int counterRow int }
-                  , body: oneLit
-                  }
-                , { op: OpName "put"
-                  , tyBinders: []
-                  , argBinder: { name: Ident "v", ty: int }
-                  , contBinder: { name: Ident "k", ty: fn unitT counterRow int }
-                  , body: oneLit
-                  }
+                [ FullClause
+                    { op: OpName "get"
+                    , tyBinders: []
+                    , argBinder: { name: Ident "u", ty: unitT }
+                    , contBinder: { name: Ident "k", ty: fn int counterRow int }
+                    , body: oneLit
+                    }
+                , FullClause
+                    { op: OpName "put"
+                    , tyBinders: []
+                    , argBinder: { name: Ident "v", ty: int }
+                    , contBinder: { name: Ident "k", ty: fn unitT counterRow int }
+                    , body: oneLit
+                    }
+                ]
+            }
+        )
+        `shouldEqual` Right int
+
+  describe "clause forms" do
+    it "checks a full clause's body at the answer type" do
+      -- `β` is `Int` here, from the return clause; `Unit` is what `log` resumes
+      -- with, and a full clause is not checked at that
+      inferAt TRowEmpty (logging (fullLog primUnit))
+        `shouldEqual` Left (TypeMismatch int unitT)
+
+    it "checks a fast clause's body at the type the operation resumes with" do
+      inferAt TRowEmpty (logging (fastLog primUnit)) `shouldEqual` Right int
+
+    it "refuses a fast clause's body at the answer type instead" do
+      inferAt TRowEmpty (logging (fastLog oneLit))
+        `shouldEqual` Left (TypeMismatch unitT int)
+
+    it "binds no continuation in a fast clause" do
+      inferAt TRowEmpty (logging (fastLog (var "k")))
+        `shouldEqual` Left (UnboundVar (Ident "k"))
+
+    it "accepts a handler mixing the two forms" do
+      -- the form is written per clause, so one effect's operations may differ
+      inferAt TRowEmpty
+        ( Handle unit (Perform unit cacheKey (OpName "get") [] primUnit)
+            { element: RowLabelledEffectEntry (Symbol "cache") stateEff [ int ]
+            , returnClause: { binder: Ident "x", ty: int, body: oneLit }
+            , opClauses:
+                [ FastClause
+                    { op: OpName "get"
+                    , tyBinders: []
+                    , argBinder: { name: Ident "u", ty: unitT }
+                    , body: oneLit
+                    }
+                , FullClause
+                    { op: OpName "put"
+                    , tyBinders: []
+                    , argBinder: { name: Ident "v", ty: int }
+                    , contBinder: { name: Ident "k", ty: pureFn unitT int }
+                    , body: oneLit
+                    }
+                ]
+            }
+        )
+        `shouldEqual` Right int
+
+    it "accepts a fast clause translating a polymorphic resume type into another effect" do
+      -- `abort : forall a. Unit ->* a` admits no pure terminating body, but
+      -- performing an operation that resumes at `a` has that type. A fast
+      -- clause is therefore available wherever a capability, not a pure type,
+      -- is the target
+      inferAt fail2Row
+        ( Handle unit (Perform unit (EffectKey failEff) (OpName "abort") [ int ] primUnit)
+            { element: RowEffectEntry failEff []
+            , returnClause: { binder: Ident "x", ty: int, body: oneLit }
+            , opClauses:
+                [ FastClause
+                    { op: OpName "abort"
+                    , tyBinders: [ { name: TyVar "b", kind: KType } ]
+                    , argBinder: { name: Ident "u", ty: unitT }
+                    , body:
+                        Perform unit (EffectKey fail2Eff) (OpName "abort")
+                          [ TVar (TyVar "b") ]
+                          primUnit
+                    }
                 ]
             }
         )

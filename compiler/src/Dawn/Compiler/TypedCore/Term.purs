@@ -10,7 +10,9 @@ module Dawn.Compiler.TypedCore.Term
   , Binding
   , Handler
   , ReturnClause
-  , OpClause
+  , OpClause(..)
+  , opClauseOp
+  , opClauseBody
   , Occurrence(..)
   , DecisionTree(..)
   , CtorBranch
@@ -125,19 +127,48 @@ type ReturnClause a =
   , body :: Expr a
   }
 
--- | A clause for one operation.
+-- | A clause for one operation, in one of the two forms Core provides (D28).
 -- |
 -- | `tyBinders` binds the operation's own type parameters, which a handler must
--- | respect. The continuation's type is `τ' -{ρ}-> β`, where `β` is the result
--- | of the `handle` and `ρ` the row outside it: resuming returns under the same
--- | handler, which is what makes handlers deep (D15).
-type OpClause a =
-  { op :: OpName
-  , tyBinders :: P.Array TyBinder
-  , argBinder :: Param
-  , contBinder :: Param
-  , body :: Expr a
-  }
+-- | respect. There is no unmarked form: which of the two a surface clause means
+-- | is settled before it reaches Core, so the form is available to the checker,
+-- | to reduction, and to a backend without any analysis.
+-- |
+-- | A `FullClause` binds the continuation, of type `τ' -{ρ}-> β` where `β` is
+-- | the result of the `handle` and `ρ` the row outside it: resuming returns
+-- | under the same handler, which is what makes handlers deep (D15). Its body
+-- | has type `β`, so the clause supplies what the `handle` returns.
+-- |
+-- | A `FastClause` binds none, and its body has the type the operation resumes
+-- | with. Such a clause cannot bypass the evaluation still to come in order to
+-- | supply the answer, and has no continuation to invoke zero or several times.
+-- | This bounds the clause and not the program around it: where its body
+-- | performs an operation of `ρ` whose `full` handler resumes more than once,
+-- | that handler's continuation runs the rest of the handled computation again.
+data OpClause a
+  = FullClause
+      { op :: OpName
+      , tyBinders :: P.Array TyBinder
+      , argBinder :: Param
+      , contBinder :: Param
+      , body :: Expr a
+      }
+  | FastClause
+      { op :: OpName
+      , tyBinders :: P.Array TyBinder
+      , argBinder :: Param
+      , body :: Expr a
+      }
+
+opClauseOp :: forall a. OpClause a -> OpName
+opClauseOp = case _ of
+  FullClause c -> c.op
+  FastClause c -> c.op
+
+opClauseBody :: forall a. OpClause a -> Expr a
+opClauseBody = case _ of
+  FullClause c -> c.body
+  FastClause c -> c.body
 
 -- | A path from a scrutinee, written `o`.
 -- |
@@ -228,6 +259,13 @@ derive instance Generic (Expr a) _
 
 instance Show a => Show (Expr a) where
   show x = genericShow x
+
+derive instance Eq a => Eq (OpClause a)
+derive instance Functor OpClause
+derive instance Generic (OpClause a) _
+
+instance Show a => Show (OpClause a) where
+  show c = genericShow c
 
 derive instance Eq Occurrence
 derive instance Ord Occurrence

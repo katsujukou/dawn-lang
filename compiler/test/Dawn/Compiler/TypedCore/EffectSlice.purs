@@ -1,22 +1,25 @@
 -- | The effect examples of the Examples document, written in Core by hand and
 -- | run through declaration checking.
 -- |
--- | Seven modules stand behind them, one per layer they draw on.
+-- | Modules stand behind them, one per layer they draw on.
 -- |
 -- | | Module | Layer | What it holds |
 -- | | --- | --- | --- |
 -- | | `Prelude` | the default portable environment | `Partial` and `Maybe`, whose identities it owns |
 -- | | `Effect.State` | a portable library | `State`, which needs nothing of the ABI |
 -- | | `Base.Int`, `Base.IO` | ABI entries | arithmetic, and the common `IO` operations |
--- | | `Base.Effect.Console` | an ABI protocol | the `Console` capability, which no backend implements |
+-- | | `Base.Effect.Console`, `Base.Effect.LiftIO` | ABI protocols | capabilities no backend implements |
 -- | | `Js.Console` | a target namespace | the native leaf building an `IO` value on one target |
+-- | | `Js.Effect.Console` | a target namespace | the adapter joining that leaf to the capability |
 -- | | `Example` | ordinary code | the three values, and nothing else |
 -- |
 -- | `tick` puts an effect row on an arrow and performs two operations under a
 -- | Lacks constraint. `toMaybe` handles `Partial` by abandoning its
 -- | continuation, interpreting an effect into a pure type. `runConsoleIO` is a
 -- | terminal interpreter, sequencing a native action before resuming, which is
--- | what obliges it to take a closed row.
+-- | what obliges it to take a closed row. `lowerConsole` is an adapter, which
+-- | translates one capability into another and so is written with a `fast`
+-- | clause (D28).
 -- |
 -- | Each mutation below is one of them with one thing changed, and each must be
 -- | rejected.
@@ -29,7 +32,7 @@ import Prelude
 
 import Prim as P
 
-import Dawn.Compiler.TypedCore (Constraint(..), Decl(..), EffName(..), Export(..), Expr(..), Handler, Ident(..), Kind(..), Literal(..), Module, ModuleName(..), OpClause, OpName(..), Qualified(..), RowElemKind(..), RowEntry(..), RowKey(..), TyName(..), TyVar(..), Type(..), TypeScheme, monoScheme)
+import Dawn.Compiler.TypedCore (Constraint(..), Decl(..), EffName(..), Export(..), Expr(..), Handler, Ident(..), Kind(..), Literal(..), Module, ModuleName(..), OpClause(..), OpName(..), Qualified(..), RowElemKind(..), RowEntry(..), RowKey(..), TyName(..), TyVar(..), Type(..), TypeScheme, monoScheme)
 import Dawn.Compiler.TypedCore.Check (CheckError(..))
 import Dawn.Compiler.TypedCore.Declare (DeclError(..), DeclFailure, declare)
 import Dawn.Compiler.TypedCore.Prim (fn, intTy, ioTy, primSignature, pureFn, stringTy, unitCtor, unitTy)
@@ -60,6 +63,12 @@ baseConsoleModuleName = ModuleName "Base.Effect.Console"
 jsConsoleModuleName :: ModuleName
 jsConsoleModuleName = ModuleName "Js.Console"
 
+baseLiftIOModuleName :: ModuleName
+baseLiftIOModuleName = ModuleName "Base.Effect.LiftIO"
+
+jsEffectConsoleModuleName :: ModuleName
+jsEffectConsoleModuleName = ModuleName "Js.Effect.Console"
+
 exampleModuleName :: ModuleName
 exampleModuleName = ModuleName "Example"
 
@@ -71,6 +80,9 @@ stateEff = Qualified stateModuleName (EffName "State")
 
 consoleEff :: Qualified EffName
 consoleEff = Qualified baseConsoleModuleName (EffName "Console")
+
+liftIOEff :: Qualified EffName
+liftIOEff = Qualified baseLiftIOModuleName (EffName "LiftIO")
 
 intAdd :: Qualified Ident
 intAdd = Qualified baseIntModuleName (Ident "add")
@@ -98,6 +110,9 @@ toMaybeName = Qualified exampleModuleName (Ident "toMaybe")
 
 runConsoleIOName :: Qualified Ident
 runConsoleIOName = Qualified exampleModuleName (Ident "runConsoleIO")
+
+lowerConsoleName :: Qualified Ident
+lowerConsoleName = Qualified jsEffectConsoleModuleName (Ident "lowerConsole")
 
 -- Types -----------------------------------------------------------------------
 
@@ -138,6 +153,13 @@ partialRow = TRowExtend (RowEffectEntry partialEff []) rowVar
 -- | before its continuation admits no residual row.
 consoleRow :: Type
 consoleRow = TRowExtend (RowEffectEntry consoleEff []) TRowEmpty
+
+-- | `( LiftIO | e )` and `( LiftIO )`
+liftIORow :: Type
+liftIORow = TRowExtend (RowEffectEntry liftIOEff []) rowVar
+
+liftIOOnly :: Type
+liftIOOnly = TRowExtend (RowEffectEntry liftIOEff []) TRowEmpty
 
 -- The supporting modules --------------------------------------------------------
 
@@ -271,6 +293,138 @@ jsConsoleModule =
       ]
   }
 
+-- The adapter -------------------------------------------------------------------
+
+-- | `effect LiftIO where liftIO : forall a. IO a ->* a`. Operation polymorphism
+-- | lets one key serve every `a`; an effect parameter would need a key and a
+-- | handler per type lifted.
+baseLiftIOModule :: Module P.Int
+baseLiftIOModule =
+  { annotation: 0
+  , name: baseLiftIOModuleName
+  , imports: []
+  , exports: [ ExportEffect (EffName "LiftIO") ]
+  , decls:
+      [ DeclEffect 1
+          { name: EffName "LiftIO"
+          , params: []
+          , operations:
+              [ { name: OpName "liftIO"
+                , tyBinders: [ { name: TyVar "a", kind: KType } ]
+                , argument: io tyVarA
+                , resumesWith: tyVarA
+                }
+              ]
+          , attributes: []
+          }
+      ]
+  }
+
+-- | `Js.Effect.Console`, where the `Console` capability meets one target. The
+-- | adapter removes `Console` and performs `LiftIO` in its place, carrying the
+-- | `IO` value the native leaf built. It executes nothing, so it stays
+-- | effect-polymorphic where a terminal interpreter cannot.
+jsEffectConsoleModule :: Module P.Int
+jsEffectConsoleModule = jsEffectConsoleOf lowerConsoleClause
+
+jsEffectConsoleOf :: OpClause P.Int -> Module P.Int
+jsEffectConsoleOf = jsEffectConsoleWith widenedThunk
+
+jsEffectConsoleWith :: Expr P.Int -> OpClause P.Int -> Module P.Int
+jsEffectConsoleWith body clause =
+  { annotation: 0
+  , name: jsEffectConsoleModuleName
+  , imports: [ baseConsoleModuleName, baseLiftIOModuleName, jsConsoleModuleName ]
+  , exports: [ ExportValue (Ident "lowerConsole") ]
+  , decls:
+      [ DeclNonRec 1
+          { name: Ident "lowerConsole"
+          , scheme: lowerConsoleScheme
+          , value: lowerConsoleOf body clause
+          , attributes: []
+          }
+      ]
+  }
+
+-- | `forall (e : Row Effect) (a : Type). Console ∉ e => LiftIO ∉ e =>`
+-- | `( Unit -{ ( Console | e ) }-> a ) -{ ( LiftIO | e ) }-> a`
+lowerConsoleScheme :: TypeScheme
+lowerConsoleScheme = monoScheme
+  ( TForall (TyVar "e") (KRow RowEffect)
+      ( TForall (TyVar "a") KType
+          ( TConstrained (Lacks (EffectKey consoleEff) rowVar)
+              ( TConstrained (Lacks (EffectKey liftIOEff) rowVar)
+                  (fn (fn unit' openConsoleRow tyVarA) liftIORow tyVarA)
+              )
+          )
+      )
+  )
+
+-- | Two widenings are needed and neither is optional (D8). The `handle` removes
+-- | `Console` from a body standing at `( Console, LiftIO | e )` while the thunk
+-- | arrives at `( Console | e )`, which is what the first is for; the second is
+-- | on the native leaf, inside the clause. Each is dropped separately below.
+lowerConsoleOf :: Expr P.Int -> OpClause P.Int -> Expr P.Int
+lowerConsoleOf body clause =
+  TyLam 0 (TyVar "e") (KRow RowEffect)
+    $ TyLam 0 (TyVar "a") KType
+    $ ConstraintLam 0 (Lacks (EffectKey consoleEff) rowVar)
+    $ ConstraintLam 0 (Lacks (EffectKey liftIOEff) rowVar)
+    $ Lam 0 (Ident "thunk") (fn unit' openConsoleRow tyVarA)
+    $ Handle 0 body
+        { element: RowEffectEntry consoleEff []
+        , returnClause: { binder: Ident "x", ty: tyVarA, body: Var 0 (Ident "x") }
+        , opClauses: [ clause ]
+        }
+
+-- | The thunk applied under the handle, widened from `( Console | e )` to the
+-- | `( Console, LiftIO | e )` the handled body stands at.
+widenedThunk :: Expr P.Int
+widenedThunk = App 0 (OpenEff 0 liftIOOnly (Var 0 (Ident "thunk"))) (Global 0 unitCtor [])
+
+-- | The same application with that first widening dropped.
+bareThunk :: Expr P.Int
+bareThunk = App 0 (Var 0 (Ident "thunk")) (Global 0 unitCtor [])
+
+-- | `( Console | ( LiftIO | e ) )`, the row inside the handle.
+adapterInnerRow :: Type
+adapterInnerRow = TRowExtend (RowEffectEntry consoleEff []) liftIORow
+
+-- | The clause translates `log` into a `LiftIO` and gives control back, which
+-- | is what a `fast` clause expresses: it binds no continuation, and its body
+-- | has the type `log` resumes with, `Unit`.
+lowerConsoleClause :: OpClause P.Int
+lowerConsoleClause = lowerConsoleClauseOf (OpenEff 0 liftIORow (Global 0 jsConsoleLog []))
+
+lowerConsoleClauseOf :: Expr P.Int -> OpClause P.Int
+lowerConsoleClauseOf leaf =
+  FastClause
+    { op: OpName "log"
+    , tyBinders: []
+    , argBinder: { name: Ident "msg", ty: string }
+    , body:
+        Perform 0 (EffectKey liftIOEff) (OpName "liftIO") [ unit' ]
+          (App 0 leaf (Var 0 (Ident "msg")))
+    }
+
+-- | The same clause with the widening dropped from the native leaf.
+bareLeafClause :: OpClause P.Int
+bareLeafClause = lowerConsoleClauseOf (Global 0 jsConsoleLog [])
+
+-- | The same body in a `full` clause, which owes the answer type rather than
+-- | the type `log` resumes with.
+fullLogClause :: OpClause P.Int
+fullLogClause =
+  FullClause
+    { op: OpName "log"
+    , tyBinders: []
+    , argBinder: { name: Ident "msg", ty: string }
+    , contBinder: { name: Ident "k", ty: fn unit' liftIORow tyVarA }
+    , body:
+        Perform 0 (EffectKey liftIOEff) (OpName "liftIO") [ unit' ]
+          (App 0 (OpenEff 0 liftIORow (Global 0 jsConsoleLog [])) (Var 0 (Ident "msg")))
+    }
+
 -- The example module ------------------------------------------------------------
 
 exampleModule :: Module P.Int
@@ -398,12 +552,13 @@ toMaybeOf clauses =
 -- | row the continuation carries: `ρ`, outside the handle, is what D15 calls for.
 abortClause :: Type -> OpClause P.Int
 abortClause contRow =
-  { op: OpName "abort"
-  , tyBinders: [ { name: TyVar "b", kind: KType } ]
-  , argBinder: { name: Ident "arg", ty: unit' }
-  , contBinder: { name: Ident "k", ty: fn tyVarB contRow (maybeOf tyVarA) }
-  , body: TyApp 0 (Global 0 nothingCtor []) tyVarA
-  }
+  FullClause
+    { op: OpName "abort"
+    , tyBinders: [ { name: TyVar "b", kind: KType } ]
+    , argBinder: { name: Ident "arg", ty: unit' }
+    , contBinder: { name: Ident "k", ty: fn tyVarB contRow (maybeOf tyVarA) }
+    , body: TyApp 0 (Global 0 nothingCtor []) tyVarA
+    }
 
 -- runConsoleIO ------------------------------------------------------------------
 
@@ -429,18 +584,19 @@ consoleHandler =
       , body: App 0 (TyApp 0 (Global 0 ioPure []) tyVarA) (Var 0 (Ident "x"))
       }
   , opClauses:
-      [ { op: OpName "log"
-        , tyBinders: []
-        , argBinder: { name: Ident "s", ty: string }
-        , contBinder: { name: Ident "k", ty: fn unit' TRowEmpty (io tyVarA) }
-        , body:
-            App 0
-              ( App 0
-                  (TyApp 0 (TyApp 0 (Global 0 ioBind []) unit') tyVarA)
-                  (App 0 (Global 0 jsConsoleLog []) (Var 0 (Ident "s")))
-              )
-              (Lam 0 (Ident "w") unit' (App 0 (Var 0 (Ident "k")) (Global 0 unitCtor [])))
-        }
+      [ FullClause
+          { op: OpName "log"
+          , tyBinders: []
+          , argBinder: { name: Ident "s", ty: string }
+          , contBinder: { name: Ident "k", ty: fn unit' TRowEmpty (io tyVarA) }
+          , body:
+              App 0
+                ( App 0
+                    (TyApp 0 (TyApp 0 (Global 0 ioBind []) unit') tyVarA)
+                    (App 0 (Global 0 jsConsoleLog []) (Var 0 (Ident "s")))
+                )
+                (Lam 0 (Ident "w") unit' (App 0 (Var 0 (Ident "k")) (Global 0 unitCtor [])))
+          }
       ]
   }
 
@@ -450,13 +606,24 @@ consoleHandler =
 -- | precedes it.
 checkedSignature :: Module P.Int -> Either (DeclFailure P.Int) Signature
 checkedSignature m = do
+  s6 <- supporting
+  declare s6 m
+
+supporting :: Either (DeclFailure P.Int) Signature
+supporting = do
   s1 <- declare primSignature intModule
   s2 <- declare s1 preludeModule
   s3 <- declare s2 stateModule
   s4 <- declare s3 baseIOModule
   s5 <- declare s4 baseConsoleModule
-  s6 <- declare s5 jsConsoleModule
-  declare s6 m
+  declare s5 jsConsoleModule
+
+-- | `Σ` for the adapter, which needs `LiftIO` beside the six above.
+checkedAdapter :: Module P.Int -> Either (DeclFailure P.Int) Signature
+checkedAdapter m = do
+  s6 <- supporting
+  s7 <- declare s6 baseLiftIOModule
+  declare s7 m
 
 verdict :: Module P.Int -> Either DeclError Unit
 verdict m = case checkedSignature m of
@@ -465,6 +632,16 @@ verdict m = case checkedSignature m of
 
 valueScheme :: Qualified Ident -> Maybe TypeScheme
 valueScheme name = case checkedSignature exampleModule of
+  Left _ -> Nothing
+  Right sig -> map _.scheme (lookupValue sig name)
+
+adapterVerdict :: Module P.Int -> Either DeclError Unit
+adapterVerdict m = case checkedAdapter m of
+  Left failure -> Left failure.error
+  Right _ -> Right unit
+
+adapterScheme :: Qualified Ident -> Maybe TypeScheme
+adapterScheme name = case checkedAdapter jsEffectConsoleModule of
   Left _ -> Nothing
   Right sig -> map _.scheme (lookupValue sig name)
 
@@ -523,20 +700,21 @@ openConsoleValue =
             , body: App 0 (OpenEff 0 rowVar (TyApp 0 (Global 0 ioPure []) tyVarA)) (Var 0 (Ident "x"))
             }
         , opClauses:
-            [ { op: OpName "log"
-              , tyBinders: []
-              , argBinder: { name: Ident "s", ty: string }
-              , contBinder: { name: Ident "k", ty: fn unit' rowVar (io tyVarA) }
-              , body:
-                  App 0
-                    ( OpenEff 0 rowVar
-                        ( App 0
-                            (OpenEff 0 rowVar (TyApp 0 (TyApp 0 (Global 0 ioBind []) unit') tyVarA))
-                            (App 0 (OpenEff 0 rowVar (Global 0 jsConsoleLog [])) (Var 0 (Ident "s")))
-                        )
-                    )
-                    (Lam 0 (Ident "w") unit' (App 0 (Var 0 (Ident "k")) (Global 0 unitCtor [])))
-              }
+            [ FullClause
+                { op: OpName "log"
+                , tyBinders: []
+                , argBinder: { name: Ident "s", ty: string }
+                , contBinder: { name: Ident "k", ty: fn unit' rowVar (io tyVarA) }
+                , body:
+                    App 0
+                      ( OpenEff 0 rowVar
+                          ( App 0
+                              (OpenEff 0 rowVar (TyApp 0 (TyApp 0 (Global 0 ioBind []) unit') tyVarA))
+                              (App 0 (OpenEff 0 rowVar (Global 0 jsConsoleLog [])) (Var 0 (Ident "s")))
+                          )
+                      )
+                      (Lam 0 (Ident "w") unit' (App 0 (Var 0 (Ident "k")) (Global 0 unitCtor [])))
+                }
             ]
         }
 
@@ -601,3 +779,29 @@ spec = describe "Dawn.Compiler.TypedCore.EffectSlice" do
     it "refuses a data constructor applied at an effectful row without openEff" do
       verdict withBareJust `shouldEqual`
         Left (IllTyped (RowMismatch rowVar TRowEmpty))
+
+  describe "the adapter" do
+    it "passes declaration checking, its clause being fast" do
+      adapterVerdict jsEffectConsoleModule `shouldEqual` Right unit
+
+    it "keeps the effect-polymorphic scheme, no native action being sequenced" do
+      adapterScheme lowerConsoleName `shouldEqual` Just lowerConsoleScheme
+
+    it "refuses the thunk applied without the widening the handle calls for" do
+      -- the handled body stands at `( Console, LiftIO | e )` because the handle
+      -- removes `Console` and leaves `( LiftIO | e )`, while the thunk arrives
+      -- at `( Console | e )`
+      adapterVerdict (jsEffectConsoleWith bareThunk lowerConsoleClause)
+        `shouldEqual` Left (IllTyped (RowMismatch adapterInnerRow openConsoleRow))
+
+    it "refuses the native leaf applied without openEff" do
+      -- the clause is typed at `( LiftIO | e )` while `Js.Console.log` has pure
+      -- arrows, so the widening is owed whichever form the clause takes
+      adapterVerdict (jsEffectConsoleOf bareLeafClause)
+        `shouldEqual` Left (IllTyped (RowMismatch liftIORow TRowEmpty))
+
+    it "refuses the same body in a full clause, which owes the answer type" do
+      -- a full clause supplies what the handle returns, so its body is `a`
+      -- rather than the `Unit` that `log` resumes with
+      adapterVerdict (jsEffectConsoleOf fullLogClause)
+        `shouldEqual` Left (IllTyped (TypeMismatch tyVarA unit'))

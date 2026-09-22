@@ -7,7 +7,7 @@ import Prelude
 
 import Prim as P
 
-import Dawn.Compiler.TypedCore (AttrValue(..), Constraint(..), Decl(..), DecisionTree(..), EffName(..), EffectDecl, Expr(..), Ident(..), Kind(..), ModuleName(..), OpName(..), Qualified(..), RowElemKind(..), RowEntry(..), RowKey(..), RowPayload(..), Symbol(..), Tag(..), TyName(..), TyVar(..), Type(..), declAnnotation, exprAnnotation, rowEntryKey, rowEntryPayload)
+import Dawn.Compiler.TypedCore (AttrValue(..), Constraint(..), Decl(..), DecisionTree(..), EffName(..), EffectDecl, Expr(..), Ident(..), Kind(..), ModuleName(..), OpClause(..), OpName(..), Qualified(..), RowElemKind(..), RowEntry(..), RowKey(..), RowPayload(..), Symbol(..), Tag(..), TyName(..), TyVar(..), Type(..), declAnnotation, exprAnnotation, opClauseBody, rowEntryKey, rowEntryPayload)
 import Data.Array (index)
 import Data.Maybe (Maybe(..))
 import Test.Spec (Spec, describe, it)
@@ -50,15 +50,16 @@ toMaybe =
             , body: App 9 (TyApp 10 (Global 11 just []) (TVar (TyVar "a"))) (Var 12 (Ident "x"))
             }
         , opClauses:
-            [ { op: OpName "abort"
-              , tyBinders: [ { name: TyVar "b", kind: KType } ]
-              , argBinder: { name: Ident "_", ty: tUnit }
-              , contBinder:
-                  { name: Ident "k"
-                  , ty: fn (TVar (TyVar "b")) (TVar (TyVar "e")) (maybeOf (TVar (TyVar "a")))
-                  }
-              , body: TyApp 13 (Global 14 nothing []) (TVar (TyVar "a"))
-              }
+            [ FullClause
+                { op: OpName "abort"
+                , tyBinders: [ { name: TyVar "b", kind: KType } ]
+                , argBinder: { name: Ident "_", ty: tUnit }
+                , contBinder:
+                    { name: Ident "k"
+                    , ty: fn (TVar (TyVar "b")) (TVar (TyVar "e")) (maybeOf (TVar (TyVar "a")))
+                    }
+                , body: TyApp 13 (Global 14 nothing []) (TVar (TyVar "a"))
+                }
             ]
         }
   where
@@ -100,7 +101,7 @@ stateEffect =
 -- | record rather than through a constructor field.
 clauseBodyAnnotation :: forall a. Expr a -> Maybe a
 clauseBodyAnnotation = case _ of
-  Handle _ _ h -> map (exprAnnotation <<< _.body) (index h.opClauses 0)
+  Handle _ _ h -> map (exprAnnotation <<< opClauseBody) (index h.opClauses 0)
   _ -> Nothing
 
 handlerOf :: forall a. Expr a -> Maybe (Expr a)
