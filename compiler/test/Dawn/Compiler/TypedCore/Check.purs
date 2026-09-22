@@ -10,7 +10,7 @@ import Prelude
 
 import Prim as P
 
-import Dawn.Compiler.TypedCore (Decl(..), DecisionTree(..), EffName(..), Expr(..), Handler, Ident(..), JoinName(..), Kind(..), Literal(..), Module, ModuleName(..), OpClause(..), Occurrence(..), OpName(..), Qualified(..), RowElemKind(..), RowEntry(..), RowKey(..), Symbol(..), TyName(..), TyVar(..), Type(..))
+import Dawn.Compiler.TypedCore (Decl(..), DecisionTree(..), EffName(..), Expr(..), Handler, Ident(..), JoinName(..), Kind(..), Layout, Literal(..), Module, ModuleName(..), OpClause(..), Occurrence(..), OpName(..), Qualified(..), RowElemKind(..), RowEntry(..), RowKey(..), Symbol(..), TyName(..), TyVar(..), Type(..))
 import Dawn.Compiler.TypedCore.Check (CheckError(..), Env, check, envOf, infer, typeOf)
 import Dawn.Compiler.TypedCore.Kinding (KindError(..))
 import Dawn.Compiler.TypedCore.Context (bindVar, emptyContext)
@@ -106,6 +106,14 @@ fixtures =
                 , resumesWith: TVar (TyVar "a")
                 }
               ]
+          , attributes: []
+          }
+      -- an effect whose one operation resumes with a value, so that a handler
+      -- owning a region has something to answer a `readCell` with
+      , DeclEffect unit
+          { name: EffName "Counter"
+          , params: []
+          , operations: [ { name: OpName "next", tyBinders: [], argument: unitT, resumesWith: int } ]
           , attributes: []
           }
       -- a second abort-shaped effect, so that one can be translated into the
@@ -212,6 +220,7 @@ aborting :: P.Array { name :: TyVar, kind :: Kind } -> Type -> Expr Unit
 aborting tyBinders contType =
   Handle unit (Perform unit (EffectKey failEff) (OpName "abort") [ int ] primUnit)
     { element: RowEffectEntry failEff []
+    , cells: Nothing
     , returnClause: { binder: Ident "x", ty: int, body: oneLit }
     , opClauses:
         [ FullClause
@@ -223,12 +232,14 @@ aborting tyBinders contType =
             }
         ]
     }
+    []
 
 -- | `{ handles Console ; return (x : α) -> e ; full log (s, k) -> 1 }`, with the
 -- | return type, the return body, and the continuation type supplied.
 consoleHandler :: Type -> Expr Unit -> Type -> Handler Unit
 consoleHandler alpha returned contType =
   { element: RowEffectEntry consoleEff []
+  , cells: Nothing
   , returnClause: { binder: Ident "x", ty: alpha, body: returned }
   , opClauses:
       [ FullClause
@@ -247,8 +258,52 @@ logging :: OpClause Unit -> Expr Unit
 logging clause =
   Handle unit (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (LitString "x")))
     { element: RowEffectEntry consoleEff []
+    , cells: Nothing
     , returnClause: { binder: Ident "x", ty: unitT, body: oneLit }
     , opClauses: [ clause ]
+    }
+    []
+
+counterEff :: Qualified EffName
+counterEff = Qualified main (EffName "Counter")
+
+regionVar :: TyVar
+regionVar = TyVar "r"
+
+nKey :: RowKey
+nKey = SymbolKey (Symbol "n")
+
+-- | `cells [r] ( n : Int )`, one cell holding an `Int`.
+oneCell :: Layout
+oneCell = { var: regionVar, cells: [ { key: nKey, ty: int } ] }
+
+-- | `handle (perform Counter.next ()) with { handles Counter ; … } @ ( ē )`,
+-- | with the layout, the initial values, the return clause's body, and the
+-- | clause supplied. Both the handled computation and the answer are `Int`.
+counting
+  :: Maybe Layout
+  -> P.Array (Expr Unit)
+  -> Expr Unit
+  -> OpClause Unit
+  -> Expr Unit
+counting cells initial returned clause =
+  Handle unit (Perform unit (EffectKey counterEff) (OpName "next") [] primUnit)
+    { element: RowEffectEntry counterEff []
+    , cells
+    , returnClause: { binder: Ident "x", ty: int, body: returned }
+    , opClauses: [ clause ]
+    }
+    initial
+
+-- | `fast next (_ : Unit) -> e`, whose body must have the type `next` resumes
+-- | with, `Int`.
+fastNext :: Expr Unit -> OpClause Unit
+fastNext body =
+  FastClause
+    { op: OpName "next"
+    , tyBinders: []
+    , argBinder: { name: Ident "u", ty: unitT }
+    , body
     }
 
 -- | `fast log (msg : String) -> e`, with the body supplied. `log` resumes with
@@ -447,9 +502,11 @@ spec = describe "TypedCore.Check" do
       inferAt TRowEmpty
         ( Handle unit (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (LitString "x")))
             { element: RowEffectEntry consoleEff []
+            , cells: Nothing
             , returnClause: { binder: Ident "x", ty: unitT, body: oneLit }
             , opClauses: []
             }
+            []
         )
         `shouldEqual` Left (MissingClause consoleEff (OpName "log"))
 
@@ -476,6 +533,7 @@ spec = describe "TypedCore.Check" do
       inferAt counterRow
         ( Handle unit (Perform unit counterKey (OpName "get") [] primUnit)
             { element: RowLabelledEffectEntry (Symbol "cache") stateEff [ int ]
+            , cells: Nothing
             , returnClause: { binder: Ident "x", ty: int, body: oneLit }
             , opClauses:
                 [ FullClause
@@ -494,6 +552,7 @@ spec = describe "TypedCore.Check" do
                     }
                 ]
             }
+            []
         )
         `shouldEqual` Right int
 
@@ -520,6 +579,7 @@ spec = describe "TypedCore.Check" do
       inferAt TRowEmpty
         ( Handle unit (Perform unit cacheKey (OpName "get") [] primUnit)
             { element: RowLabelledEffectEntry (Symbol "cache") stateEff [ int ]
+            , cells: Nothing
             , returnClause: { binder: Ident "x", ty: int, body: oneLit }
             , opClauses:
                 [ FastClause
@@ -537,6 +597,7 @@ spec = describe "TypedCore.Check" do
                     }
                 ]
             }
+            []
         )
         `shouldEqual` Right int
 
@@ -548,6 +609,7 @@ spec = describe "TypedCore.Check" do
       inferAt fail2Row
         ( Handle unit (Perform unit (EffectKey failEff) (OpName "abort") [ int ] primUnit)
             { element: RowEffectEntry failEff []
+            , cells: Nothing
             , returnClause: { binder: Ident "x", ty: int, body: oneLit }
             , opClauses:
                 [ FastClause
@@ -561,8 +623,146 @@ spec = describe "TypedCore.Check" do
                     }
                 ]
             }
+            []
         )
         `shouldEqual` Right int
+
+  describe "regions of cells" do
+    it "checks a fast clause against the cell the layout declares" do
+      inferAt TRowEmpty
+        (counting (Just oneCell) [ oneLit ] (var "x") (fastNext (ReadCell unit nKey)))
+        `shouldEqual` Right int
+
+    it "refuses a readCell in the computation the handler handles" do
+      -- the handled computation stands at `( ent | ρ )`, which carries no
+      -- region, so the code a handler handles reaches no cell of its own (D36)
+      inferAt TRowEmpty
+        ( Handle unit (ReadCell unit nKey)
+            { element: RowEffectEntry counterEff []
+            , cells: Just oneCell
+            , returnClause: { binder: Ident "x", ty: int, body: var "x" }
+            , opClauses: [ fastNext oneLit ]
+            }
+            [ oneLit ]
+        )
+        `shouldEqual` Left (NoCellAt nKey (TRowExtend (RowEffectEntry counterEff []) TRowEmpty))
+
+    it "refuses a readCell in the return clause" do
+      -- the return clause stands at `ρ`, which is what makes an ordinary return
+      -- hand back no state
+      inferAt TRowEmpty
+        (counting (Just oneCell) [ oneLit ] (ReadCell unit nKey) (fastNext oneLit))
+        `shouldEqual` Left (NoCellAt nKey TRowEmpty)
+
+    it "refuses a readCell for a key the layout does not declare" do
+      inferAt TRowEmpty
+        (counting (Just oneCell) [ oneLit ] (var "x") (fastNext (ReadCell unit sizeKey)))
+        `shouldEqual` Left
+          ( NoCellAt sizeKey
+              (TRowExtend (RowRegionEntry (TVar regionVar) (TRowExtend (RowTypeEntry nKey int) TRowEmpty)) TRowEmpty)
+          )
+
+    it "refuses an initial value of the wrong type" do
+      inferAt TRowEmpty
+        (counting (Just oneCell) [ primUnit ] (var "x") (fastNext (ReadCell unit nKey)))
+        `shouldEqual` Left (TypeMismatch int unitT)
+
+    it "refuses a layout and a list of initial values of different lengths" do
+      inferAt TRowEmpty
+        (counting (Just oneCell) [] (var "x") (fastNext (ReadCell unit nKey)))
+        `shouldEqual` Left (CellCount 1 0)
+
+    it "refuses initial values where the handler owns no region" do
+      inferAt TRowEmpty
+        (counting Nothing [ oneLit ] (var "x") (fastNext oneLit))
+        `shouldEqual` Left (CellCount 0 1)
+
+    it "refuses a layout declaring one key twice" do
+      -- kinding the layout is what rejects it: a row extension requires the key
+      -- absent from the rest, which a repeat cannot discharge
+      inferAt TRowEmpty
+        ( counting
+            (Just { var: regionVar, cells: [ { key: nKey, ty: int }, { key: nKey, ty: int } ] })
+            [ oneLit, oneLit ]
+            (var "x")
+            (fastNext (ReadCell unit nKey))
+        )
+        `shouldEqual` Left (IllKindedType (NotSharp nKey (TRowExtend (RowTypeEntry nKey int) TRowEmpty)))
+
+    it "refuses an answer type that mentions the region" do
+      -- the answer is a closure carrying `ρ'` in its own arrow, so it mentions
+      -- `r` — which is what `r ∉ ftv(β)` rejects. Everything else about the
+      -- handler checks: the clause is the one place such a closure can be built
+      let
+        regionRow =
+          TRowExtend (RowRegionEntry (TVar regionVar) (TRowExtend (RowTypeEntry nKey int) TRowEmpty))
+            TRowEmpty
+        answer = fn unitT regionRow int
+      checkAt TRowEmpty answer
+        ( Handle unit (Perform unit (EffectKey counterEff) (OpName "next") [] primUnit)
+            { element: RowEffectEntry counterEff []
+            , cells: Just oneCell
+            , returnClause: { binder: Ident "x", ty: int, body: lam "u" unitT oneLit }
+            , opClauses:
+                [ FullClause
+                    { op: OpName "next"
+                    , tyBinders: []
+                    , argBinder: { name: Ident "u", ty: unitT }
+                    , contBinder: { name: Ident "k", ty: fn int regionRow answer }
+                    , body: lam "u" unitT (ReadCell unit nKey)
+                    }
+                ]
+            }
+            [ oneLit ]
+        )
+        `shouldEqual` Left (RegionEscapes regionVar)
+
+    it "refuses a cell binder already bound where the handler stands" do
+      -- every bound variable of a Core term is unique within its context, and a
+      -- region binder is checked against that: its layout is kinded outside the
+      -- binder and then stands inside it
+      inferAt TRowEmpty
+        ( TyLam unit regionVar KType
+            ( lam "u" unitT
+                (counting (Just oneCell) [ oneLit ] (var "x") (fastNext (ReadCell unit nKey)))
+            )
+        )
+        `shouldEqual` Left (RegionBinderShadows regionVar)
+
+    it "keeps an outer variable apart from the region standing beside it" do
+      -- the layout and the answer both mention `r`, which is bound outside the
+      -- handler; the region binds `s`, and neither name is read for the other
+      let
+        r = TVar regionVar
+        layout = { var: TyVar "s", cells: [ { key: nKey, ty: r } ] }
+        term =
+          TyLam unit regionVar KType
+            ( lam "x" r
+                ( Handle unit (Perform unit (EffectKey counterEff) (OpName "next") [] primUnit)
+                    { element: RowEffectEntry counterEff []
+                    , cells: Just layout
+                    , returnClause: { binder: Ident "y", ty: int, body: var "x" }
+                    , opClauses: [ fastNext (Let unit (Ident "z") r (ReadCell unit nKey) oneLit) ]
+                    }
+                    [ var "x" ]
+                )
+            )
+      inferAt TRowEmpty term
+        `shouldEqual` Right (TForall regionVar KType (fn r TRowEmpty r))
+
+    it "refuses a handler naming a region as the element it handles" do
+      -- `handles` reads an effect application out of the payload, and a region
+      -- carries none
+      inferAt TRowEmpty
+        ( Handle unit oneLit
+            { element: RowRegionEntry unitT TRowEmpty
+            , cells: Nothing
+            , returnClause: { binder: Ident "x", ty: int, body: var "x" }
+            , opClauses: []
+            }
+            []
+        )
+        `shouldEqual` Left (WrongPayload RegionKey)
 
   describe "handlers of one key" do
     it "refuses two of them nested directly" do
@@ -570,7 +770,8 @@ spec = describe "TypedCore.Check" do
       let
         inner = Handle unit (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (LitString "x")))
           (consoleHandler unitT primUnit (pureFn unitT unitT))
-      inferAt TRowEmpty (Handle unit inner (consoleHandler unitT primUnit (pureFn unitT unitT)))
+          []
+      inferAt TRowEmpty (Handle unit inner (consoleHandler unitT primUnit (pureFn unitT unitT)) [])
         `shouldEqual` Left (IllKindedType (NotSharp (EffectKey consoleEff) consoleRow))
 
     it "accepts a pure function handling the effect within itself" do
@@ -579,11 +780,12 @@ spec = describe "TypedCore.Check" do
       let
         handled = Handle unit (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (LitString "x")))
           (consoleHandler unitT primUnit (pureFn unitT unitT))
+          []
         f = lam "u" unitT handled
         call = App unit (OpenEff unit consoleRow (var "f")) primUnit
       inferAt TRowEmpty
         ( Let unit (Ident "f") (pureFn unitT unitT) f
-            (Handle unit call (consoleHandler unitT oneLit (fn unitT TRowEmpty int)))
+            (Handle unit call (consoleHandler unitT oneLit (fn unitT TRowEmpty int)) [])
         )
         `shouldEqual` Right int
 

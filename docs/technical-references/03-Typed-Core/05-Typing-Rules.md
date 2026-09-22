@@ -199,6 +199,7 @@ merge : forall (r : Row Type). forall (s : Row Type).
   payload(ent) = E τ̄
   the k̄ are distinct      |ē| = |k̄|      ι = ( k̄ : σ̄ )      Γ ⊢ ι : Row Type
   Γ ⊨ RegionKey ∉ ρ                                 ← the residual row carries no region
+  r ∉ dom(Γ)                                        ← the binder is fresh, not shadowing
   Γ' = Γ, r : Type          ρ' = ( region r ι | ρ ) ← sharp by that entailment
   each j:  Γ;Δ ⊢ e_j : σ_j ! ρ                      ← initial values, before the handler stands
   Γ, x : α; · ⊢ e_r : β ! ρ                         ← outside the region; no cell is in scope
@@ -244,6 +245,8 @@ The return clause's row is the point at which "an ordinary return hands back no 
 **`ρ'` is sharp only under `RegionKey ∉ ρ`, and the rule requires it.** A handler polymorphic in its residual row cannot derive the absence of a region there, so the constraint is assumed — written in its type as any other is ([Kinds and Types](01-Kinds-and-Types.md)). What the premise rejects is a region opened where one is already open, which is what keeps `readCell` from having two regions to choose between.
 
 `readCell` and `writeCell` read the region out of the ambient row. **Neither says which region**, and neither needs to: a row holds at most one. `writeCell` evaluates to the value written, which is what lets a clause read back what it just set without a second `readCell`.
+
+**`r ∉ dom(Γ)` is what lets an occurrence of `r` mean the region.** Core terms are unique up to α-equivalence, and every bound variable is renamed to be unique within its context ([Kinds and Types](01-Kinds-and-Types.md)); the rule writes the condition out because a region binder is where leaving it implicit costs the most. The layout `ι` is kinded under `Γ`, outside the binder, and then stands under it in `ρ'`: a binder shadowing an outer variable would draw that variable's occurrences in `σ̄` under the region, and would make the condition below read an outer variable of the same name as an escape. Under the premise neither can happen.
 
 **`r ∉ ftv(β) ∪ ftv(ρ)` is the whole of the escape discipline.** Every way to reach a cell mentions the region: a closure over a `readCell` carries `ρ'` in its own arrow, and `ρ'` mentions `r`. The condition therefore keeps such a closure out of the answer type and out of the residual row. There is no cell handle to leak, a cell being named by a key rather than held as a value, so these are the only routes there are. This is what a rank-2 quantifier would enforce for a `runST`-shaped function; `cells` being a binder, a side condition enforces it directly.
 

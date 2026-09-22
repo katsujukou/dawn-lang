@@ -136,6 +136,7 @@ substitute ctx = go
     XRowTypeEntry k ty -> XRowTypeEntry k (go ty)
     XRowEffectEntry e args -> XRowEffectEntry e (map go args)
     XRowLabelledEffectEntry s e args -> XRowLabelledEffectEntry s e (map go args)
+    XRowRegionEntry var cells -> XRowRegionEntry (go var) (go cells)
 
   -- A constraint carries rows of its own, and a hole left in one of them would
   -- survive zonking and fail `toCore`.
@@ -411,6 +412,7 @@ entryKind = case _ of
   XRowTypeEntry _ _ -> KRow RowType
   XRowEffectEntry _ _ -> KRow RowEffect
   XRowLabelledEffectEntry _ _ _ -> KRow RowEffect
+  XRowRegionEntry _ _ -> KRow RowEffect
 
 -- | What `?r` lacks, the flexible tail of its solution must lack too.
 propagateLacks :: MetaContext -> MetaInfo -> XType -> UnifyResult

@@ -412,7 +412,9 @@ value ctx expr k = case stripErased expr of
     atomize ctx e \a -> k (RComp (M.CAbsurd a) (repAt ctx expr))
 
   C.Perform _ _ _ _ _ -> throw (NotYetTranslated "perform")
-  C.Handle _ _ _ -> throw (NotYetTranslated "handle")
+  C.Handle _ _ _ _ -> throw (NotYetTranslated "handle")
+  C.ReadCell _ _ -> throw (NotYetTranslated "readCell")
+  C.WriteCell _ _ _ -> throw (NotYetTranslated "writeCell")
 
   -- reached only through `go`, which handles these before delegating here
   _ -> throw (NotYetTranslated "a control construct in value position")
@@ -771,12 +773,15 @@ freeVars = case _ of
   C.VariantWeaken _ _ _ e -> freeVars e
   C.VariantAbsurd _ _ e -> freeVars e
   C.Perform _ _ _ _ arg -> freeVars arg
-  C.Handle _ body handler ->
+  C.Handle _ body handler initial ->
     Set.unions
       [ freeVars body
+      , unions (map freeVars initial)
       , Set.delete handler.returnClause.binder (freeVars handler.returnClause.body)
       , unions (map freeVarsClause handler.opClauses)
       ]
+  C.ReadCell _ _ -> Set.empty
+  C.WriteCell _ _ written -> freeVars written
   C.OpenEff _ _ e -> freeVars e
 
 freeVarsClause :: forall a. C.OpClause a -> Set Ident

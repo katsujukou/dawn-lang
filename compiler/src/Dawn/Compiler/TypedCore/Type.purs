@@ -16,6 +16,7 @@ module Dawn.Compiler.TypedCore.Type
   , substituteType
   , substituteConstraint
   , substituteKindsInType
+  , freeTypeVars
   ) where
 
 import Prelude
@@ -31,6 +32,9 @@ import Data.Generic.Rep (class Generic)
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (fromMaybe)
+import Data.Foldable (foldMap)
+import Data.Set (Set)
+import Data.Set as Set
 import Data.Show.Generic (genericShow)
 
 -- | A type, written `τ`, `σ`, or `ρ`.
@@ -71,6 +75,10 @@ data RowEntry
   -- | `SymbolKey s : E τ̄` — the same, with a key written for it. This is what
   -- | lets one effect appear twice in a row.
   | RowLabelledEffectEntry Symbol (Qualified EffName) (P.Array Type)
+  -- | `region r ι` — the region a handler owns, its variable and the row of its
+  -- | cells. It names no declaration, which is why nothing can declare one and
+  -- | why the rules that read a payload for an effect find nothing to read.
+  | RowRegionEntry Type Type
 
 -- | The key of a row element. Keys are rigid — independent of metavariable
 -- | solving — which is what makes row equality decidable (D13, D16).
@@ -86,6 +94,11 @@ data RowKey
   -- | the component stands (D13).
   | PositionKey P.Int
   | EffectKey (Qualified EffName)
+  -- | A handler's region of cells (D36). No source syntax writes it: only a
+  -- | handler's `cells` produces one, which is what keeps a region from being
+  -- | discharged by anything but the `handle` that owns it. There is one such
+  -- | key, so a sharp row holds at most one region.
+  | RegionKey
 
 -- | What an element carries once its key is taken away.
 -- |
@@ -96,18 +109,23 @@ data RowKey
 data RowPayload
   = TypePayload Type
   | EffectPayload (Qualified EffName) (P.Array Type)
+  -- | A region carries no effect application, so no operation is looked up
+  -- | through it and no handler may write one (D36).
+  | RegionPayload Type Type
 
 rowEntryKey :: RowEntry -> RowKey
 rowEntryKey = case _ of
   RowTypeEntry k _ -> k
   RowEffectEntry e _ -> EffectKey e
   RowLabelledEffectEntry s _ _ -> SymbolKey s
+  RowRegionEntry _ _ -> RegionKey
 
 rowEntryPayload :: RowEntry -> RowPayload
 rowEntryPayload = case _ of
   RowTypeEntry _ ty -> TypePayload ty
   RowEffectEntry e args -> EffectPayload e args
   RowLabelledEffectEntry _ e args -> EffectPayload e args
+  RowRegionEntry var cells -> RegionPayload var cells
 
 -- | Instantiate type variables.
 -- |
@@ -131,6 +149,7 @@ substituteType sub = go
     RowTypeEntry key ty -> RowTypeEntry key (go ty)
     RowEffectEntry name args -> RowEffectEntry name (map go args)
     RowLabelledEffectEntry s name args -> RowLabelledEffectEntry s name (map go args)
+    RowRegionEntry var cells -> RowRegionEntry (go var) (go cells)
 
 substituteConstraint :: Map TyVar Type -> Constraint -> Constraint
 substituteConstraint sub = case _ of
@@ -161,6 +180,7 @@ substituteKindsInType sub = go
     RowTypeEntry key ty -> RowTypeEntry key (go ty)
     RowEffectEntry name args -> RowEffectEntry name (map go args)
     RowLabelledEffectEntry s name args -> RowLabelledEffectEntry s name (map go args)
+    RowRegionEntry var cells -> RowRegionEntry (go var) (go cells)
 
 -- | A row constraint. Core has exactly two, and neither carries run-time
 -- | content: the checker re-derives entailment rather than accepting a proof
@@ -217,3 +237,32 @@ derive instance Generic Constraint _
 
 instance Show Constraint where
   show x = genericShow x
+
+-- | The type variables a type mentions free, payloads and constraints included.
+-- |
+-- | `r ∉ ftv(β) ∪ ftv(ρ)` is what keeps a region from outliving the `handle`
+-- | that owns it (D36): every way to reach a cell mentions the region, so a
+-- | closure over a `readCell` carries it in its own arrow and this rejects it
+-- | where it would become the answer or join the residual row.
+freeTypeVars :: Type -> Set TyVar
+freeTypeVars = go Set.empty
+  where
+  go bound = case _ of
+    TVar a -> if Set.member a bound then Set.empty else Set.singleton a
+    TCon _ _ -> Set.empty
+    TApp f x -> go bound f <> go bound x
+    TForall a _ body -> go (Set.insert a bound) body
+    TConstrained constraint body -> goConstraint bound constraint <> go bound body
+    TRowEmpty -> Set.empty
+    TRowExtend entry rest -> goEntry bound entry <> go bound rest
+    TRowUnion left right -> go bound left <> go bound right
+
+  goConstraint bound = case _ of
+    Lacks _ row -> go bound row
+    Disjoint left right -> go bound left <> go bound right
+
+  goEntry bound = case _ of
+    RowTypeEntry _ ty -> go bound ty
+    RowEffectEntry _ args -> foldMap (go bound) args
+    RowLabelledEffectEntry _ _ args -> foldMap (go bound) args
+    RowRegionEntry var cells -> go bound var <> go bound cells

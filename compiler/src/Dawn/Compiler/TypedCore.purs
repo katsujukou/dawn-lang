@@ -46,5 +46,5 @@ import Dawn.Compiler.TypedCore.Name (EffName(..), Ident(..), JoinName(..), KindV
 import Dawn.Compiler.TypedCore.Prim (asFunction, booleanTy, charTy, fn, functionTy, intTy, ioTy, litType, numberTy, primModule, primSignature, pureFn, recordTy, stringTy, unitCtor, unitTy, variantTy)
 import Dawn.Compiler.TypedCore.Row (RowError(..), RowNormalForm, emptyNormalForm, nf)
 import Dawn.Compiler.TypedCore.Signature (CanonicalClass(..), CtorInfo, EffectInfo, Signature, TyConInfo(..), ValueInfo, effectParamKinds, emptySignature, lookupCtor, lookupEffect, lookupOperation, lookupTyCon, lookupValue, tyConKind)
-import Dawn.Compiler.TypedCore.Term (Binding, CtorBranch, DecisionTree(..), Expr(..), Handler, KeyBranch, LitBranch, Literal(..), OpClause(..), Occurrence(..), Param, ReturnClause, exprAnnotation, opClauseBody, opClauseOp, withAnnotation)
+import Dawn.Compiler.TypedCore.Term (Binding, CtorBranch, DecisionTree(..), Expr(..), Handler, Layout, Cell, KeyBranch, LitBranch, Literal(..), OpClause(..), Occurrence(..), Param, ReturnClause, exprAnnotation, opClauseBody, opClauseOp, withAnnotation)
 import Dawn.Compiler.TypedCore.Type (Constraint(..), RowEntry(..), RowKey(..), RowPayload(..), TyBinder, Type(..), TypeScheme, rowEntryKey, rowEntryPayload)

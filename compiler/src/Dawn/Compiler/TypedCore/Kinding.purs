@@ -133,6 +133,10 @@ wellFormedKey sig key elemKind = case key of
     EffectKey name, RowEffect -> case lookupEffect sig name of
       Just _ -> Right unit
       Nothing -> Left (UndeclaredEffect name)
+    -- Well formed unconditionally and at `Row Effect` alone, so `RegionKey ∉ ρ`
+    -- can be written and assumed — which is what an effect-polymorphic handler
+    -- owning a region needs of its residual row (D36).
+    RegionKey, RowEffect -> Right unit
     _, _ -> Left (KeyNotAtKind key elemKind)
 
 -- | `Γ ⊢ C ok`.
@@ -253,6 +257,15 @@ entryElemKind sig ctx = case _ of
   RowEffectEntry name args -> effectPayload sig ctx name args
 
   RowLabelledEffectEntry _ name args -> effectPayload sig ctx name args
+
+  -- A region consults the signature nowhere: it names no declaration, which is
+  -- why nothing can declare one (D36). `r` is the region variable the owning
+  -- handler binds and `ι` the row of its cells, at `Row Type` because a cell
+  -- holds a value.
+  RowRegionEntry var cells -> do
+    checkKind sig ctx var KType
+    checkKind sig ctx cells (KRow RowType)
+    Right RowEffect
 
 -- | `( E : κ̄ -> Effect ) ∈ Σ` and `Γ ⊢ τ̄ : κ̄`.
 effectPayload

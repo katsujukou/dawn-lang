@@ -55,6 +55,10 @@ rigidR = TyVar "r"
 field :: Symbol -> XType -> XType -> XType
 field l ty rest = XRowExtend (XRowTypeEntry (SymbolKey l) ty) rest
 
+-- | `( region r ι | ρ )`
+regionOf :: XType -> XType -> XType -> XType
+regionOf var cells rest = XRowExtend (XRowRegionEntry var cells) rest
+
 -- | `( s : E τ̄ | ρ )`
 labelledEffect :: Symbol -> Qualified EffName -> P.Array XType -> XType -> XType
 labelledEffect s eff args rest = XRowExtend (XRowLabelledEffectEntry s eff args) rest
@@ -385,3 +389,27 @@ spec = describe "Dawn.Compiler.Elaborate.Unify" do
       case fst result of
         Mismatch (PayloadMismatch key _ _) -> key `shouldEqual` SymbolKey cache
         other -> show other `shouldEqual` "Mismatch (PayloadMismatch …)"
+
+    it "equates both the variable and the layout of two regions sharing the key" do
+      let
+        m = twoMetas effectRowInfo effectRowInfo
+        result = unifyRow noAssumptions m.ctx
+          (regionOf tA (field a tA XRowEmpty) (XMeta m.r))
+          (regionOf tB (field a tB XRowEmpty) (XMeta m.s))
+      snd result `shouldEqual`
+        [ Tuple tA tB, Tuple (field a tA XRowEmpty) (field a tB XRowEmpty) ]
+
+    it "leaves two regions whose layouts differ to the layout equation" do
+      -- The key does not decide the layout, so the two are handed back as an
+      -- equation and fail where that equation is solved, not here
+      let
+        m = twoMetas effectRowInfo effectRowInfo
+        left = field a tA XRowEmpty
+        right = field b tA XRowEmpty
+        result = unifyRow noAssumptions m.ctx
+          (regionOf tA left (XMeta m.r))
+          (regionOf tA right (XMeta m.s))
+      snd result `shouldEqual` [ Tuple tA tA, Tuple left right ]
+      case fst (unifyRow noAssumptions m.ctx left right) of
+        Mismatch (RowMismatch _ _) -> pure unit
+        other -> show other `shouldEqual` "Mismatch (RowMismatch …)"

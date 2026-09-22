@@ -26,7 +26,7 @@ import Prelude
 
 import Prim as P
 
-import Dawn.Compiler.TypedCore.Context (Context, assume, bindTyVar, bindVar, lookupVar)
+import Dawn.Compiler.TypedCore.Context (Context, assume, bindTyVar, bindVar, lookupTyVar, lookupVar)
 import Dawn.Compiler.TypedCore.Entailment (DecomposeError, entails)
 import Dawn.Compiler.TypedCore.Equality (constraintEquiv, typeEquiv)
 import Dawn.Compiler.TypedCore.Kind (Kind(..), RowElemKind(..))
@@ -35,11 +35,11 @@ import Dawn.Compiler.TypedCore.Name (EffName, Ident, JoinName, OpName, Qualified
 import Dawn.Compiler.TypedCore.Prim (asFunction, booleanTy, fn, litType, recordTy, variantTy)
 import Dawn.Compiler.TypedCore.Row (RowError, RowNormalForm, fromNormalForm, nf)
 import Dawn.Compiler.TypedCore.Signature (CanonicalClass(..), CtorInfo, EffectInfo, Signature, TyConInfo(..), lookupCtor, lookupEffect, lookupOperation, lookupTyCon, lookupValue)
-import Dawn.Compiler.TypedCore.Term (Binding, DecisionTree(..), Expr(..), Handler, OpClause(..), Occurrence(..), Param, exprAnnotation, opClauseOp, withAnnotation)
-import Dawn.Compiler.TypedCore.Type (Constraint(..), RowEntry(..), RowKey, RowPayload(..), TyBinder, Type(..), TypeScheme, rowEntryKey, rowEntryPayload, substituteKindsInType, substituteType)
+import Dawn.Compiler.TypedCore.Term (Binding, DecisionTree(..), Expr(..), Handler, Layout, OpClause(..), Occurrence(..), Param, exprAnnotation, opClauseOp, withAnnotation)
+import Dawn.Compiler.TypedCore.Type (Constraint(..), RowEntry(..), RowKey(..), RowPayload(..), TyBinder, Type(..), TypeScheme, freeTypeVars, rowEntryKey, rowEntryPayload, substituteKindsInType, substituteType)
 import Data.Array as Array
 import Data.Either (Either(..))
-import Data.Foldable (foldl, traverse_)
+import Data.Foldable (foldl, foldr, traverse_)
 import Data.Generic.Rep (class Generic)
 import Data.Map (Map)
 import Data.Map as Map
@@ -181,6 +181,21 @@ data CheckError
   | IllKindedType KindError
   | NotARowType RowError
   | UndecidedConstraint DecomposeError
+  -- | A handler given a number of initial values its layout does not declare,
+  -- | as expected and actual. A handler owning no region declares none (D36).
+  | CellCount P.Int P.Int
+  -- | A region binder that is already bound where the handler stands. Every
+  -- | bound variable of a Core term is unique within its context, and a region
+  -- | is where that matters most: its layout is kinded outside the binder and
+  -- | then stands inside it, so a binder shadowing an outer variable would draw
+  -- | that variable under the region.
+  | RegionBinderShadows TyVar
+  -- | A region variable occurring in the answer type or in the residual row,
+  -- | which would let a reference into the region outlive it.
+  | RegionEscapes TyVar
+  -- | `readCell` or `writeCell` where the ambient row has no region, or none
+  -- | declaring that key.
+  | NoCellAt RowKey Type
 
 -- | The environment a top-level right-hand side is checked in. The join point
 -- | context is empty, a join point crossing no declaration boundary.
@@ -354,6 +369,9 @@ infer env rho expr = case expr of
     case Map.lookup key normal.known of
       Nothing -> Left { at, error: NoElementAt key rho }
       Just (TypePayload _) -> Left { at, error: WrongPayload key }
+      -- A `perform` cannot name a region: the rule reads an effect application
+      -- out of the payload and a region carries none (D36).
+      Just (RegionPayload _ _) -> Left { at, error: WrongPayload key }
       Just (EffectPayload name args) -> do
         { params, signature } <- operationOf at env name op
         substitution <- operationSubstitution at env op params args signature.tyBinders tyArgs
@@ -366,9 +384,20 @@ infer env rho expr = case expr of
               arg'
           )
 
-  Handle at body handler -> do
-    result <- handled at env rho Nothing body handler
-    Right (Handle (at' at result.ty) result.body result.handler)
+  Handle at body handler initial -> do
+    result <- handled at env rho Nothing body handler initial
+    Right (Handle (at' at result.ty) result.body result.handler result.initial)
+
+  ReadCell at key -> do
+    ty <- cellAt at key rho
+    Right (ReadCell (at' at ty) key)
+
+  -- `writeCell` evaluates to the value written, which is what lets a clause read
+  -- back what it just set without a second `readCell` (D36).
+  WriteCell at key value -> do
+    ty <- cellAt at key rho
+    value' <- check (notTail env) rho ty value
+    Right (WriteCell (at' at ty) key value')
 
   OpenEff at row e -> do
     kinded at (checkKind env.signature env.context row (KRow RowEffect))
@@ -443,9 +472,9 @@ check env rho expected expr = case expr of
       Right (ConstraintLam (at' at expected) constraint body')
     other -> Left { at, error: NotConstrained other }
 
-  Handle at body handler -> do
-    result <- handled at env rho (Just expected) body handler
-    Right (Handle (at' at expected) result.body result.handler)
+  Handle at body handler initial -> do
+    result <- handled at env rho (Just expected) body handler initial
+    Right (Handle (at' at expected) result.body result.handler result.initial)
 
   other -> do
     other' <- infer env rho other
@@ -465,22 +494,37 @@ handled
   -> Maybe Type
   -> Expr a
   -> Handler a
-  -> Either (CheckFailure a) { ty :: Type, body :: Expr (Typed a), handler :: Handler (Typed a) }
-handled at env rho expected body handler = do
+  -> P.Array (Expr a)
+  -> Either (CheckFailure a)
+       { ty :: Type
+       , body :: Expr (Typed a)
+       , initial :: P.Array (Expr (Typed a))
+       , handler :: Handler (Typed a)
+       }
+handled at env rho expected body handler initial = do
   let inner = TRowExtend handler.element rho
   kinded at (checkKind env.signature env.context inner (KRow RowEffect))
   let alpha = handler.returnClause.ty
   kinded at (checkKind env.signature env.context alpha KType)
+  -- The handled computation stands at `( ent | ρ )` whether or not the handler
+  -- owns a region, so the code a handler handles reaches no cell of its own and
+  -- a handler owning a region may be installed within it (D36).
   body' <- check (abstracted env) inner alpha body
+  -- The return clause stands at `ρ` for the same reason, which is what makes an
+  -- ordinary return hand back no state.
   returned <- returnType at env rho expected alpha handler
   payload <- effectPayloadOf at handler.element
   info <- effectInfoOf at env payload.name
-  clauses <- checkClauses at env rho returned.ty payload info handler.opClauses
+  region <- openRegion at env rho handler.cells initial
+  clauses <- checkClauses at region.env region.row returned.ty payload info handler.opClauses
+  escapeFree at handler.cells returned.ty rho
   Right
     { ty: returned.ty
     , body: body'
+    , initial: region.initial
     , handler:
         { element: handler.element
+        , cells: handler.cells
         , returnClause:
             { binder: handler.returnClause.binder
             , ty: handler.returnClause.ty
@@ -489,6 +533,75 @@ handled at env rho expected body handler = do
         , opClauses: clauses
         }
     }
+
+-- | The row a clause stands at, and the environment it stands in.
+-- |
+-- | Without a region both are what they always were. With one the clauses stand
+-- | at `ρ' = ( region r ι | ρ )` under `Γ, r : Type` for an `r` fresh for `Γ`,
+-- | and `ρ'` is sharp only under `RegionKey ∉ ρ`, which a handler
+-- | effect-polymorphic in `ρ` assumes rather than derives (D36).
+openRegion
+  :: forall a
+   . a
+  -> Env
+  -> Type
+  -> Maybe Layout
+  -> P.Array (Expr a)
+  -> Either (CheckFailure a) { env :: Env, row :: Type, initial :: P.Array (Expr (Typed a)) }
+openRegion at env rho cells initial = case cells of
+  Nothing -> do
+    when (not (Array.null initial)) (Left { at, error: CellCount 0 (Array.length initial) })
+    Right { env, row: rho, initial: [] }
+  Just layout -> do
+    -- Every bound variable of a Core term is unique within its context, and the
+    -- region binder is checked against that rather than assuming it. The layout
+    -- is kinded outside the binder and then stands inside it, so a binder that
+    -- shadowed an outer variable would draw that variable under the region; and
+    -- an outer variable of the same name in the answer type would read as a
+    -- region escape.
+    when (isJust (lookupTyVar env.context layout.var))
+      (Left { at, error: RegionBinderShadows layout.var })
+    let expectedCount = Array.length layout.cells
+    let actualCount = Array.length initial
+    when (expectedCount /= actualCount)
+      (Left { at, error: CellCount expectedCount actualCount })
+    -- The layout is a written sequence and therefore closed. Kinding it is what
+    -- rejects a key written twice: a row extension requires the key absent from
+    -- the rest, which a repeat cannot discharge.
+    let ι = foldr (\c acc -> TRowExtend (RowTypeEntry c.key c.ty) acc) TRowEmpty layout.cells
+    kinded at (checkKind env.signature env.context ι (KRow RowType))
+    -- The initial values are evaluated before the handler stands, so they are
+    -- checked at `ρ` and reach no cell.
+    initial' <- traverse (\(Tuple c e) -> check (notTail env) rho c.ty e)
+      (Array.zip layout.cells initial)
+    require at env (Lacks RegionKey rho)
+    let row = TRowExtend (RowRegionEntry (TVar layout.var) ι) rho
+    let inner = env { context = bindTyVar env.context layout.var KType }
+    kinded at (checkKind inner.signature inner.context row (KRow RowEffect))
+    Right { env: inner, row, initial: initial' }
+
+-- | `r ∉ ftv(β) ∪ ftv(ρ)`.
+-- |
+-- | Every way to reach a cell mentions the region: a closure over a `readCell`
+-- | carries `ρ'` in its own arrow, and `ρ'` mentions `r`. This keeps such a
+-- | closure out of the answer type and out of the residual row. A term carrying
+-- | the whole `handle` is a different matter and is unrestricted — it carries
+-- | the binder too, and mentions no `r` (D36).
+-- |
+-- | The binder is fresh for the context, so an occurrence of its name here is
+-- | the region itself and not some outer variable that shares the name.
+escapeFree
+  :: forall a
+   . a
+  -> Maybe Layout
+  -> Type
+  -> Type
+  -> Either (CheckFailure a) Unit
+escapeFree at cells beta rho = case cells of
+  Nothing -> Right unit
+  Just layout ->
+    when (Set.member layout.var (freeTypeVars beta <> freeTypeVars rho))
+      (Left { at, error: RegionEscapes layout.var })
 
 returnType
   :: forall a
@@ -517,6 +630,9 @@ effectPayloadOf
 effectPayloadOf at element = case rowEntryPayload element of
   EffectPayload name args -> Right { name, args }
   TypePayload _ -> Left { at, error: WrongPayload (rowEntryKey element) }
+  -- A region carries no effect application, so `handles` cannot name one: the
+  -- rule reads the payload for an effect and finds none (D36).
+  RegionPayload _ _ -> Left { at, error: WrongPayload (rowEntryKey element) }
 
 effectInfoOf :: forall a. a -> Env -> Qualified EffName -> Either (CheckFailure a) EffectInfo
 effectInfoOf at env name = case lookupEffect env.signature name of
@@ -970,6 +1086,7 @@ keyItem at occurrences occurrence row normal branch =
   case Map.lookup branch.key normal.known of
     Nothing -> Left { at, error: NoElementAt branch.key row }
     Just (EffectPayload _ _) -> Left { at, error: WrongPayload branch.key }
+    Just (RegionPayload _ _) -> Left { at, error: WrongPayload branch.key }
     Just (TypePayload payload) ->
       Right
         ( Tuple (Map.insert (OccVariantPayload occurrence branch.key) payload occurrences)
@@ -1226,6 +1343,7 @@ payloadAt at key row = do
   case Map.lookup key normal.known of
     Just (TypePayload ty) -> Right ty
     Just (EffectPayload _ _) -> Left { at, error: WrongPayload key }
+    Just (RegionPayload _ _) -> Left { at, error: WrongPayload key }
     Nothing -> Left { at, error: NoElementAt key row }
 
 derive instance Eq CheckError
@@ -1233,3 +1351,18 @@ derive instance Generic CheckError _
 
 instance Show CheckError where
   show x = genericShow x
+
+-- | The type of the cell keyed `k` in the region the ambient row carries.
+-- |
+-- | Neither `readCell` nor `writeCell` says which region, and neither needs to:
+-- | a sharp row holds at most one, `RegionKey` being a single key (D4, D16).
+cellAt :: forall a. a -> RowKey -> Type -> Either (CheckFailure a) Type
+cellAt at key rho = do
+  normal <- normalize at rho
+  case Map.lookup RegionKey normal.known of
+    Just (RegionPayload _ cells) -> do
+      inner <- normalize at cells
+      case Map.lookup key inner.known of
+        Just (TypePayload ty) -> Right ty
+        _ -> Left { at, error: NoCellAt key rho }
+    _ -> Left { at, error: NoCellAt key rho }

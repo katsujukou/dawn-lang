@@ -450,6 +450,11 @@ entryImpureArrow = case _ of
   RowTypeEntry _ ty -> impureArrow ty
   RowEffectEntry _ args -> Array.findMap impureArrow args
   RowLabelledEffectEntry _ _ args -> Array.findMap impureArrow args
+  -- A region carries a type and a row of cell types; D23 looks through both, a
+  -- cell holding a value as a payload does.
+  RowRegionEntry var cells -> case impureArrow var of
+    Just ty -> Just ty
+    Nothing -> impureArrow cells
 
 isEmptyRow :: Type -> P.Boolean
 isEmptyRow row = case nf row of
@@ -567,7 +572,9 @@ globalsOf = case _ of
   VariantWeaken _ _ _ e -> globalsOf e
   VariantAbsurd _ _ e -> globalsOf e
   Perform _ _ _ _ e -> globalsOf e
-  Handle _ e handler -> globalsOf e <> handlerGlobals handler
+  Handle _ e handler initial -> globalsOf e <> handlerGlobals handler <> foldMap globalsOf initial
+  ReadCell _ _ -> Set.empty
+  WriteCell _ _ value -> globalsOf value
   OpenEff _ _ e -> globalsOf e
 
 treeGlobals :: forall a. DecisionTree a -> Set (Qualified Ident)

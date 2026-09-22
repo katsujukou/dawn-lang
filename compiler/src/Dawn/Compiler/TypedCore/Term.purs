@@ -9,6 +9,8 @@ module Dawn.Compiler.TypedCore.Term
   , Param
   , Binding
   , Handler
+  , Layout
+  , Cell
   , ReturnClause
   , OpClause(..)
   , opClauseOp
@@ -92,7 +94,15 @@ data Expr a
   -- | effect row to have `k` as a key, not a handler to be installed. The
   -- | operation's signature comes from the effect the payload at `k` names.
   | Perform a RowKey OpName (P.Array Type) (Expr a)
-  | Handle a (Expr a) (Handler a)
+  -- | `handle e with h` and `handle e with h @ ( ē )`. The array holds the
+  -- | initial values of the region `h` declares, one per key of its layout and
+  -- | in the order the layout writes them; it is empty exactly where `h` owns no
+  -- | region, which the checker enforces (D36).
+  | Handle a (Expr a) (Handler a) (P.Array (Expr a))
+  -- | `readCell k` and `writeCell k e`, reaching the innermost region declaring
+  -- | `k`. Neither says which region: a sharp row holds at most one (D16).
+  | ReadCell a RowKey
+  | WriteCell a RowKey (Expr a)
   -- | Effect widening, `openEff [ρ] e`, which is the identity at run time.
   -- | Containment is an explicit term rather than subtyping (D8).
   | OpenEff a Type (Expr a)
@@ -120,8 +130,29 @@ type Binding a =
 -- | leaving an operation without a clause nowhere to go.
 type Handler a =
   { element :: RowEntry
+  , cells :: Maybe Layout
   , returnClause :: ReturnClause a
   , opClauses :: P.Array (OpClause a)
+  }
+
+-- | A handler's region of cells, `cells [r] ( k1 : σ1, …, kn : σn )` (D36).
+-- |
+-- | `var` is written rather than generated, as every other binder of Core is,
+-- | and it scopes over the operation clauses entire — their type annotations as
+-- | well as their bodies, a `full` clause writing the region in the type of its
+-- | continuation. `handles`, the layout, and the return clause lie outside it.
+-- |
+-- | The layout is a written sequence and therefore closed, which is what lets
+-- | the initial values be given one per cell. The `ι` of a `region r ι` **type**
+-- | is an ordinary row and may have a tail; only a layout is closed.
+type Layout =
+  { var :: TyVar
+  , cells :: P.Array Cell
+  }
+
+type Cell =
+  { key :: RowKey
+  , ty :: Type
   }
 
 type ReturnClause a =
@@ -246,7 +277,9 @@ exprAnnotation = case _ of
   VariantWeaken a _ _ _ -> a
   VariantAbsurd a _ _ -> a
   Perform a _ _ _ _ -> a
-  Handle a _ _ -> a
+  Handle a _ _ _ -> a
+  ReadCell a _ -> a
+  WriteCell a _ _ -> a
   OpenEff a _ _ -> a
 
 -- | Replace the annotation of the outermost node, leaving those beneath it as
@@ -277,7 +310,9 @@ withAnnotation a = case _ of
   VariantWeaken _ key ty e -> VariantWeaken a key ty e
   VariantAbsurd _ ty e -> VariantAbsurd a ty e
   Perform _ key op tyArgs arg -> Perform a key op tyArgs arg
-  Handle _ body handler -> Handle a body handler
+  Handle _ body handler initial -> Handle a body handler initial
+  ReadCell _ key -> ReadCell a key
+  WriteCell _ key value -> WriteCell a key value
   OpenEff _ row e -> OpenEff a row e
 
 derive instance Eq Literal

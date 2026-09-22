@@ -164,7 +164,7 @@ comp ::= pure atom                                 name a value
 
        -- effects
        | perform k.op a                            invoke an operation of the element keyed k
-       | handle h f [ā]                            install h and call the body
+       | handle h f [ā] @ [v̄]                      install h and call the body
 
 callee ::= M.x | M.f | M.Ctor
 ```

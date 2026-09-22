@@ -65,12 +65,17 @@ data XRowEntry
   = XRowTypeEntry RowKey XType
   | XRowEffectEntry (Qualified EffName) (P.Array XType)
   | XRowLabelledEffectEntry Symbol (Qualified EffName) (P.Array XType)
+  -- | `region r ι`, the region a handler owns (D36). Core has it, so Core⁺ must
+  -- | represent it to round-trip; nothing in elaboration produces one, a region
+  -- | arising only from a handler's `cells`.
+  | XRowRegionEntry XType XType
 
 -- | What an element carries once its key is taken away. Two elements sharing a
 -- | key are equal exactly when these are, which is what unification decides.
 data XRowPayload
   = XTypePayload XType
   | XEffectPayload (Qualified EffName) (P.Array XType)
+  | XRegionPayload XType XType
 
 data XConstraint
   = XLacks RowKey XType
@@ -85,12 +90,14 @@ xRowEntryKey = case _ of
   XRowTypeEntry k _ -> k
   XRowEffectEntry e _ -> EffectKey e
   XRowLabelledEffectEntry s _ _ -> SymbolKey s
+  XRowRegionEntry _ _ -> RegionKey
 
 xRowEntryPayload :: XRowEntry -> XRowPayload
 xRowEntryPayload = case _ of
   XRowTypeEntry _ ty -> XTypePayload ty
   XRowEffectEntry e args -> XEffectPayload e args
   XRowLabelledEffectEntry _ e args -> XEffectPayload e args
+  XRowRegionEntry var cells -> XRegionPayload var cells
 
 fromCore :: Type -> XType
 fromCore = case _ of
@@ -108,6 +115,7 @@ fromCoreEntry = case _ of
   RowTypeEntry k ty -> XRowTypeEntry k (fromCore ty)
   RowEffectEntry e args -> XRowEffectEntry e (map fromCore args)
   RowLabelledEffectEntry s e args -> XRowLabelledEffectEntry s e (map fromCore args)
+  RowRegionEntry var cells -> XRowRegionEntry (fromCore var) (fromCore cells)
 
 fromCoreConstraint :: Constraint -> XConstraint
 fromCoreConstraint = case _ of
@@ -134,6 +142,7 @@ toCoreEntry = case _ of
   XRowTypeEntry k ty -> RowTypeEntry k <$> toCore ty
   XRowEffectEntry e args -> RowEffectEntry e <$> traverse toCore args
   XRowLabelledEffectEntry s e args -> RowLabelledEffectEntry s e <$> traverse toCore args
+  XRowRegionEntry var cells -> RowRegionEntry <$> toCore var <*> toCore cells
 
 toCoreConstraint :: XConstraint -> Maybe Constraint
 toCoreConstraint = case _ of
@@ -159,6 +168,7 @@ entryMetas = case _ of
   XRowTypeEntry _ ty -> metasOf ty
   XRowEffectEntry _ args -> foldMap metasOf args
   XRowLabelledEffectEntry _ _ args -> foldMap metasOf args
+  XRowRegionEntry var cells -> metasOf var <> metasOf cells
 
 constraintMetas :: XConstraint -> Set MetaVar
 constraintMetas = case _ of
@@ -194,6 +204,7 @@ freeRigids = go Set.empty
     XRowTypeEntry _ ty -> go bound ty
     XRowEffectEntry _ args -> foldMap (go bound) args
     XRowLabelledEffectEntry _ _ args -> foldMap (go bound) args
+    XRowRegionEntry var cells -> go bound var <> go bound cells
 
   goConstraint bound = case _ of
     XLacks _ row -> go bound row
@@ -221,6 +232,7 @@ entryKindVars = case _ of
   XRowTypeEntry _ ty -> freeKindVars ty
   XRowEffectEntry _ args -> foldMap freeKindVars args
   XRowLabelledEffectEntry _ _ args -> foldMap freeKindVars args
+  XRowRegionEntry var cells -> freeKindVars var <> freeKindVars cells
 
 constraintKindVars :: XConstraint -> Set KindVar
 constraintKindVars = case _ of

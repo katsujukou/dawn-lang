@@ -117,6 +117,9 @@ entryOf (Tuple key payload) = case payload of
     EffectKey e | e == name -> Just (RowEffectEntry name args)
     SymbolKey s -> Just (RowLabelledEffectEntry s name args)
     _ -> Nothing
+  RegionPayload var cells -> case key of
+    RegionKey -> Just (RowRegionEntry var cells)
+    _ -> Nothing
 
 union :: RowNormalForm -> RowNormalForm -> Either RowError RowNormalForm
 union l r =
