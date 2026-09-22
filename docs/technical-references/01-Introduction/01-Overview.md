@@ -62,6 +62,7 @@ Typed Core
   │ lowering of language semantics
   ▼
 backend-independent Mid IR
+  ├── bytecode ───────► .dmo module objects ──► the Dawn virtual machine
   ├── JavaScript IR ──► ES modules
   ├── Wasm IR ────────► WebAssembly modules
   └── future IRs ─────► native and others
@@ -71,7 +72,11 @@ backend-independent Mid IR
 
 **Typed Core** defines the semantics of the language. It makes explicit: type abstraction and application, evidence and dictionary arguments, record and variant operations, the decision structure of pattern matching, effect operations and handlers, and evaluation order wherever it is observable. The rest of these documents specify it.
 
-**Mid IR** retains useful type information and invariants while depending on no particular backend. It expresses closure construction and application, algebraic data construction and destruction, join points and tail calls, primitive operations, explicit control flow, handler and continuation operations, and abstracted allocation. JavaScript functions and objects, Wasm GC structs, and linear-memory layouts must not leak into this stage.
+**Mid IR** retains useful type information and invariants while depending on no particular backend. It expresses closure construction and application, algebraic data construction and destruction, join points and tail calls, primitive operations, explicit control flow, handler and continuation operations, and abstracted allocation. JavaScript functions and objects, Wasm GC structs, and linear-memory layouts must not leak into this stage. It is an A-normal form, and [Mid IR](../04-MiddleEnd/01-Mid-IR.md) specifies it.
+
+**Bytecode** is the lowering of Mid IR to a machine Dawn owns, which is what lets a program be executed before either web backend exists ([Bytecode](../05-Backend/01-Bytecode.md)). Its continuations are multi-shot, so unlike the v0.1 JavaScript and Wasm backends it conforms to the reference semantics. Against the Core evaluator it is a second evaluator to compare with, and it runs the programs the web backends cannot; the properties stated over Typed Core stay with the Core evaluator ([Implementation Plan](04-Implementation-Plan.md)).
+
+Its output, a **`.dmo` module object**, is also what a backend outside this compiler reads. Mid IR is an in-memory representation, so the artefact a third party builds on is the lowered one — erased, in A-normal form, with closures and their captures explicit and decision trees already disjoint — rather than Typed Core.
 
 ## Backend strategy
 
@@ -109,7 +114,7 @@ These serve as architecture tests as well as demonstrations.
 | Document | Content |
 | --- | --- |
 | [§1.2 Notation](02-Notation.md) | Metavariables, sequences, symbols |
-| [§1.3 Design Decisions](03-Design-Decisions.md) | The numbered decisions D1–D27 |
+| [§1.3 Design Decisions](03-Design-Decisions.md) | The numbered decisions D1–D35 |
 | [§1.4 Implementation Plan](04-Implementation-Plan.md) | Order of implementation work |
 | [§2.1 Elaboration](../02-Surface-Language/01-Elaboration.md) | Core⁺, metavariables, unification, synthesis |
 | [§3.1 Kinds and Types](../03-Typed-Core/01-Kinds-and-Types.md) | Names, kinds, types, kinding rules |
@@ -121,6 +126,9 @@ These serve as architecture tests as well as demonstrations.
 | [§3.7 Core Type Checker](../03-Typed-Core/07-Core-Type-Checker.md) | What the checker verifies, and what it does not |
 | [§3.8 Examples](../03-Typed-Core/08-Examples.md) | Worked examples in Core |
 | [§3.9 PureScript CoreFn](../03-Typed-Core/09-PureScript-CoreFn.md) | Correspondence with PureScript's CoreFn |
+| [§4.1 Mid IR](../04-MiddleEnd/01-Mid-IR.md) | A-normal form, representation types, closures, join points, handlers |
+| [§4.2 Translation](../04-MiddleEnd/02-Translation.md) | Typed Core to Mid IR: erasure, spines, decision trees, closure conversion |
+| [§5.1 Bytecode](../05-Backend/01-Bytecode.md) | The instruction set, continuations, and the `.dmo` module object |
 | [§6.1 Modules](../06-Modules/01-Modules.md) | Modules, declarations, FFI, entry point |
 | [§6.2 Prim and Base](../06-Modules/02-Prim-and-Base.md) | The four layers: what `Prim` holds, and what the `Base` ABI surface does |
 | [§7.1 Open Questions](../07-Open-Questions/01-Open-Questions.md) | Questions deferred beyond v0.1 |

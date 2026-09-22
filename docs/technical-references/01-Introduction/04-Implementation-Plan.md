@@ -28,6 +28,14 @@ Two constraints must be respected even though the constructs they concern belong
 
 **Represent partially applied constructors** ([Semantics](../03-Typed-Core/06-Semantics.md)). A constructor application with fewer arguments than its arity is a value and may be passed around. Mid IR should retain constructor application in a form that lowers either to curried functions or to a partial-application object.
 
+**The bytecode and the virtual machine belong to this step**, between it and step 6. Lowering Mid IR to a `.dmo` and executing one is what makes a program runnable before either web backend exists. See [Mid IR](../04-MiddleEnd/01-Mid-IR.md), [Translation](../04-MiddleEnd/02-Translation.md), and [Bytecode](../05-Backend/01-Bytecode.md).
+
+**The machine does not replace the Core evaluator.** Preservation reduces a Typed Core term one step and re-runs the type checker; erasure compares the typed relation against the erased one. A machine state carries no types, so it serves neither — there is nothing to type check, and no typed side to compare against. The Core evaluator of step 4 is what those two properties are tested against, and it stays.
+
+What the machine adds is of two kinds. It is a **second evaluator to compare against**: one program run both ways should give the same value and the same sequence of observable effects, which tests the whole of translation and lowering at once and is what catches a fold that reorders effects or drops one. And it **runs programs the web backends cannot**, a second resumption of a continuation among them (D33), so effect safety and progress can be exercised on terms that D18's gap otherwise puts out of reach.
+
+Anything stronger — asserting preservation over machine states — would need a correspondence between a machine state and the Core term it stands for, and nothing defines one.
+
 ## Notes on step 6
 
 The set of FFI the backend must implement is `dawn-base-0.1`, the first version of the `Base` ABI surface ([Open Questions](../07-Open-Questions/01-Open-Questions.md)). The longer it is deferred, the more the standard library settles into a shape that depends on FFI, so it should be fixed while writing this backend.
@@ -206,3 +214,50 @@ The heading of each group names the step of the plan that the group belongs to.
 | A term whose reduction faults | The erased term faults identically |
 | The number of run-time arguments a backend passes to `δ_f` | Determined by the arrow count of the **declared** type, not by the instantiated result type |
 | A handler carrying a `full` clause and a `fast` clause | Both markers survive erasure, Core having written each of them. They carry no type information, and a backend lowers the two differently |
+
+### Translation to Mid IR (step 5)
+
+| Input | Required outcome |
+| --- | --- |
+| A saturated call to a pure global under a non-empty ambient row, wrapped in one `openEff` per argument consumed | One `callk`. Peeling the spine looks through `openEff`, `TyApp`, and `ConstraintApp`; stopping at the first of them emits a chain of `callu`s where one known call belongs |
+| `Main.Nil [Int]` | The atom `const Main.Nil`. A saturated constructor of arity 0 allocates nothing |
+| A `foreign` of arity 0, referenced bare | `ffi f []`, which **calls the implementation**. The spine is saturated as soon as it is formed, so treating the reference as a value leaves the call unmade |
+| A `foreign` of arity `n > 0`, referenced bare | `pap f []`. It is a value, not a call and not an atom |
+| A top-level value referenced bare | The atom `global M.x`, which is a load |
+| A constructor applied below its arity | `pap`. Over-application does not arise, a constructor's declared result never being an arrow |
+| A global whose definitional arity the interface does not publish | `callu`. Correct for every callee; arity buys `callk` and never correctness |
+| `o ! Ctor . j` | Materialized inside the branch that selected `Ctor`, and nowhere earlier. Projecting it before the dispatch reads a field that is not there |
+| One occurrence used by several nodes | Projected once. An occurrence has no effect, so naming it once is sound |
+| A `Case` in argument position | A join point binding the continuation, not the continuation duplicated into each branch. A `Handle` needs none of this, being a computation |
+| A `Bind` of an occurrence already materialized | An alias in the translator's environment; no instruction is emitted |
+| A handler clause body | A function with an explicit capture list. No join point of the enclosing scope is in scope in it, nor in the body of the `handle` |
+| A member of a top-level `rec` group | A closure over an **empty** capture list. Its recursive references are global names, so nothing is evaluated to install it |
+| A `nonrec` whose right-hand side diverges, referred to by nothing | Initialization hangs. Evaluation is eager and in declaration order |
+| A binding whose Core type is a type variable | `Rep Val`. Sound wherever a type is not to hand, and the cost is precision |
+| `f (perform A.x Prim.Unit) (perform B.y Prim.Unit)` | `B.y` is performed first. An application evaluates its argument before its function, so a spine runs right to left (D35) |
+| A spine folded into one call, against the same spine as nested applications | The same sequence of observable effects and the same faults, in the same order. This is what makes folding sound and is worth a generated test rather than a written one |
+| A global of definitional arity 1 applied to two arguments | `callk` with the first, then `callu` with the second. Both arguments are evaluated before either call, and whatever `f x` performs happens between the two calls |
+| `nonrec alias = Main.f` | Arity **absent**, not 0. What it stores is a function of `Main.f`'s arity, so reading 0 makes every call to `alias` an over-application of a nullary function |
+| `λx. λy. e` | **One** function table entry of two parameters, so that the entry's arity and the definitional arity agree. Two entries of one parameter each would have `callk f [a, b]` supply two arguments to a function of one |
+| `Λa. λx. Λb. λy. e` | The same entry of two parameters. The run of lambdas is taken after erasure, so a type abstraction between two of them does not break it |
+| A `Handle` whose value is consumed by a surrounding expression | A `let` binding a `handle` computation. Its body is a function, so the return clause — entered later, and a function itself — has an ordinary call's result to give back rather than a join point it cannot reach |
+
+### Lowering to bytecode (step 5)
+
+| Input | Required outcome |
+| --- | --- |
+| A branch of a `BRC` | A `Node` held inline. A decision tree stays a tree, so a branch is not an edge to a block elsewhere (D32) |
+| A `jump` | A `JMP` naming the join point. Never an offset |
+| Two branches that cannot both run | Distinct register slots. There is no register allocation, so slots are not shared |
+| An atom that is a literal | `LOADK` into a slot of its own before the instruction that takes it |
+| A Mid IR `tail` of a `ctor` or a `closure` | That instruction followed by `RET`. Only a call has a `Tail` of its own |
+| A group of mutually capturing closures | `CLOSN` for every member before any `SETCAP`. Filling one capture list first reads a closure that does not exist yet |
+| A continuation applied twice | Two independent runs, each resuming from the state that was captured, so that what the first did does not reach the second. Each application returns to the `CALLU` that made it rather than to the `HNDL` that installed the handler (D33) |
+| A `fast` clause | No continuation value is constructed, and the continuation is not split |
+| `perform` under two handlers of one key | The innermost. Handlers of one key nest at run time, `openEff` being what puts a self-handling function under an outer one |
+| A faulting `FFI` inside a `handle` | The whole continuation is discarded, handler markers included. A fault is not the `Partial` effect and no clause sees it |
+| A `JMP` read from a file | The destination's parameter registers come from the `Join`, which names them. A count alone leaves a consumer unable to perform the transfer |
+| A tail call in the body of a `handle` | The marker and the path to the return clause survive it. The marker stands below the body's activation, which is the one a tail call replaces |
+| `RET` at the end of a `handle` body | The return clause runs and its own value goes to the `HNDL`. `RET` itself has no case for a handler; where the marker stands is what produces this |
+| `isNewtype` on a constructor | Carried from Core through Mid IR into `CTORS`. A `newtype` and a data type of one constructor with one field have the same shape, so a backend erasing the representation cannot tell them apart without the flag |
+

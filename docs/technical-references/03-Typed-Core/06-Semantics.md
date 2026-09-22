@@ -6,7 +6,7 @@ Evaluation is strict and call-by-value. Because effect rows expose the points at
 
 | Construct | Order |
 | --- | --- |
-| `e1 e2` | `e1` → `e2` → apply |
+| `e1 e2` | `e2` → `e1` → apply |
 | `extend k e1 e2` | `e1` → `e2` |
 | `update k e1 e2` | `e1` → `e2` |
 | `merge e1 e2` | `e1` → `e2` |
@@ -16,11 +16,38 @@ Evaluation is strict and call-by-value. Because effect rows expose the points at
 | `perform k.op [τ̄] e` | `e` → capture the continuation |
 | `handle e with h` | install the handler → `e` |
 
-`e1 e2` evaluates the function before the argument, matching JavaScript. The Wasm backend observes the same order.
+**`e1 e2` evaluates the argument before the function** (D35). Application is the
+only construct of which that is true; every other row above reads left to right.
+
+Since application is left-associative and each argument is evaluated before the
+function it is applied to, a spine is evaluated **right to left**, and the
+applications then happen left to right.
+
+```text
+f x y z   is   (((f x) y) z)
+
+z → y → x → f → apply f x → apply that result y → apply that result z
+```
+
+An argument therefore reaches a value before anything the callee does, however
+deep the spine. What this buys is that a whole spine can be collected into one
+multi-argument call without moving any effect ([Mid IR](../04-MiddleEnd/01-Mid-IR.md)).
+Under the opposite order the evaluation of `f x` — which may perform, fault, or
+diverge — stands between the arguments, so `f [x, y]` would reorder them.
+
+The order is observable and is part of the language rather than a convention of
+one backend. `f (perform A.x Prim.Unit) (perform B.y Prim.Unit)` performs `B.y`
+first, and a fault or a divergence in a later argument happens before the callee
+or any earlier argument is evaluated.
+
+**Nothing in the surface is exempt.** A multi-argument operation and a syntax
+macro both expand into curried application, so both evaluate right to left as
+any other application does; there is no second rule for them
+([Effects](03-Effects.md)).
 
 ### What "apply" resolves to
 
-After `e1` and `e2` are evaluated to values, the value form of `e1` determines what happens.
+After `e2` and `e1` are evaluated to values, the value form of `e1` determines what happens.
 
 | Value form of `e1` | Behaviour |
 | --- | --- |
@@ -419,7 +446,7 @@ An evaluation context marks the single position at which reduction may occur. It
 
 ```text
 Ev ::= []
-     | Ev e  |  v Ev                        function before argument
+     | e Ev  |  Ev v                        argument before function (D35)
      | Ev [τ]  |  Ev [•]
      | openEff [ρ] Ev  |  openEffC [ρ] Ev
      | extend k Ev e  |  extend k v Ev
