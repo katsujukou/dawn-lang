@@ -305,14 +305,16 @@ infer env rho expr = case expr of
     rest <- rowOfNormalForm at e'.row (normal { known = Map.delete key normal.known })
     Right (RecordRestrict (at' at (record rest)) key e'.expr)
 
-  RecordUpdate at key value rest -> do
+  -- `update k e1 e2` takes the record first and the value second, so the record
+  -- is what reaches a value first
+  RecordUpdate at key rec value -> do
     kinded at (wellFormedKey env.signature key RowType)
-    rest' <- recordRow at env rho rest
-    normal <- normalize at rest'.row
-    _ <- payloadAt at key rest'.row
+    rec' <- recordRow at env rho rec
+    normal <- normalize at rec'.row
+    _ <- payloadAt at key rec'.row
     value' <- infer (notTail env) rho value
-    updated <- rowOfNormalForm at rest'.row (normal { known = Map.insert key (TypePayload (typeOf value')) normal.known })
-    Right (RecordUpdate (at' at (record updated)) key value' rest'.expr)
+    updated <- rowOfNormalForm at rec'.row (normal { known = Map.insert key (TypePayload (typeOf value')) normal.known })
+    Right (RecordUpdate (at' at (record updated)) key rec'.expr value')
 
   RecordMerge at left right -> do
     left' <- recordRow at env rho left

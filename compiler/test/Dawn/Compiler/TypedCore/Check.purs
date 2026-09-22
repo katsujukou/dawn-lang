@@ -380,8 +380,9 @@ spec = describe "TypedCore.Check" do
 
     it "lets an update change the type of an element" do
       inferAt TRowEmpty
-        ( RecordUpdate unit nameKey (Lit unit (LitString "s"))
+        ( RecordUpdate unit nameKey
             (RecordExtend unit nameKey oneLit emptyRecord)
+            (Lit unit (LitString "s"))
         )
         `shouldEqual` Right (record (TRowExtend (RowTypeEntry nameKey string) TRowEmpty))
 

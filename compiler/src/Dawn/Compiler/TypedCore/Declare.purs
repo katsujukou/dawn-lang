@@ -561,7 +561,7 @@ globalsOf = case _ of
   RecordExtend _ _ value rest -> globalsOf value <> globalsOf rest
   RecordSelect _ _ e -> globalsOf e
   RecordRestrict _ _ e -> globalsOf e
-  RecordUpdate _ _ value rest -> globalsOf value <> globalsOf rest
+  RecordUpdate _ _ rec value -> globalsOf rec <> globalsOf value
   RecordMerge _ left right -> globalsOf left <> globalsOf right
   VariantInject _ _ e -> globalsOf e
   VariantWeaken _ _ _ e -> globalsOf e

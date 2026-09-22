@@ -81,6 +81,8 @@ data Expr a
   | RecordExtend a RowKey (Expr a) (Expr a)
   | RecordSelect a RowKey (Expr a)
   | RecordRestrict a RowKey (Expr a)
+  -- | `update k e1 e2`, where `e1` is the record and `e2` the value it takes at `k`
+  -- | `extend` writes them the other way about, the value first.
   | RecordUpdate a RowKey (Expr a) (Expr a)
   | RecordMerge a (Expr a) (Expr a)
   | VariantInject a RowKey (Expr a)
@@ -269,7 +271,7 @@ withAnnotation a = case _ of
   RecordExtend _ key value rest -> RecordExtend a key value rest
   RecordSelect _ key e -> RecordSelect a key e
   RecordRestrict _ key e -> RecordRestrict a key e
-  RecordUpdate _ key value rest -> RecordUpdate a key value rest
+  RecordUpdate _ key rec value -> RecordUpdate a key rec value
   RecordMerge _ left right -> RecordMerge a left right
   VariantInject _ key value -> VariantInject a key value
   VariantWeaken _ key ty e -> VariantWeaken a key ty e
