@@ -1,16 +1,18 @@
 # 🌅 The Dawn Programming Language
 
-A new functional programming language inspired by PureScript
+An effect-oriented functional programming language with first-class macro
 
 [![CI](https://github.com/katsujukou/dawn-lang/actions/workflows/ci.yaml/badge.svg)](https://github.com/katsujukou/dawn-lang/actions/workflows/ci.yaml)
 
 ## Motivation
 
 Dawn is a functional programming language inspired by PureScript.
-PureScript is a excellent functional language. Thanks to its brilliant design,
-it keeps the language core remarkably minimal while remaining incredibly expressive.
-However, after years of writing PureScript, I've come across a few areas where
-I couldn't help but think, *"Man, I wish it did this differently..."*
+
+As you all know, PureScript is an excellent language.
+Thanks to its brilliant design, it keeps the language core remarkably minimal
+while remaining incredibly expressive. However, after years of writing PureScript, 
+I've come across a few areas where I couldn't help but think, 
+*"Man, I wish it did this differently..."*
 
 - Row operations are handled through type class resolution.
 - Metaprogramming also relies on resolving type classes (specifically, functional dependencies).
