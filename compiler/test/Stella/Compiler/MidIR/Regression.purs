@@ -299,8 +299,10 @@ spec = describe "Stella.Compiler.MidIR.Translate » cases a plausible translatio
       let
         locals = do
           result <- lower debugModule
-          Right (map (\(Tuple f m) -> Tuple f (Map.toUnfoldable m :: P.Array (Tuple M.Local Ident)))
-                   (Map.toUnfoldable result.debug.locals :: P.Array (Tuple M.FuncId (Map.Map M.Local Ident))))
+          Right
+            ( map (\(Tuple f m) -> Tuple f (Map.toUnfoldable m :: P.Array (Tuple M.Local Ident)))
+                (Map.toUnfoldable result.debug.locals :: P.Array (Tuple M.FuncId (Map.Map M.Local Ident)))
+            )
       locals `shouldEqual` Right
         [ Tuple (M.FuncId 0) [ Tuple (M.Local 0) (Ident "x") ]
         , Tuple (M.FuncId 1) [ Tuple (M.Local 2) (Ident "y") ]

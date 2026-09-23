@@ -141,9 +141,10 @@ spec = describe "Stella.Compiler.Bytecode.Lower » the vertical slice" do
       [ CInt 0, CInt 3, CInt 2, CInt 1 ]
 
   it "names what the code refers to, its own and what it imports" do
-    let refs = do
-          dmo <- lowered
-          Right { ctors: dmo.ctorRefs, foreigns: dmo.foreignRefs, globals: dmo.globalRefs }
+    let
+      refs = do
+        dmo <- lowered
+        Right { ctors: dmo.ctorRefs, foreigns: dmo.foreignRefs, globals: dmo.globalRefs }
     refs `shouldEqual` Right
       { ctors: [ nil, cons ]
       , foreigns: []
@@ -174,22 +175,24 @@ spec = describe "Stella.Compiler.Bytecode.Lower » the vertical slice" do
       ]
 
   it "records the format and the contract it was compiled against" do
-    let header = do
-          dmo <- lowered
-          Right { formatVersion: dmo.formatVersion, abiVersion: dmo.abiVersion, imports: dmo.imports }
+    let
+      header = do
+        dmo <- lowered
+        Right { formatVersion: dmo.formatVersion, abiVersion: dmo.abiVersion, imports: dmo.imports }
     header `shouldEqual` Right
       { formatVersion: 0, abiVersion: "Stella-base-0.1", imports: [ ModuleName "Base.Int" ] }
 
   it "names neither a key, an operation, a callee, nor a handler" do
     -- the slice has no record, no variant, and no effect
-    let empties = do
-          dmo <- lowered
-          Right
-            { keys: Array.length dmo.keys
-            , ops: Array.length dmo.ops
-            , callees: Array.length dmo.callees
-            , handlers: Array.length dmo.handlers
-            }
+    let
+      empties = do
+        dmo <- lowered
+        Right
+          { keys: Array.length dmo.keys
+          , ops: Array.length dmo.ops
+          , callees: Array.length dmo.callees
+          , handlers: Array.length dmo.handlers
+          }
     empties `shouldEqual` Right { keys: 0, ops: 0, callees: 0, handlers: 0 }
 
   it "carries the debug table across, under the indices a `.dmo` names things by" do
@@ -208,8 +211,10 @@ spec = describe "Stella.Compiler.Bytecode.Lower » the vertical slice" do
     let
       locals = do
         out <- loweredWithDebug
-        Right (map (\(Tuple f m) -> Tuple f (Map.toUnfoldable m :: P.Array (Tuple Reg Ident)))
-                 (Map.toUnfoldable out.debug.locals :: P.Array (Tuple FuncIx (Map.Map Reg Ident))))
+        Right
+          ( map (\(Tuple f m) -> Tuple f (Map.toUnfoldable m :: P.Array (Tuple Reg Ident)))
+              (Map.toUnfoldable out.debug.locals :: P.Array (Tuple FuncIx (Map.Map Reg Ident)))
+          )
     locals `shouldEqual` Right
       [ Tuple (FuncIx 0)
           [ Tuple (Reg 0) (Ident "xs")

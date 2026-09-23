@@ -273,11 +273,11 @@ dense :: M.Function -> P.Array P.Int -> Either VerifyError Unit
 dense f bound
   | Array.null bound = Right unit
   | otherwise = traverse_ present (Array.range 0 (Array.length bound - 1))
-  where
-  held = Set.fromFoldable bound
-  present n
-    | Set.member n held = Right unit
-    | otherwise = Left (LocalsNotDense f.id n)
+      where
+      held = Set.fromFoldable bound
+      present n
+        | Set.member n held = Right unit
+        | otherwise = Left (LocalsNotDense f.id n)
 
 -- | The parameters come first and the captures after them.
 placed :: M.Function -> Either VerifyError Unit

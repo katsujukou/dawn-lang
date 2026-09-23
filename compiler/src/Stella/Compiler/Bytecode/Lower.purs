@@ -122,8 +122,10 @@ intern :: forall a. Eq a => (LState -> P.Array a) -> (P.Array a -> LState -> LSt
 intern get set entry = L \s -> case Array.elemIndex entry (get s) of
   Just i -> Right (Tuple i s)
   Nothing ->
-    let table = get s
-    in Right (Tuple (Array.length table) (set (Array.snoc table entry) s))
+    let
+      table = get s
+    in
+      Right (Tuple (Array.length table) (set (Array.snoc table entry) s))
 
 internConst :: Literal -> L ConstIx
 internConst lit = ConstIx <$> intern _.constants (\t s -> s { constants = t }) (constantOf lit)

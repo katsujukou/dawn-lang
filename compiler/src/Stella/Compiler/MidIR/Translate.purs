@@ -471,8 +471,10 @@ type Spine a =
 peel :: forall a. C.Expr (Typed a) -> Spine a
 peel expr = case stripErased expr of
   C.App ann f x ->
-    let s = peel f
-    in s { args = Array.snoc s.args { value: x, result: ann.ty } }
+    let
+      s = peel f
+    in
+      s { args = Array.snoc s.args { value: x, result: ann.ty } }
   _ -> { head: expr, args: [] }
 
 application :: forall a. Ctx -> C.Expr (Typed a) -> (Result -> T a M.Expr) -> T a M.Expr
@@ -560,8 +562,10 @@ withAtoms ctx exprs k = fromStart 0 []
 lambdaRun :: forall a. C.Expr (Typed a) -> { params :: P.Array (Tuple Ident Type), body :: C.Expr (Typed a) }
 lambdaRun expr = case stripErased expr of
   C.Lam _ name ty body ->
-    let r = lambdaRun body
-    in r { params = Array.cons (Tuple name ty) r.params }
+    let
+      r = lambdaRun body
+    in
+      r { params = Array.cons (Tuple name ty) r.params }
   e -> { params: [], body: e }
 
 -- | Every wrapper erasure removes.
@@ -703,9 +707,10 @@ decisionTree ctx dest types atoms dt = case dt of
   C.SwitchCtor occurrence branches fallback ->
     materialize ctx types atoms occurrence \atoms' atom -> do
       branches' <- traverse
-        (\branch -> do
+        ( \branch -> do
             body <- decisionTree ctx dest types atoms' branch.tree
-            pure { ctor: branch.ctor, body })
+            pure { ctor: branch.ctor, body }
+        )
         branches
       fallback' <- traverse (decisionTree ctx dest types atoms') fallback
       pure (M.ESwitchCtor atom branches' fallback')
@@ -713,9 +718,10 @@ decisionTree ctx dest types atoms dt = case dt of
   C.SwitchLit occurrence branches fallback ->
     materialize ctx types atoms occurrence \atoms' atom -> do
       branches' <- traverse
-        (\branch -> do
+        ( \branch -> do
             body <- decisionTree ctx dest types atoms' branch.tree
-            pure { lit: branch.lit, body })
+            pure { lit: branch.lit, body }
+        )
         branches
       fallback' <- decisionTree ctx dest types atoms' fallback
       pure (M.ESwitchLit atom branches' fallback')
@@ -723,9 +729,10 @@ decisionTree ctx dest types atoms dt = case dt of
   C.SwitchKey occurrence branches fallback ->
     materialize ctx types atoms occurrence \atoms' atom -> do
       branches' <- traverse
-        (\branch -> do
+        ( \branch -> do
             body <- decisionTree ctx dest types atoms' branch.tree
-            pure { key: branch.key, body })
+            pure { key: branch.key, body }
+        )
         branches
       fallback' <- traverse (decisionTree ctx dest types atoms') fallback
       pure (M.ESwitchKey atom branches' fallback')
@@ -936,13 +943,14 @@ ctorEntries :: forall a. ModuleName -> D.Decl a -> P.Array M.CtorEntry
 ctorEntries moduleName = case _ of
   D.DeclData _ decl ->
     map
-      (\ctor ->
+      ( \ctor ->
           { ref: Qualified moduleName ctor.name
           , owner: Qualified moduleName decl.name
           , tag: ctor.tag
           , arity: Array.length ctor.fields
           , isNewtype: decl.isNewtype
-          })
+          }
+      )
       decl.constructors
   _ -> []
 
