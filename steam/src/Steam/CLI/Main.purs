@@ -1,5 +1,5 @@
 module Steam.CLI.Main where
-  
+
 import Prelude
 
 import Effect (Effect)
