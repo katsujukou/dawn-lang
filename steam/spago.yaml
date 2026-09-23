@@ -1,0 +1,11 @@
+package:
+  name: steam
+  dependencies:
+    - console
+    - effect
+    - prelude
+  test:
+    main: Test.Steam
+    dependencies:
+      - spec
+      - spec-node
