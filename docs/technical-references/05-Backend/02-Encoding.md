@@ -487,9 +487,23 @@ reader may read.
 | A `String` constant or a name carrying an unpaired surrogate | A Stella `String` is a sequence of Unicode scalar values (D27) |
 | A `Char` constant that is not a scalar value | A `Char` is one scalar value (D27) |
 | An operation the ABI version it writes does not name | The code is that version's to fix, and there is none |
+| A callee naming an operation the module's `PRIMS` does not hold | The callee is written as an index into that table, so there is nothing to write |
+| A structural value below zero | A `uvar` carries no sign, so it would be written as a 32-bit pattern and read back as a value no module holds |
+| An index no table of the module holds, a register outside a function's file, a capture it does not take, or a jump to a join point it does not declare | None of them would read back as what it was |
+| A format version or an ABI version other than the ones it writes | What a byte means is this format's, and what an operation's code means is that version's |
 
 Each is a module the stages before this one should not have produced. Refusing is
 what keeps the file honest where one of them does.
+
+**What an encoder writes, a decoder returns**, and the rows above are what make
+that a contract rather than a hope: an encoder refuses a module a reader would not
+read back, and a reader refuses to return one the bytes happen to describe.
+
+**A negative structural value and an index or a scope naming nothing are found by
+one walk over the module, which both directions read.** Two walks would disagree
+about some module and each be satisfied with itself. The version is not among what
+that walk reads: it is read where each direction begins, an encoder writing one
+format and one ABI version and a reader reading the same two.
 
 ## What a reader rejects
 
@@ -507,6 +521,7 @@ encoder did not write.
 | An unknown tag, opcode, or `form` byte | An unknown form has no known length |
 | An unknown operation code | What it realizes is the manifest's, and this reader holds another |
 | A varint over five bytes, over 32 bits, or not minimal | The value would not fit the carrier, and a longer form of one that fits is a second encoding of one module |
+| A count or a length above what is left of the file | Every item takes at least one byte, so such a count is a file that ends inside the vector. **A reader says so before reserving room for it**: a few bytes must not cost a reader what they claim |
 | A structural value above `0x7FFFFFFF` | A count, an index, a register, an arity, and their kin are the numbers a consumer counts with, and none reaches that |
 | Ill-formed UTF-8, or a surrogate, in a string or a `Char` | A scalar value is what either holds (D27), and a substitution would hand back what the module never held |
 | An index no table holds | It names nothing |
