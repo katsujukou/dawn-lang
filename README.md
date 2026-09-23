@@ -1,8 +1,12 @@
-# 🌅 The Stella Programming Language
+# ⭐️ The Stella Programming Language
 
 An effect-oriented functional programming language with first-class macro
 
 [![CI](https://github.com/katsujukou/stella-lang/actions/workflows/ci.yaml/badge.svg)](https://github.com/katsujukou/stella-lang/actions/workflows/ci.yaml)
+
+> Stella was originally called *Dawn*. However, since several languages
+> already use that name and the corresponding domain is already taken,
+> I decided to rename it to *Stella*.
 
 ## Motivation
 
