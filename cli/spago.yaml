@@ -1,14 +1,14 @@
 package:
   name: cli
-  description: The Dawn Compiler Toolchain CLI
+  description: The Stella Compiler Toolchain CLI
   dependencies:
     - effect
     - console
     - prelude
   run:
-    main: Dawn.CLI
+    main: Stella.CLI
   test:
-    main: Test.Dawn.CLI
+    main: Test.Stella.CLI
     dependencies:
       - spec
       - spec-node

@@ -1,6 +1,6 @@
 {
-  "name": "@dawn-lang/cli",
-  "description": "The Dawn compiler toolchain CLI",
+  "name": "@stella-lang/cli",
+  "description": "The Stella compiler toolchain CLI",
   "version": "0.1.0",
   "author": {
     "name": "Katsujukou Kineya",
@@ -9,7 +9,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "dawn": "./index.js"
+    "stella": "./index.js"
   },
   "files": [
     "index.js",

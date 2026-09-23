@@ -26,7 +26,7 @@ decl ::= data    T forall k̄. (ā : κ̄) = Ctor_1 τ̄1 | … | Ctor_n τ̄n  
 
 ## Modules are namespaces
 
-Dawn's modules are namespaces, as PureScript's are. There is no ML-style module system (D22): no functors, no sealing by signature, no first-class modules.
+Stella's modules are namespaces, as PureScript's are. There is no ML-style module system (D22): no functors, no sealing by signature, no first-class modules.
 
 **Data abstraction is provided by export lists.** Exporting a type without its constructors yields an abstract type.
 
@@ -136,7 +136,7 @@ foreign mapImpl : forall a b. forall (e : Row Effect).
                   ( a -{e}-> b ) -> Array a -{e}-> Array b     ← not admitted
 ```
 
-An argument arrow with a non-empty effect row would have the FFI call back into effectful Dawn code. Under the generator lowering, an effectful Dawn function compiles to a generator, so a JavaScript implementation calling `cb(x)` naively receives a generator object rather than a value. **The lowering's calling convention would leak across the FFI boundary.** PureScript does not face this because `Effect a` is a plain thunk `() -> a`; algebraic effects afford no such thing.
+An argument arrow with a non-empty effect row would have the FFI call back into effectful Stella code. Under the generator lowering, an effectful Stella function compiles to a generator, so a JavaScript implementation calling `cb(x)` naively receives a generator object rather than a value. **The lowering's calling convention would leak across the FFI boundary.** PureScript does not face this because `Effect a` is a plain thunk `() -> a`; algebraic effects afford no such thing.
 
 D23 therefore closes two holes with one rule: the result side prevents handler bypass, the argument side prevents the calling convention from leaking.
 
@@ -146,7 +146,7 @@ The rule is syntactically checkable.
 
 ### Uncurried FFI
 
-To avoid a chain of closures, PureScript uses `Fn2` through `Fn10`. The equivalent in Dawn is a family of n-argument function types, which are manifest intrinsics of `Base.Function.Uncurried` rather than part of `Prim` ([Prim and Base](02-Prim-and-Base.md)).
+To avoid a chain of closures, PureScript uses `Fn2` through `Fn10`. The equivalent in Stella is a family of n-argument function types, which are manifest intrinsics of `Base.Function.Uncurried` rather than part of `Prim` ([Prim and Base](02-Prim-and-Base.md)).
 
 **The family takes no effect row.** Since `runFn2`'s result arrow must also be pure, admitting `Fn2 a b ρ c` would make `runFn2 : Fn2 a b ρ c -> a -> b -{ρ}-> c` undeclarable.
 
@@ -163,7 +163,7 @@ foreign primWriteAt : Fn2 Int String (IO Unit)
 -- runFn2 primWriteAt 0 "x" : IO Unit   constructs a value; the runtime performs the effect
 ```
 
-**One family suffices.** PureScript needs `Data.Function.Uncurried.Fn2` for pure functions and `Effect.Uncurried.EffectFn2` for effectful ones; in Dawn `Fn2 a b (IO c)` covers the latter, because being uncurried and having effects are orthogonal.
+**One family suffices.** PureScript needs `Data.Function.Uncurried.Fn2` for pure functions and `Effect.Uncurried.EffectFn2` for effectful ones; in Stella `Fn2 a b (IO c)` covers the latter, because being uncurried and having effects are orthogonal.
 
 These belong to the ABI surface rather than to Core. To Core, `Fn2` is an ordinary type constructor and `runFn2` an ordinary `foreign`.
 
@@ -173,7 +173,7 @@ The restrictions above follow from a single principle.
 
 > **FFI supplies leaf operations. Higher-order control structures are written in the language.**
 
-`map`, `traverse`, and `fold` are control structures, not leaf operations. They are written in Dawn, and FFI supplies only pure components.
+`map`, `traverse`, and `fold` are control structures, not leaf operations. They are written in Stella, and FFI supplies only pure components.
 
 ```text
 foreign Base.Array.length      : forall a. Array a -> Int
@@ -182,7 +182,7 @@ foreign Base.Array.unsafeIndex : forall a. Array a -> Int -> a
 
 A `Base` signature mentions only `Prim` types and portable manifest intrinsics, so no leaf here takes a `List`: `List` belongs to `Prelude`, and converting between the two is `Data.Array` ([Prim and Base](02-Prim-and-Base.md)).
 
-On top of these leaves, `mapArray` is Dawn code, written in `Data.Array`.
+On top of these leaves, `mapArray` is Stella code, written in `Data.Array`.
 
 ```purescript
 mapArray :: forall a b. (a -> b / {| ... |}) -> Array a -> Array b / {| ... |}
@@ -190,21 +190,21 @@ mapArray :: forall a b. (a -> b / {| ... |}) -> Array a -> Array b / {| ... |}
 
 It traverses with `unsafeIndex` and builds its result with the construction its own module provides. Should mutable arrays be wanted, their operations are declared as leaves returning `IO`, and `mapArray`'s type returns `IO` accordingly.
 
-Since `f` is called from the Dawn side, the lowering takes care of driving generators and **the calling convention never crosses the FFI boundary**.
+Since `f` is called from the Stella side, the lowering takes care of driving generators and **the calling convention never crosses the FFI boundary**.
 
 This is the standard arrangement for a language with algebraic effects. Koka writes `list/map` in Koka and reserves `extern` for leaves.
 
-**What is lost is a fast path, not expressiveness.** Even when the effect row is empty, the Dawn loop runs rather than JavaScript's `Array.prototype.map`. A pure variant may be declared as a separate `foreign`, since all of its arrows are pure.
+**What is lost is a fast path, not expressiveness.** Even when the effect row is empty, the Stella loop runs rather than JavaScript's `Array.prototype.map`. A pure variant may be declared as a separate `foreign`, since all of its arrows are pure.
 
 ```text
 foreign Base.Array.mapPure : forall a b. (a -> b) -> Array a -> Array b
 ```
 
-Forcing authors to choose between the two is undesirable, so the intended resolution is for `mapArray` to be an elaboration macro that inspects the effect row and emits `Base.Array.mapPure` when it resolves to empty and the Dawn loop otherwise. This is exactly the typed transformation that the metaprogramming design provides, and it needs only the Phase B foundation. The equivalence of the two is asserted by the library, not derived by the compiler.
+Forcing authors to choose between the two is undesirable, so the intended resolution is for `mapArray` to be an elaboration macro that inspects the effect row and emits `Base.Array.mapPure` when it resolves to empty and the Stella loop otherwise. This is exactly the typed transformation that the metaprogramming design provides, and it needs only the Phase B foundation. The equivalence of the two is asserted by the library, not derived by the compiler.
 
 ### Keeping the FFI surface small
 
-**Dawn uses FFI far more sparingly than PureScript** (D19).
+**Stella uses FFI far more sparingly than PureScript** (D19).
 
 Mid IR is required not to leak JavaScript functions and objects, Wasm GC structs, or linear-memory layouts into backends. **FFI is the only path around that requirement.**
 
@@ -216,10 +216,10 @@ PureScript's FFI is powerful, and the power has costs.
 
 Authors of alternative backends are consequently forced to reimplement FFI and to track representation choices.
 
-Dawn's policy:
+Stella's policy:
 
 1. **Leaf operations only.** Control structures are written in the language.
-2. **Keep the ABI surface small, explicit, and versioned.** The ABI entries of `Base.*` are the FFI a backend implements, versioned and graded by profile ([Prim and Base](02-Prim-and-Base.md)); everything else is Dawn code.
+2. **Keep the ABI surface small, explicit, and versioned.** The ABI entries of `Base.*` are the FFI a backend implements, versioned and graded by profile ([Prim and Base](02-Prim-and-Base.md)); everything else is Stella code.
 3. **Do not depend on representation.** Types appearing in `foreign` declarations should be restricted to those with a declared ABI. Passing a `Record r` or a user-defined ADT raw fixes its representation for every backend.
 4. **Separate per-backend implementations.** A `foreign` declaration — a name and a type — lives in the module; implementations are per-backend artifacts. Adding a backend must not require editing modules.
 
@@ -337,7 +337,7 @@ Value declarations are folded from `Σ_decl` leftwards.
 
 The right-hand side of `nonrec x : σκ = e` must not refer to `x` itself or to any later value declaration; every cycle belongs to a `rec` group. Elaboration performs the dependency analysis, gathers strongly connected components into `rec` groups, and emits them in topological order. This invariant lets the fold close in a single left-to-right pass.
 
-A design collecting signatures first and permitting forward references is also possible. Dawn takes the form of CoreFn's binding groups, in which order carries meaning, because order being readable from the term is what makes Core determine its semantics uniquely.
+A design collecting signatures first and permitting forward references is also possible. Stella takes the form of CoreFn's binding groups, in which order carries meaning, because order being readable from the term is what makes Core determine its semantics uniquely.
 
 ### The entry point
 

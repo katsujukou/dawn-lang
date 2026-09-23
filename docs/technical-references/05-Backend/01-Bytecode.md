@@ -1,7 +1,7 @@
 # Bytecode and the `.dmo` module object
 
 Bytecode is one lowering of Mid IR, beside JavaScript and WebAssembly. Its
-target is a machine Dawn owns, which is what lets a program be executed before
+target is a machine Stella owns, which is what lets a program be executed before
 either of the other two backends exists.
 
 `lower` takes a Mid IR module and produces a **`.dmo` file**, a module object
@@ -19,7 +19,7 @@ is what a consumer outside this compiler reads**, and the format is fixed here
 for that reason rather than for the machine's convenience.
 
 PureScript publishes `corefn.json`, and several backends outside its compiler
-consume it. Dawn publishes the lowered form instead, and what that buys a
+consume it. Stella publishes the lowered form instead, and what that buys a
 consumer is the work already done: erasure, A-normal form, spine folding,
 explicit closures with their capture lists, and decision trees whose branches no
 longer overlap. A consumer of Typed Core would have to perform every one of
@@ -224,7 +224,7 @@ rest to the result — left to right, the arguments being values already.
 ordinary function value ([Semantics](../03-Typed-Core/06-Semantics.md)).
 
 **An argument vector is in source order, and every register in it already holds
-a value.** Dawn evaluates an application's argument before its function, so a
+a value.** Stella evaluates an application's argument before its function, so a
 spine is evaluated right to left (D35) — but that happened in Mid IR, where each
 argument became a binding of its own in that order. By the time a call
 instruction runs there is nothing left to evaluate and nothing to reorder, so

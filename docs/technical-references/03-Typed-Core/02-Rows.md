@@ -52,7 +52,7 @@ Sharing one theory does not mean sharing one notation.
 
 A well-kinded row never contains the same key twice (D4).
 
-PureScript, following Leijen's scoped labels, admits `( a :: Int, a :: String )`. That choice makes row unification unitary, which is a real benefit. Dawn nevertheless rejects it, because Dawn has `⊎`.
+PureScript, following Leijen's scoped labels, admits `( a :: Int, a :: String )`. That choice makes row unification unitary, which is a real benefit. Stella nevertheless rejects it, because Stella has `⊎`.
 
 With duplicates permitted, `⊎` is not commutative, and worse, the **position of known fields relative to an unknown tail** becomes significant.
 
@@ -66,7 +66,7 @@ With sharp rows, `⊎` is a disjoint union: commutative, associative, with unit 
 
 For effect rows, sharpness means that no **key** occurs twice, which is not the same as no effect occurring twice. `( Exn String, Exn Int )` is ill-kinded, both elements deriving the key `EffectKey Exn`; `( primary : Exn String, fallback : Exn Int )` is well-kinded, the two carrying different symbols. Writing the instance name is how one effect is used twice.
 
-Koka-style languages permit duplicates in effect rows and use them for masking (`mask<exn>`), which needs an offset — which occurrence of the key — rather than a key. Dawn has no masking in v0.1, and a labelled instance is what it offers instead.
+Koka-style languages permit duplicates in effect rows and use them for masking (`mask<exn>`), which needs an offset — which occurrence of the key — rather than a key. Stella has no masking in v0.1, and a labelled instance is what it offers instead.
 
 ## Constraints
 
@@ -231,7 +231,7 @@ A failed row constraint is reported by the row solver directly.
 ```text
   row constraint unsatisfied
     required : "name" ∉ r
-    r is universally quantified at Example.dawn:12:8
+    r is universally quantified at Example.stella:12:8
     no assumption gives "name" ∉ r
 ```
 

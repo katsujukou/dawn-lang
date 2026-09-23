@@ -1,6 +1,6 @@
 package:
   name: compiler
-  description: The Dawn compiler lib
+  description: The Stella compiler lib
   dependencies:
     - either
     - maybe
@@ -10,7 +10,7 @@ package:
     - prelude
     - tuples
   test:
-    main: Test.Dawn.Compiler
+    main: Test.Stella.Compiler
     dependencies:
       - arrays
       - effect

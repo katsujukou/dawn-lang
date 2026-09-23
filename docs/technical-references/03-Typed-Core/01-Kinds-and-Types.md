@@ -158,7 +158,7 @@ The same condition applies at every site that introduces a type variable: `foral
 
 `Effect` belongs to `κ` but not to `q`: it is required as the result kind of effect constructors, and it cannot be quantified.
 
-One could instead permit quantification over `Effect`. That design is also coherent, but it then needs a separate rule forbidding a type variable at the head of a row element, since effect row keys must be rigid (D16). Dawn takes the stratification instead.
+One could instead permit quantification over `Effect`. That design is also coherent, but it then needs a separate rule forbidding a type variable at the head of a row element, since effect row keys must be rigid (D16). Stella takes the stratification instead.
 
 ## Kind schemes
 
@@ -271,7 +271,7 @@ The judgement is `Γ ⊢ τ : κ`. Contexts are defined in [Typing Rules](05-Typ
 
 **A constraint is assumed while its body is kinded.** A row that is sharp only under `k ∉ r` — `(k ∉ r) => Record ( k : τ | r )`, the shape every row-polymorphic function has — is well-kinded for that reason and for no other. Writing `Γ, C` also requires `C` to be satisfiable ([Typing Rules](05-Typing-Rules.md)).
 
-That row extension and row union require **entailment from the context** is the centre of the design. PureScript admits `RCons` unconditionally and performs no elimination of duplicate labels; in Dawn a well-kinded row is sharp by construction.
+That row extension and row union require **entailment from the context** is the centre of the design. PureScript admits `RCons` unconditionally and performs no elimination of duplicate labels; in Stella a well-kinded row is sharp by construction.
 
 ### Row elements
 

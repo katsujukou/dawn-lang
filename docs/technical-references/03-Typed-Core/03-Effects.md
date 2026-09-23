@@ -65,13 +65,13 @@ effect E (ā : κ̄) where
 
 **An operation signature is not a function type.** To the left of `->*` are the arguments; to the right is the type the continuation resumes with. There is no functional relationship between them (D21).
 
-`->` is unsuitable because in Dawn it asserts an empty effect row.
+`->` is unsuitable because in Stella it asserts an empty effect row.
 
 ```text
 τ1 -> τ2   ≡   Function τ1 () τ2
 ```
 
-An operation is by definition the one thing that is not pure, so `log : String -> Unit` would, read by Dawn's own rules, say the opposite of what is meant. In Haskell or Eff no contradiction arises, because `->` there says nothing about effects; once the effect row sits on the arrow (D7), the notation is no longer available.
+An operation is by definition the one thing that is not pure, so `log : String -> Unit` would, read by Stella's own rules, say the opposite of what is meant. In Haskell or Eff no contradiction arises, because `->` there says nothing about effects; once the effect row sits on the arrow (D7), the notation is no longer available.
 
 ### Rules for `->*`
 
@@ -532,7 +532,7 @@ The type of `Js.Console.log`, `String -> IO Unit`, says only that some IO occurs
 
 This is a trust boundary that **should be accepted**. That is what FFI is, and [Modules](../06-Modules/01-Modules.md) already declares it.
 
-What matters is its **location**: at the `foreign` declaration, and nowhere else. An interpreter such as `runConsoleIO` is ordinary safe Dawn code and is not a trust boundary. The boundaries do not multiply.
+What matters is its **location**: at the `foreign` declaration, and nowhere else. An interpreter such as `runConsoleIO` is ordinary safe Stella code and is not a trust boundary. The boundaries do not multiply.
 
 ### A lift is sound, and coarse
 
@@ -594,7 +594,7 @@ Rows are sharp, and two unlabelled instances of the second form share the key `E
 
 A standard library providing one puts it in a module named for what it is — `Unsafe` or `Runtime` — so that importing it records the choice.
 
-A pure elimination is a different matter. `foreign unsafePerformIO : forall a. IO a -> a` satisfies D23 and the checker admits the declaration, but **no conforming `δ_f` implements it**: the implementation would have to execute the action, and D25 places execution outside Core ([Semantics](06-Semantics.md)). It is unimplementable rather than ill-typed, which is why Dawn does not provide one.
+A pure elimination is a different matter. `foreign unsafePerformIO : forall a. IO a -> a` satisfies D23 and the checker admits the declaration, but **no conforming `δ_f` implements it**: the implementation would have to execute the action, and D25 places execution outside Core ([Semantics](06-Semantics.md)). It is unimplementable rather than ill-typed, which is why Stella does not provide one.
 
 ### Confining `IO` is a discipline
 

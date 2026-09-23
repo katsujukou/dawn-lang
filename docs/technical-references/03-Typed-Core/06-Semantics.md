@@ -75,7 +75,7 @@ Handlers are deep. `perform k.op` transfers control to the **innermost** handler
 
 **Handlers of one key do nest at run time**, and the innermost wins. A function that handles `E` internally is pure to its caller, so calling it through `openEff [( E )]` from under an outer handler for `E` puts two on the stack at once. `Ev_k` is what picks between them: every `handle` on the path from the chosen one to the hole has some other key.
 
-What sharpness gives is narrower and static: **no row holds one key twice**, so a `perform` names the element it means with a key alone, and needs nothing to say which occurrence. A design permitting duplicates within the row, as Koka's scoped labels do, must name an occurrence instead — which `E` of the several the row carries — and `mask` manipulates that offset. In Dawn the notion of an offset does not arise, and that is the by-product of D4.
+What sharpness gives is narrower and static: **no row holds one key twice**, so a `perform` names the element it means with a key alone, and needs nothing to say which occurrence. A design permitting duplicates within the row, as Koka's scoped labels do, must name an occurrence instead — which `E` of the several the row carries — and `mask` manipulates that offset. In Stella the notion of an offset does not arise, and that is the by-product of D4.
 
 ### How many times a continuation may be resumed
 
@@ -206,11 +206,11 @@ A `rec` group installs **every entry at once, with the right-hand sides themselv
 
 The fold over value declarations is well defined because they are in dependency order and cycles are confined to `rec` groups.
 
-Evaluating eagerly rather than on first reference is the choice consistent with strict evaluation, and it is observable: **a top-level declaration whose right-hand side diverges hangs initialization even if nothing refers to it.** Lazy global lookup would leave such a declaration harmless. Dawn takes the strict reading.
+Evaluating eagerly rather than on first reference is the choice consistent with strict evaluation, and it is observable: **a top-level declaration whose right-hand side diverges hangs initialization even if nothing refers to it.** Lazy global lookup would leave such a declaration harmless. Stella takes the strict reading.
 
 ### Faults
 
-A pure primitive may fail. Indexing an array out of bounds is the standard example, and no type in Dawn describes it.
+A pure primitive may fail. Indexing an array out of bounds is the standard example, and no type in Stella describes it.
 
 A failure of this kind is **not an effect**. It is not intercepted by `handle`, it does not appear in an effect row, and it is not the `Partial` effect, which is an ordinary handleable effect for non-exhaustive matches (D10). It is a fault, in the same category as exhausting the stack.
 

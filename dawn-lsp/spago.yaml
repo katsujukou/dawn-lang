@@ -1,4 +1,0 @@
-package:
-  name: dawn-lsp
-  description: Dawn Language Server Protocol implementation
-  dependencies: []

@@ -1,6 +1,6 @@
 # Notation
 
-This document lists the notation used throughout the Dawn design documents.
+This document lists the notation used throughout the Stella design documents.
 Notation confined to a single document is introduced where it is used.
 
 ## Metavariables

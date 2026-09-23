@@ -9,7 +9,7 @@ drawing.
 | `Prim` | the types and constructors the rules of Core name | the Core specification |
 | `Base.*` | the versioned runtime contract: portable primitive protocols, and the ABI surface a backend implements | the ABI specification and backend conformance profiles |
 | `Prelude` | the default portable environment: foundational types, classes, ordinary names, and syntax macros | the standard library specification |
-| portable libraries — `Data.*`, `Effect.*`, and the rest | portable API written in Dawn over `Prelude` and, where necessary, `Base.*` | their library packages |
+| portable libraries — `Data.*`, `Effect.*`, and the rest | portable API written in Stella over `Prelude` and, where necessary, `Base.*` | their library packages |
 
 `Prim` is visible without being imported; every other layer is imported like
 anything else. A module touching `Base.*` says so in its header (D22), so which
@@ -36,7 +36,7 @@ applications
 
 A portable library may reach past `Prelude` to `Base.*` where it must —
 `Data.Array` wraps `Base.Array`, while `Effect.State` needs nothing of the ABI
-and is written in Dawn alone. What no layer does is reach upwards.
+and is written in Stella alone. What no layer does is reach upwards.
 
 **A target namespace stands beside the portable libraries rather than within
 them.** `Js.*` and `Wasm.*` sit at the same depth as `Data.*`, and may name what
@@ -96,7 +96,7 @@ the match, and what it asks for is the import.
 
 ## What a backend owes the standard environment
 
-Supporting `Prelude` is what lets a backend run ordinary Dawn, so the condition
+Supporting `Prelude` is what lets a backend run ordinary Stella, so the condition
 for it is stated against `Prelude` rather than against `Base.*` as a whole.
 
 ```text
@@ -288,7 +288,7 @@ An ABI entry is an ordinary `foreign` declaration, checked where it is written
 like any other (D23, well-kindedness); what sets it apart is the obligation on
 the other side. A protocol is an ordinary `effect` declaration, and an effect
 declares operations without implementations ([Effects](../03-Typed-Core/03-Effects.md)) — there
-is nothing for a backend to supply, and what interprets one is ordinary Dawn
+is nothing for a backend to supply, and what interprets one is ordinary Stella
 code.
 
 ```text
@@ -308,7 +308,7 @@ Base.Effect.Console          effect Console where log : String ->* Unit
 Base.Effect.LiftIO           effect LiftIO  where liftIO : forall a. IO a ->* a
 ```
 
-**A public `IO`, `Int`, or `Array` module is ordinary Dawn code over `Base.*`.**
+**A public `IO`, `Int`, or `Array` module is ordinary Stella code over `Base.*`.**
 Nothing obliges `Prelude` or a portable library to expose these names as they
 stand; the layers above are where a portable API is shaped.
 
@@ -322,7 +322,7 @@ a program name a capability without naming a target.
 | --- | --- | --- |
 | `Base.Effect.Console` | the meaning of the capability and the types of its operations | the ABI specification |
 | `Js.Console.log` | a native leaf constructing an `IO` value on one target | that target, as an ABI entry |
-| `Js.Effect.Console` | the adapter joining the two | ordinary Dawn code |
+| `Js.Effect.Console` | the adapter joining the two | ordinary Stella code |
 
 `Js.Console.log` is an ABI entry like any other, and a **target** one: what
 obliges a backend to supply it is its own backend manifest, not a `Base` profile.
@@ -379,7 +379,7 @@ builds with `Base.IO.bind` and is therefore closed ([Effects](../03-Typed-Core/0
 
 ```text
 { Console, FileSystem, … }        capabilities a program names
-       │  target adapters, ordinary Dawn code
+       │  target adapters, ordinary Stella code
        ▼
 { LiftIO }                        one capability carrying an IO value
        │  the terminal interpreter, which takes a closed row
@@ -460,7 +460,7 @@ it claims, and any entries it adds beyond them.
 
 ```text
 -- ABI manifest
-ABI version: dawn-base-0.1
+ABI version: stella-base-0.1
 
 profiles:
   core-runtime:
@@ -563,7 +563,7 @@ implements `Base.String.length` as a count of scalar values rather than as
 ### Lone surrogates
 
 A JavaScript string may hold an unpaired surrogate, which is not a scalar value.
-**A Dawn `String` may not.** A literal is a sequence of scalar values, a `Char`
+**A Stella `String` may not.** A literal is a sequence of scalar values, a `Char`
 is a scalar value, and a string arriving through the FFI is validated.
 
 Code that must carry a JavaScript string through unchanged uses an opaque type
@@ -626,7 +626,7 @@ never the spelling.
 These are recorded as open ([Open Questions](../07-Open-Questions/01-Open-Questions.md)). Until they
 are settled, **the choices an implementation happens to make are not the
 specification** — that the first compiler is written in PureScript does not make
-Dawn's `Int` a 32-bit one.
+Stella's `Int` a 32-bit one.
 
 ## Manifest intrinsics, which live outside `Prim`
 
@@ -655,7 +655,7 @@ the two is `Data.Array`. Which construction entries `Base.Array` does supply, an
 whether each is pure or returns `IO`, is part of the ABI content that remains
 open ([Open Questions](../07-Open-Questions/01-Open-Questions.md)).
 
-Splitting it this way keeps the manifest to what only it can express. A `foreign` is checked wherever it is written — every arrow pure (D23), the type well-kinded — and a manifest entry would either duplicate that or become a trusted input for no reason. It also leaves the module free to hold Dawn code beside its primitives, which a portable library needs: `Data.Array.mapArray` is written in Dawn and uses `unsafeIndex` ([Modules](01-Modules.md)).
+Splitting it this way keeps the manifest to what only it can express. A `foreign` is checked wherever it is written — every arrow pure (D23), the type well-kinded — and a manifest entry would either duplicate that or become a trusted input for no reason. It also leaves the module free to hold Stella code beside its primitives, which a portable library needs: `Data.Array.mapArray` is written in Stella and uses `unsafeIndex` ([Modules](01-Modules.md)).
 
 Checking such a module therefore needs its own entries in scope before its declarations are collected. Writing `Σ_ABI(M)` for what the manifest supplies to `M` — empty for every module the manifest does not name — the collection of [Modules](01-Modules.md) reads:
 
@@ -673,7 +673,7 @@ Arithmetic is the same story without an intrinsic type of its own: `Base.Int.add
 
 **`Fn2` and its siblings take no effect row** (D19). Being uncurried and having effects are orthogonal, so `Fn2 a b (IO c)` covers what PureScript needs `EffectFn2` for.
 
-**What may fault, and on which inputs, is unsettled.** An unchecked array index can fail, and no Dawn type describes it; a fault is not an effect and no handler intercepts it ([Semantics](../03-Typed-Core/06-Semantics.md)). Enumerating the faulting entries, and the preconditions of each, belongs to the ABI specification.
+**What may fault, and on which inputs, is unsettled.** An unchecked array index can fail, and no Stella type describes it; a fault is not an effect and no handler intercepts it ([Semantics](../03-Typed-Core/06-Semantics.md)). Enumerating the faulting entries, and the preconditions of each, belongs to the ABI specification.
 
 ## Names that are not `Prim`
 

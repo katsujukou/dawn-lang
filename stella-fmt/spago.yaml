@@ -1,0 +1,4 @@
+package:
+  name: stella-fmt
+  description: Stella-lang Formatter
+  dependencies: []

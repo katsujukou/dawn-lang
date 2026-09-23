@@ -92,7 +92,7 @@ At a call site passing a `Record ( name : String )`, the elaborator decides `age
 
 ```text
 Example.withAge [ ( name : String ) ] [•]
-  ( extend name "dawn" {} )
+  ( extend name "stella" {} )
   30
   : Record ( age : Int, name : String )
 ```

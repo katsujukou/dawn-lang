@@ -68,7 +68,7 @@ FunVal ::= λ (x : τ) . e
          | Λ (_ : C) . FunVal
 ```
 
-Under strict evaluation a binding such as `letrec x = f x` has no meaning. PureScript leaves this to an uninitialized reference at run time; Dawn rejects it syntactically in the type checker.
+Under strict evaluation a binding such as `letrec x = f x` has no meaning. PureScript leaves this to an uninitialized reference at run time; Stella rejects it syntactically in the type checker.
 
 ## Join points
 
@@ -117,7 +117,7 @@ This is the necessary condition, on the Core side, for type classes to be implem
 
 ## Pattern matching
 
-PureScript's CoreFn keeps `Case` with binders and guards, a representation that preserves the shape of the source; which field is examined in which order cannot be read from the term. Dawn's Core holds a decision tree (D9).
+PureScript's CoreFn keeps `Case` with binders and guards, a representation that preserves the shape of the source; which field is examined in which order cannot be read from the term. Stella's Core holds a decision tree (D9).
 
 ### Occurrences
 

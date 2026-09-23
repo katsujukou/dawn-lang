@@ -40,8 +40,8 @@
           ]
         }
       },
-      "dawn-fmt": {
-        "path": "dawn-fmt",
+      "stella-fmt": {
+        "path": "stella-fmt",
         "core": {
           "dependencies": []
         },
@@ -49,8 +49,8 @@
           "dependencies": []
         }
       },
-      "dawn-lsp": {
-        "path": "dawn-lsp",
+      "stella-lsp": {
+        "path": "stella-lsp",
         "core": {
           "dependencies": []
         },

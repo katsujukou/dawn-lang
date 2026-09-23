@@ -1,0 +1,4 @@
+package:
+  name: stella-lsp
+  description: Stella Language Server Protocol implementation
+  dependencies: []

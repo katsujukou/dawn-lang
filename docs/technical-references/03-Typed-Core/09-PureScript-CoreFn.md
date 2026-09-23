@@ -1,12 +1,12 @@
 # Correspondence with PureScript's CoreFn
 
-Dawn's Typed Core takes PureScript's CoreFn as its starting point. CoreFn's position — a desugared, fully qualified, unoptimized functional IR — and its skeleton of `Abs`, `App`, `Var`, `Let`, `Case`, and `Literal` carry over directly.
+Stella's Typed Core takes PureScript's CoreFn as its starting point. CoreFn's position — a desugared, fully qualified, unoptimized functional IR — and its skeleton of `Abs`, `App`, `Var`, `Let`, `Case`, and `Literal` carry over directly.
 
 **CoreFn is not typed.** The annotation emitted by `purs compile --codegen corefn` is `{ span, meta }` and carries no type. The compiler's internal `Language.PureScript.CoreFn` does put a type in its annotation, but that merely conveys an already-checked type; it is not enough information to support an independent type checker over CoreFn terms. There is no type abstraction and no type application, and the instantiation of a `forall` has disappeared entirely.
 
 What CoreFn therefore lacks:
 
-| Absent from CoreFn | Why Dawn needs it |
+| Absent from CoreFn | Why Stella needs it |
 | --- | --- |
 | Type abstraction and application | To make an independent Core type checker possible |
 | Row operations as terms | To treat rows as first class rather than through type classes |
@@ -14,9 +14,9 @@ What CoreFn therefore lacks:
 | The decision structure of pattern matching | `Case` with `Binder` keeps the source's shape; branch order cannot be read from the term |
 | Row constraints | `Prim.Row.Union` and its kin are type classes, outside CoreFn |
 
-Conversely, some things CoreFn has do not appear in Dawn's Core.
+Conversely, some things CoreFn has do not appear in Stella's Core.
 
-| Present in CoreFn | How Dawn handles it |
+| Present in CoreFn | How Stella handles it |
 | --- | --- |
 | `Meta` (`IsConstructor`, `IsNewtype`, `IsTypeClassConstructor`, `IsForeign`, `IsWhere`, `IsSyntheticApp`) | Codegen hints, moved into the declaration table and attributes. `IsTypeClassConstructor` has no counterpart |
 | The `Constructor` node | A declaration table exists, so a constructor is an ordinary global name with a declared type |
@@ -25,7 +25,7 @@ Conversely, some things CoreFn has do not appear in Dawn's Core.
 
 ## Terms
 
-| CoreFn | Dawn Typed Core | Difference |
+| CoreFn | Stella Typed Core | Difference |
 | --- | --- | --- |
 | `Var Ann (Qualified Ident)` | `x` / `M.x` | Carries a type |
 | `Abs Ann Ident Expr` | `λ (x : τ). e` | The argument is annotated |
@@ -51,15 +51,15 @@ Conversely, some things CoreFn has do not appear in Dawn's Core.
 
 ## Types and kinds
 
-| PureScript `Type a` | Dawn | Difference |
+| PureScript `Type a` | Stella | Difference |
 | --- | --- | --- |
 | `TypeVar`, `TypeConstructor`, `TypeApp` | `a`, `T [[κ̄]]`, `τ1 τ2` | Kind schemes are instantiated explicitly |
 | `ForAll a vis name (Maybe kind) ty scope` | `forall (a : κ). τ` | The kind is mandatory and must be quantifiable. `SkolemScope` is an elaboration concern and absent from Core |
 | `Skolem` | (absent) | A constructor for inference; it never appears in Core |
 | `TUnknown` | `?α`, in Core⁺ only | Absent from Core |
 | `TypeWildcard` | `hole`, in Core⁺ only | The same |
-| `ConstrainedType a Constraint ty` | `C => τ` | The content of `Constraint` differs: in Dawn it is row constraints only, never type classes |
-| `REmpty`, `RCons Label Type Type` | `()`, `( ent \| ρ )` | `RCons` permits duplicates; Dawn does not. Dawn derives the key for effect rows |
+| `ConstrainedType a Constraint ty` | `C => τ` | The content of `Constraint` differs: in Stella it is row constraints only, never type classes |
+| `REmpty`, `RCons Label Type Type` | `()`, `( ent \| ρ )` | `RCons` permits duplicates; Stella does not. Stella derives the key for effect rows |
 | (absent) | `ρ1 ⊎ ρ2` | New. Replaces the `Prim.Row.Union` class |
 | `KindApp` | `T [[κ̄]]` / `M.x [[κ̄]]` | Similar in role, but kind-specific, since kinds and types are separate classes |
 | `KindedType` | (absent) | Unnecessary once kinds and types are separate |
@@ -68,7 +68,7 @@ Conversely, some things CoreFn has do not appear in Dawn's Core.
 
 ## Modules
 
-| CoreFn `Module` | Dawn | Difference |
+| CoreFn `Module` | Stella | Difference |
 | --- | --- | --- |
 | `name`, `path`, `builtWith` | The same | |
 | `imports` | The same | No influence on type checking |

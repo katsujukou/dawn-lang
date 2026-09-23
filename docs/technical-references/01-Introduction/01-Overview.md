@@ -1,18 +1,18 @@
 # Overview
 
-Dawn is a pure functional language influenced by PureScript. It is not a PureScript dialect: source compatibility, package compatibility, and semantic compatibility are not goals. Where a more coherent design is available, Dawn takes it.
+Stella is a pure functional language influenced by PureScript. It is not a PureScript dialect: source compatibility, package compatibility, and semantic compatibility are not goals. Where a more coherent design is available, Stella takes it.
 
 The initial compilation targets are the web — JavaScript and WebAssembly — but the compiler keeps a backend-independent intermediate representation so that native backends remain possible.
 
 ## Two central positions
 
-Two choices distinguish Dawn from PureScript. Both follow from a single observation: PureScript loads too much work onto type class resolution.
+Two choices distinguish Stella from PureScript. Both follow from a single observation: PureScript loads too much work onto type class resolution.
 
 **Rows are a first-class structure in the type system, not something manipulated through type classes.** A dedicated row solver normalizes open rows without closing them. Structural relationships between rows are constraints the solver discharges, not instances a search procedure finds.
 
 **Type classes are a library, not a compiler builtin.** The compiler provides one general synthesis hook. The standard library implements class declarations as syntax macros and dictionary synthesis as an ordinary elaborator.
 
-## What Dawn inherits from PureScript
+## What Stella inherits from PureScript
 
 - Pure functional programming by default
 - Strict evaluation
@@ -36,7 +36,7 @@ This separation is what allows type classes, derive mechanisms, and row-directed
 
 ## Compile-time computation is separated by concern
 
-PureScript's type class resolution serves several purposes at once. Dawn gives each its own mechanism.
+PureScript's type class resolution serves several purposes at once. Stella gives each its own mechanism.
 
 | Mechanism | Responsibility |
 | --- | --- |
@@ -62,7 +62,7 @@ Typed Core
   │ lowering of language semantics
   ▼
 backend-independent Mid IR
-  ├── bytecode ───────► .dmo module objects ──► the Dawn virtual machine
+  ├── bytecode ───────► .dmo module objects ──► the Stella virtual machine
   ├── JavaScript IR ──► ES modules
   ├── Wasm IR ────────► WebAssembly modules
   └── future IRs ─────► native and others
@@ -74,7 +74,7 @@ backend-independent Mid IR
 
 **Mid IR** retains useful type information and invariants while depending on no particular backend. It expresses closure construction and application, algebraic data construction and destruction, join points and tail calls, primitive operations, explicit control flow, handler and continuation operations, and abstracted allocation. JavaScript functions and objects, Wasm GC structs, and linear-memory layouts must not leak into this stage. It is an A-normal form, and [Mid IR](../04-MiddleEnd/01-Mid-IR.md) specifies it.
 
-**Bytecode** is the lowering of Mid IR to a machine Dawn owns, which is what lets a program be executed before either web backend exists ([Bytecode](../05-Backend/01-Bytecode.md)). Its continuations are multi-shot, so unlike the v0.1 JavaScript and Wasm backends it conforms to the reference semantics. Against the Core evaluator it is a second evaluator to compare with, and it runs the programs the web backends cannot; the properties stated over Typed Core stay with the Core evaluator ([Implementation Plan](04-Implementation-Plan.md)).
+**Bytecode** is the lowering of Mid IR to a machine Stella owns, which is what lets a program be executed before either web backend exists ([Bytecode](../05-Backend/01-Bytecode.md)). Its continuations are multi-shot, so unlike the v0.1 JavaScript and Wasm backends it conforms to the reference semantics. Against the Core evaluator it is a second evaluator to compare with, and it runs the programs the web backends cannot; the properties stated over Typed Core stay with the Core evaluator ([Implementation Plan](04-Implementation-Plan.md)).
 
 Its output, a **`.dmo` module object**, is also what a backend outside this compiler reads. Mid IR is an in-memory representation, so the artefact a third party builds on is the lowered one — erased, in A-normal form, with closures and their captures explicit and decision trees already disjoint — rather than Typed Core.
 

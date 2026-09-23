@@ -1,12 +1,12 @@
-# 🌅 The Dawn Programming Language
+# 🌅 The Stella Programming Language
 
 An effect-oriented functional programming language with first-class macro
 
-[![CI](https://github.com/katsujukou/dawn-lang/actions/workflows/ci.yaml/badge.svg)](https://github.com/katsujukou/dawn-lang/actions/workflows/ci.yaml)
+[![CI](https://github.com/katsujukou/stella-lang/actions/workflows/ci.yaml/badge.svg)](https://github.com/katsujukou/stella-lang/actions/workflows/ci.yaml)
 
 ## Motivation
 
-Dawn is a functional programming language inspired by PureScript.
+Stella is a functional programming language inspired by PureScript.
 
 As you all know, PureScript is an excellent language.
 Thanks to its brilliant design, it keeps the language core remarkably minimal
@@ -21,18 +21,18 @@ I've come across a few areas where I couldn't help but think,
 
 The first two points really boil down to one observation: *doing too much with type classes.*
 I suspect this was a deliberate trade-off to keep the compiler small.
-In Dawn, we believe that if a feature genuinely belongs in the language core,
-that's exactly where it should go. By doing this, Dawn scratches those stubborn itches that
+In Stella, we believe that if a feature genuinely belongs in the language core,
+that's exactly where it should go. By doing this, Stella scratches those stubborn itches that
 PureScript leaves behind.
 
-Specifically, what sets Dawn apart from PureScript comes down to three main pillars:
+Specifically, what sets Stella apart from PureScript comes down to three main pillars:
 
 - First-class Row system
 - direct-style algebraic effect & handlers ... inspired by Koka
 - Metaprogramming with first-class macro ... inspired by Lean and F*
 
 The third pillar is a vital and powerful feature. It ensures we don't over-minimize the core, but it also stops the language from becoming bloated. 
-Interestingly, Dawn's compiler doesn't actually have built-in support for Typeclasses!
+Interestingly, Stella's compiler doesn't actually have built-in support for Typeclasses!
 Instead, they are just dictionary records passed as arguments with method field access.
 The dedicated syntax for them is implemented as macros **at the library level** (planned)!
 This particular idea was inspired by F*.
