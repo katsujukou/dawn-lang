@@ -60,6 +60,10 @@ leading lambdas its right-hand side has and not something its type says
 correct for every callee, so a `.dmi` that does not yet publish arity costs
 sharpness and nothing else.
 
+**That much of the file is therefore fixed**, and [Interface](03-Interface.md)
+fixes it: what a `.dmi` holds today is the definitional arity of each value a
+module exports, and what it holds tomorrow is what the optimizer asks for.
+
 ### What it therefore carries
 
 **The meaning of every instruction is fixed by this document**, in terms of

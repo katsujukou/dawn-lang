@@ -694,6 +694,13 @@ that module's to state, and a `.dmo` deliberately carries no copy of it
 the modules are together, which is what a loader does. Everything a module does
 declare is checked here.
 
+**That check is also what a wrong `.dmi` runs into.** A `callk` is a transfer to an
+entry point whose arity is settled, and the arity a translation used for an
+imported value came from that module's interface file; a loader reading the
+declaring module's own entry against the call is what turns a stale interface into a
+rejected build rather than a call that supplies the wrong number of arguments
+([Interface](../05-Backend/03-Interface.md)).
+
 That a `readCell` or a `writeCell` names a key of the region it reaches is not
 checked here either, and not for want of the declaration: the region is the one a
 walk of the continuation finds, and the function the form stands in says nothing
