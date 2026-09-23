@@ -17,6 +17,8 @@ module Stella.Compiler.Primitive
   , primTable
   , lookupPrim
   , entryOfOp
+  , codeOfOp
+  , opOfCode
   , arityOfOp
   ) where
 
@@ -76,6 +78,28 @@ entryOfOp = case _ of
   ArrayUnsafeIndex -> base "Base.Array" "unsafeIndex"
   where
   base moduleName name = Qualified (ModuleName moduleName) (Ident name)
+
+-- | The code an operation carries in a `.dmo`. Total, and the one place the
+-- | code is written.
+-- |
+-- | **A code is written rather than derived**: a position in this table, or an
+-- | alphabetical rank, would change a published file's meaning as soon as an
+-- | operation were added. It is fixed for the life of an ABI version, and the
+-- | code of an operation a later version drops is not reused
+-- | ([Encoding](../../../../docs/technical-references/05-Backend/02-Encoding.md)).
+codeOfOp :: PrimOp -> P.Int
+codeOfOp = case _ of
+  IntAdd -> 0x01
+  IntSub -> 0x02
+  StringLength -> 0x10
+  StringCodePointAt -> 0x11
+  ArrayUnsafeIndex -> 0x20
+
+-- | The operation a code names, where this ABI version names one. A reader of a
+-- | code it does not hold rejects the file: what an operation realizes is not
+-- | derivable from the file.
+opOfCode :: P.Int -> Maybe PrimOp
+opOfCode code = map _.op (Array.find (\e -> codeOfOp e.op == code) primTable)
 
 -- | How many arguments saturate an operation. Total, and the one place the
 -- | arity is written.

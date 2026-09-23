@@ -7,6 +7,7 @@ import Test.Stella.Compiler.TypedCore as TypedCore
 import Test.Stella.Compiler.Primitive as Primitive
 import Test.Stella.Compiler.Bytecode.Effects as BytecodeEffects
 import Test.Stella.Compiler.Bytecode.Lower as BytecodeLower
+import Test.Stella.Compiler.Bytecode.Serialize as BytecodeSerialize
 import Test.Stella.Compiler.MidIR.Regression as MidRegression
 import Test.Stella.Compiler.MidIR.Translate as MidTranslate
 import Test.Stella.Compiler.MidIR.Effects as MidEffects
@@ -41,6 +42,7 @@ main = runSpecAndExitProcess [ consoleReporter ] do
   Primitive.spec
   BytecodeLower.spec
   BytecodeEffects.spec
+  BytecodeSerialize.spec
   VerticalSlice.spec
   EffectSlice.spec
   HandlerSlice.spec

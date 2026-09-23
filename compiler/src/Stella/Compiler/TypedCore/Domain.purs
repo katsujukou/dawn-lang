@@ -18,6 +18,7 @@ module Stella.Compiler.TypedCore.Domain
   , codePointOf
   , ScalarString
   , scalarString
+  , scalarStringOf
   , textOf
   , sameNumber
   , compareNumber
@@ -28,9 +29,9 @@ import Prelude
 import Prim as P
 
 import Data.Array as Array
-import Data.Enum (fromEnum)
+import Data.Enum (fromEnum, toEnum)
 import Data.Maybe (Maybe(..))
-import Data.String.CodePoints (toCodePointArray)
+import Data.String.CodePoints (CodePoint, fromCodePointArray, toCodePointArray)
 
 -- | A Unicode scalar value: `0x0` to `0x10FFFF`, less the surrogates `0xD800`
 -- | to `0xDFFF`.
@@ -39,18 +40,17 @@ import Data.String.CodePoints (toCodePointArray)
 -- | code unit holds no astral character whole and admits an unpaired surrogate,
 -- | which no Stella `String` carries. The constructor is not exported, so a
 -- | value of this type is a scalar value and nothing downstream checks it again.
-newtype ScalarValue = ScalarValue P.Int
+newtype ScalarValue = ScalarValue CodePoint
 
--- | The scalar value a code stands for, where it stands for one.
+-- | The scalar value a code stands for, where it stands for one: `toEnum` is
+-- | what admits the range and the surrogates are what this refuses.
 scalarValue :: P.Int -> Maybe ScalarValue
 scalarValue code
-  | code < 0 = Nothing
-  | code > 0x10FFFF = Nothing
   | surrogate code = Nothing
-  | otherwise = Just (ScalarValue code)
+  | otherwise = map ScalarValue (toEnum code)
 
 codePointOf :: ScalarValue -> P.Int
-codePointOf (ScalarValue code) = code
+codePointOf (ScalarValue point) = fromEnum point
 
 -- | A sequence of Unicode scalar values: text holding no unpaired surrogate.
 -- |
@@ -69,6 +69,13 @@ scalarString :: P.String -> Maybe ScalarString
 scalarString text
   | Array.any (surrogate <<< fromEnum) (toCodePointArray text) = Nothing
   | otherwise = Just (ScalarString text)
+
+-- | The text a sequence of scalar values spells, which every such sequence
+-- | spells: nothing built this way can carry an unpaired surrogate, so this needs
+-- | no failure case and a reader of a file has one less unreachable branch.
+scalarStringOf :: P.Array ScalarValue -> ScalarString
+scalarStringOf values =
+  ScalarString (fromCodePointArray (map (\(ScalarValue point) -> point) values))
 
 textOf :: ScalarString -> P.String
 textOf (ScalarString text) = text

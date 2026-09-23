@@ -25,6 +25,7 @@
             "either",
             "enums",
             "foldable-traversable",
+            "integers",
             "maybe",
             "ordered-collections",
             "prelude",
