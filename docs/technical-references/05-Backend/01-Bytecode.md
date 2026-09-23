@@ -254,7 +254,9 @@ treats reaching it as an internal error rather than as a fault.
 | Instruction | Effect |
 | --- | --- |
 | `PERF d, key, op, s` | Perform `op` on the element keyed `key` with the argument in `s` |
-| `HNDL d, handler, r_body, r_ret, n, r…` | Install the handler and call the body; `d` receives what the return clause gives |
+| `HNDL d, handler, r_body, r_ret, n, r…, m, c…` | Open the handler's region, install the handler, and call the body; `d` receives what the return clause gives |
+| `CGET d, key` | The cell keyed `key` of the innermost region declaring it |
+| `CSET d, key, s` | Replace what that cell holds with the value in `s`; `d` receives `Prim.Unit` |
 
 `PERF` is not a `Tail`. Where the clause found is `fast`, control returns to
 the instruction after it with the clause's value in `d`; where it is `full`,
@@ -265,11 +267,30 @@ and the resumed value arrives in `d`.
 `handle` is the value of a computation. It supplies its functions in registers:
 `r_body` holds the body, `r_ret` the return clause, and `r…` the operation
 clauses in the order the handler table lists them. Each is built by an ordinary
-`CLOS`, so nothing here carries a capture list of its own.
+`CLOS`, so nothing here carries a capture list of its own. `c…` holds the initial
+value of each cell of the handler's region, one per key of its `cells` and in
+that order, and is empty for a handler declaring none.
 
 Installing the marker and calling the body is one step. **The marker stands
 between the calling activation and the body's**, which is what lets the return
 clause's value arrive in `d` by the ordinary route a call's value arrives by.
+
+**The marker `HNDL` pushes is an owner**, and it owns the frame directly below
+it. A marker a continuation reinstalls is a **reinstatement** and owns nothing;
+the two differ in what finishing does and in nothing else, and neither is written
+in the file — an owner is what installing produces and a reinstatement what
+applying a continuation produces.
+
+**The region frame stands below the marker**, the whole of what places the cells
+where the clauses reach them and the handled computation does not: a clause runs
+where the marker has been popped or is still installed, and either way the frame
+is below it, while the body runs above it. Which continuations carry the frame
+follows from the same placement and needs no rule of its own.
+
+`CGET` and `CSET` walk the continuation from the top for the first frame
+declaring the key, as `PERF` walks it for a marker. A write replaces what that
+frame holds and has no result of its own, so `d` takes the machine's `Prim.Unit`;
+reading back what was just set takes a `CGET`.
 
 ### Tails
 
@@ -287,7 +308,7 @@ is what keeps a decision tree a tree; `join` stands for a join point's name.
 | `BRC s, [(ctor, node)…], node?` | Dispatch on a constructor tag |
 | `BRL s, [(const, node)…], node` | Dispatch on a literal |
 | `BRK s, [(key, node)…], node?` | Dispatch on the key a variant carries |
-| `TAILHNDL handler, r_body, r_ret, n, r…` | The same as `HNDL`, in tail position |
+| `TAILHNDL handler, r_body, r_ret, n, r…, m, c…` | The same as `HNDL`, in tail position |
 
 **A branch is a `Node` and not a name**, so the instructions a branch needs
 before its own dispatch stand inside it. This is where the projections of a
@@ -306,25 +327,54 @@ check**: the Core type checker established local totality and Mid IR preserved
 it.
 
 A Mid IR `tail` of a computation that is not a call — a `ctor`, a `closure`, a
-record operation — lowers to that instruction followed by `RET`. Only a call has
-a `Tail` of its own, because only a call is a transfer of control that a
-backend must be told not to push a frame for.
+record operation — lowers to that instruction followed by `RET`. What has a
+`Tail` of its own is a transfer of control that a backend must be told not to
+push a frame for: a call, and a `handle`, which calls its body.
 
-### `RET` and an installed handler
+### `RET`, an installed handler, and an open region
 
 **`RET` returns from the current activation, and that is the whole of the rule.**
-It has no case for a handler.
+It has no case for a handler and none for a region.
 
-What makes a handler work is where its marker stands. `HNDL` pushes the marker
-and then calls the body, so the marker is **below** the body's activation.
-Returning from the body therefore reaches the marker, which pops, calls the
-return clause with the value, and delivers that clause's own result to the
-`HNDL` that installed it. This is `handle v with h → e_r[x := v]`, and it needs
-no rule beyond returning from an activation.
+What a value does on its way down is decided by what it reaches. `HNDL` pushes a
+frame and a marker and then calls the body, so both stand **below** the body's
+activation, and returning from the body reaches the marker first.
 
-It is also why `HNDL` needs no matching instruction to close the region: a
-handler's extent is the part of the continuation above its marker, and whatever
-leaves that part removes it.
+| The value reaches | What the machine does |
+| --- | --- |
+| an **owner** marker | pops the marker and the frame it owns, then calls the return clause with the value; that clause's result goes on down |
+| a **reinstatement** marker | pops the marker alone, then calls the return clause with the value; the frame the marker stood in is untouched |
+| a **frame** whose marker is gone | pops the frame and carries the value on down |
+
+The three are the reduction rules for a value read as machine steps, and the
+distinction they turn on is the one the markers carry.
+
+**An owner finishing closes the region, so its return clause runs outside it.**
+This is `region [r] θ in ( handleO v with h ) → e_r[x := v]`, which is one step
+in Core for the same reason: there is no moment at which an answer and a cell
+both exist, and a return clause that could read a cell is what would make a
+handler with cells a state monad in disguise (D36). Where the handler declares no
+region there is no frame to pop and the rule reads as
+`handle v with h → e_r[x := v]`.
+
+**A reinstatement finishing leaves the region open**, the frame it stands in being
+another activation's to close — the `handle` that opened it, or the `full` clause
+that holds the continuation where that `handle`'s own marker was captured. This is
+`handleI v with h`, whose return clause runs within the region and whose value
+goes to whoever applied the continuation.
+
+**A `full` clause's answer reaches the frame directly.** Splitting the
+continuation at the marker took the marker and left the frame, so the clause runs
+with the cells still reachable — which is what lets it copy one into the answer —
+and its value then reaches a frame no marker owns. This is `region [r] θ in v → v`:
+the region closes with no return clause, that clause having run already or not at
+all.
+
+`HNDL` therefore needs no matching instruction to close what it opened. A
+handler's extent is the part of the continuation above its marker, and the table
+above is the whole of what closes a marker and a frame: a marker goes where a
+value reaches it, and a frame where its own owner does or where a value reaches
+it with that owner gone.
 
 **A tail call inside the body does not disturb any of this.** `TAILK` and its
 kin replace the body's activation, and the marker is not in that activation, so
@@ -408,9 +458,11 @@ slot lowering introduced for itself.
 
 ## Handlers, `perform`, and continuations
 
-The machine holds a **continuation**: a stack whose entries are activations and
-handler markers. `HNDL` pushes a marker carrying the handler's key, the forms
-and closures of its clauses, and the return clause.
+The machine holds a **continuation**: a stack whose entries are activations,
+handler markers, and region frames. `HNDL` pushes a frame holding the handler's
+cell keys paired with their initial values, where it declares any, and then a
+marker carrying the handler's key, the forms and closures of its clauses, and the
+return clause.
 
 `PERF key, op` walks the continuation from the top for the first marker whose
 key is `key`. The innermost wins, which is what makes handlers deep, and
@@ -427,6 +479,35 @@ Nothing here consults an effect row, a type, or an operation's signature. A key
 is compared for equality and an operation is found by name among the clauses of
 the one handler the key selected.
 
+### Cells
+
+A region frame is part of the continuation and **not a store**. `CGET` and `CSET`
+find the innermost frame declaring the key, and a write replaces what that frame
+holds.
+
+**A frame leaves in three ways and no others**: its owner marker finishes, which
+pops the two together; a value reaches it with its owner gone, which is a `full`
+clause's answer arriving; or a fault discards the continuation entire. A
+reinstatement finishing is not among them — the frame it stands in belongs to
+another activation, which is still owed the rest of its own computation.
+
+Which continuations carry the cells follows from where the capturing marker
+stands, and the machine implements no rule for it beyond the ones above.
+
+| The capturing marker | The frame | What two applications see |
+| --- | --- | --- |
+| **outside** the region | inside the captured segment | each begins from the values the frame held at the capture |
+| the handler **owning** the region | below the marker, so outside the segment | both reach the one frame, and a write under the first is visible to the second |
+
+The first row is what a shared mutable location would get wrong: two applications
+would reach one cell whatever the composition order, and a program's result would
+turn on a placement the semantics settles (D36). A machine that copies the
+captured segment at each application satisfies it by copying the frame with it.
+
+The second row is the semantics and not a concession. A handler's cells are its
+state across the operations it handles, and a `full` clause of that handler
+resuming twice is resuming its own computation twice.
+
 ### Resuming more than once
 
 **A continuation may be applied any number of times, and each application
@@ -439,6 +520,14 @@ the marker, and the value the return clause produces there goes to the
 `CALLU` that applied the continuation — not to the `HNDL` that first installed
 the handler. A continuation is a function value, and this is what being one
 means.
+
+**The marker at the bottom of a re-pushed segment is a reinstatement**, whichever
+kind the marker captured there was. It owns no frame, so finishing pops it alone.
+The frame it stands in, where there is one, is the one the original `handle`
+opened: it stayed behind when the segment was split, and where the handler
+capturing it was the frame's own owner, what stands between the two is the `full`
+clause that holds the continuation. Every other marker in the segment returns as
+what it was, an owner among them carrying the frame it owns along with it.
 
 What is captured is a run of **whole activations**, from the one performing the
 operation up to and including the marker, each with its registers and the point
@@ -520,7 +609,7 @@ section  id | length | payload           repeated to the end of the file
 | `CTORREFS`, `FOREIGNREFS`, `GLOBALREFS` | The constructors, foreigns, and top-level values this module's **code names** — its own and those of the modules it imports. Every `ctor`, `foreign`, and `global` operand is an index into one of these |
 | `CALLEES` | Per partial-application target: a value, a foreign, or a constructor with its qualified name, or an operation. **An operation carries no name**: what it realizes comes from the ABI version, so no entry can name one operation and an unrelated entry |
 | `PRIMS` | The operations the module carries out, saturated or waiting in a partial application. It holds the operations alone: **what each realizes is derived from the ABI version** the header carries |
-| `HANDLERS` | Per handler: its key, and per clause the operation and its form |
+| `HANDLERS` | Per handler: its key, the keys of the cells its region declares, and per clause the operation and its form |
 | `FUNCTIONS` | Per function: `nparams`, the `Rep` of each register and of each capture slot, its join points with the registers each takes its arguments in, and its body |
 | `GLOBALS` | Per top-level value: its name, whether it is run or installed, and which function |
 | `EXPORTS` | The globals this module exports |
@@ -535,6 +624,10 @@ per instruction is not among them ([Mid IR](../04-MiddleEnd/01-Mid-IR.md)).
 **Keys and operation names are interned on load.** They are compared for
 equality and for nothing else, so the machine replaces each with an integer
 identifying it across every module it has loaded.
+
+**A region key is not among them.** `KEYS` holds the keys terms carry, and no
+erased term carries a region's: a handler keeps the key of the element it removes,
+its cells keep their own, and `CGET` and `CSET` name those (D36).
 
 ### What a module declares, and what its code names
 
@@ -626,9 +719,11 @@ one implementation.
 2. `PERF` finding the innermost marker of its key
 3. A continuation applicable any number of times, each application proceeding from the captured state and returning to whoever applied it
 4. A handler marker standing below the body's activation, so that returning from the body runs the return clause and a tail call inside the body leaves the path to it intact
-5. A fault discarding the continuation entirely, handler markers included
-6. Conformance of every foreign implementation it supplies: condition (3) of `Σ ⊨ G` — each returns a value of the instantiated result type or a fault, performs nothing observable to Core, and terminates
-7. The runtime ABI at the profile it claims, including the execution of `main`
+5. A fault discarding the continuation entirely, handler markers and region frames included
+6. A region frame standing below its handler's marker and within the continuation, so that `CGET` and `CSET` reach the innermost frame declaring a key and a captured segment carries the values its frame held at the capture
+7. The three paths a value takes: an owner marker closing its region before its return clause runs, a reinstatement leaving that region open, and a frame no marker owns closing with no return clause at all
+8. Conformance of every foreign implementation it supplies: condition (3) of `Σ ⊨ G` — each returns a value of the instantiated result type or a fault, performs nothing observable to Core, and terminates
+9. The runtime ABI at the profile it claims, including the execution of `main`
 
 A consumer unable to meet (3) is non-conforming in the way D18 records, and says
 so rather than failing quietly: the v0.1 JavaScript and Wasm backends are in

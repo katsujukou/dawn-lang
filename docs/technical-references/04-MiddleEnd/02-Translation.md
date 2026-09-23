@@ -193,7 +193,9 @@ RecordExtend k e1 e2   atomize e1 (\a1 -> atomize e2 (\a2 -> ... ))
 Case (e1 … en) dt      each scrutinee in turn, then the tree
 Jump j (e1 … en)       each argument in turn, then the transfer
 Perform k op e         the argument, then the operation
-Handle e h             install, then the body
+WriteCell k e          the value, then the write
+Handle e h @ ( ē )     each initial value in turn, then the region, then install,
+                       then the body
 ```
 
 **Application is the one construct that reads right to left**, and it is why a
@@ -334,12 +336,29 @@ the atom it had, Core tracking no refinement there. In the default branch of
 `switchKey` the atom is the same value at the residual variant type; only its
 `Rep` would differ, and `Variant` is one class.
 
+## Effects
+
+`Perform k op e` atomizes its argument and produces `perform k.op a`. `ReadCell k`
+is `readCell k`, which takes no operand at all, and `WriteCell k e` atomizes the
+value and produces `writeCell k a`. Each is one computation, bound where any other
+is, and none of them names the region it reaches: the key is the whole of what a
+cell is named by (D36).
+
+The type binders of a `Perform` are erased with every other type application, and
+its key is carried through. Nothing consults the ambient effect row, which is
+gone: the operation is named by its own name, and the key is what a handler is
+found by ([Mid IR](01-Mid-IR.md)).
+
 ## Handlers
 
-`Handle e h` produces the computation `handle h f [ā]`. **The handled
-computation becomes a function, as every clause does.**
+`Handle e h @ ( ē )` produces the computation `handle h f [ā] @ [v̄]`. **The
+handled computation becomes a function, as every clause does.**
 
 ```text
+for the initial values ē, where h declares a region:
+  atomize each in turn, before anything else of the handle is emitted
+  the atoms are the [v̄], one per key of the layout and in the order it writes them
+
 for the handled computation e:
   lift it into a Function of no parameters, whose body is  go e ret
   its captures are the free locals of e
@@ -356,6 +375,16 @@ for the return clause and each operation clause:
 
 The operation's own type binders `b̄_i` are erased with every other type
 abstraction. The handler keeps `key(ent)` and drops the payload.
+
+**Of a region, the keys survive and nothing else does.** The handler's `cells`
+are the keys of the layout, in the order it writes them, which is what pairs them
+with the initial values; the region variable and the types the layout assigns are
+annotations the checker used and are erased (D36).
+
+**The initial values are atomized ahead of everything else the `handle` emits.**
+They are evaluated before the region is opened and the handler installed, so the
+bindings that name them stand outside the `handle` — and they are not among the
+body's captures, the body naming none of them.
 
 **Lifting the body is what lets the result of a `handle` be used.** The
 computation is a `handle`, so `atomize` binds it with a `let` like any other and

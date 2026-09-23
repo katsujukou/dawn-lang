@@ -166,6 +166,8 @@ comp ::= pure atom                                 name a value
        -- effects
        | perform k.op a                            invoke an operation of the element keyed k
        | handle h f [ā] @ [v̄]                      install h and call the body
+       | readCell k                                the cell keyed k of the innermost region
+       | writeCell k a                             replace what that cell holds
 
 callee ::= M.x | M.f | M.Ctor | prim op
 ```
@@ -183,6 +185,13 @@ values into it would have the body capture what it never names, and the initial
 values are evaluated before the handler is installed while a capture list is
 collected when the closure is built. Both are empty for a handler declaring no
 region.
+
+**A cell is reached by its key alone, and `writeCell` produces `Prim.Unit`.**
+Neither form says which region: the innermost one declaring the key is the one
+reached, and a write is done for its effect on that cell rather than for a result
+of its own (D36). Which region that is is settled where the computation runs
+rather than where it stands — a clause is a function of its own, so no scope
+within a function says what frame is installed around it.
 
 **`recExtend` and `recUpdate` take their operands the other way about**, as Core
 writes them: the value first for one and the record first for the other
@@ -430,10 +439,19 @@ enclosing activation would have to say where the return clause's value goes,
 and the return clause — being a function entered later — could not simply jump
 to a join point of that activation to deliver it.
 
-**Returning needs no special rule.** A function returns from its activation; the
-handler is below the body's activation, so the body's return reaches it, runs
-the return clause, and the return clause's own value goes on to whatever called
-the `handle`. This is `handle v with h → e_r[x := v]` read as a machine step.
+**Returning needs no special rule of the body's.** A function returns from its
+activation; the handler is below the body's activation, so the body's return
+reaches it, runs the return clause, and the return clause's own value goes on to
+whatever called the `handle`. Where the handler declares no region that is the
+whole of it, and it is `handle v with h → e_r[x := v]` read as a machine step.
+
+**Where the handler owns a region, three paths reach a value and a consumer tells
+them apart.** An installed handler closes its region before its return clause
+runs, a handler a continuation reinstalled leaves the region of the one that owns
+it open, and a `full` clause's answer reaches the region with no return clause
+left to run. Mid IR fixes where the region stands and no more than that; which
+path a value takes is what a lowering settles
+([Bytecode](../05-Backend/01-Bytecode.md)).
 
 **A tail call inside the body keeps the handler.** It replaces the body's
 activation, which the handler does not stand in, so the path from wherever
@@ -651,7 +669,10 @@ the read are both rejected, and the second passes every check of layout alone.
 and handler clause names a function of the table and supplies exactly the
 captures that function takes. Each function a handler reaches has the arity its
 form gives it: none for the body, two for a `full` clause, one for a `fast`
-clause and for the return clause. A handler names no operation twice.
+clause and for the return clause. A handler names no operation twice and no cell
+key twice, and a `handle` supplies one initial value per key of its `cells` — a
+lowering pairs the two by position, so a count that disagrees leaves a cell
+holding another's value.
 
 **Arities and fields.** A saturated `prim` supplies the arity the ABI manifest
 fixes, and a `pap` over one supplies fewer. A saturated `callk`, `ctor`, or
@@ -672,6 +693,12 @@ that module's to state, and a `.dmo` deliberately carries no copy of it
 ([Bytecode](../05-Backend/01-Bytecode.md)). Those references are checked where
 the modules are together, which is what a loader does. Everything a module does
 declare is checked here.
+
+That a `readCell` or a `writeCell` names a key of the region it reaches is not
+checked here either, and not for want of the declaration: the region is the one a
+walk of the continuation finds, and the function the form stands in says nothing
+about what frame is installed around it. The Core type checker established it
+while the row still carried the region ([Typing Rules](../03-Typed-Core/05-Typing-Rules.md)).
 
 That a handler's clauses **exhaust** the operations of the effect its element
 carried is not checked at all. The element's payload is what said which
