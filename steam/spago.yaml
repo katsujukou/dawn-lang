@@ -1,9 +1,17 @@
 package:
   name: steam
+  description: The Stella abstract machine
   dependencies:
+    - argparse-basic
+    - arrays
+    - cli
     - console
     - effect
+    - either
+    - node-process
     - prelude
+  run:
+    main: Steam.CLI.JS
   test:
     main: Test.Steam
     dependencies:

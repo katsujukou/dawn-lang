@@ -5,13 +5,17 @@
         "path": "cli",
         "core": {
           "dependencies": [
+            "ansi",
+            "argparse-basic",
             "console",
-            "effect",
-            "prelude"
+            "dodo-printer",
+            "prelude",
+            "run"
           ]
         },
         "test": {
           "dependencies": [
+            "effect",
             "spec",
             "spec-node"
           ]
@@ -47,6 +51,27 @@
         "path": "steam",
         "core": {
           "dependencies": [
+            "argparse-basic",
+            "arrays",
+            "cli",
+            "console",
+            "effect",
+            "either",
+            "node-process",
+            "prelude"
+          ]
+        },
+        "test": {
+          "dependencies": [
+            "spec",
+            "spec-node"
+          ]
+        }
+      },
+      "stella": {
+        "path": "stella",
+        "core": {
+          "dependencies": [
             "console",
             "effect",
             "prelude"
@@ -54,6 +79,7 @@
         },
         "test": {
           "dependencies": [
+            "effect",
             "spec",
             "spec-node"
           ]
@@ -809,6 +835,28 @@
         "tailrec"
       ]
     },
+    "argparse-basic": {
+      "type": "registry",
+      "version": "2.0.0",
+      "integrity": "sha256-j0HDYapdh4HCvJgt1xBF5Xp2ZU9Pyd5n6spEgPZYkDk=",
+      "dependencies": [
+        "arrays",
+        "bifunctors",
+        "control",
+        "either",
+        "foldable-traversable",
+        "integers",
+        "lists",
+        "maybe",
+        "newtype",
+        "numbers",
+        "prelude",
+        "record",
+        "strings",
+        "tuples",
+        "unfoldable"
+      ]
+    },
     "arraybuffer-types": {
       "type": "registry",
       "version": "3.0.2",
@@ -949,6 +997,25 @@
         "prelude",
         "tuples",
         "type-equality"
+      ]
+    },
+    "dodo-printer": {
+      "type": "registry",
+      "version": "2.2.3",
+      "integrity": "sha256-z6LZV9tXQPBZvHqzUYyCYGB7zHq6u7TOgV6Pr0wiobs=",
+      "dependencies": [
+        "ansi",
+        "either",
+        "foldable-traversable",
+        "integers",
+        "lists",
+        "maybe",
+        "newtype",
+        "partial",
+        "prelude",
+        "safe-coerce",
+        "strings",
+        "tuples"
       ]
     },
     "effect": {
@@ -1634,6 +1701,28 @@
         "prelude"
       ]
     },
+    "run": {
+      "type": "registry",
+      "version": "5.0.0",
+      "integrity": "sha256-zGCyG7IamjYWypKMXTP9PFis2ShnoZJKZiu3SbXMc+M=",
+      "dependencies": [
+        "aff",
+        "control",
+        "effect",
+        "either",
+        "free",
+        "maybe",
+        "newtype",
+        "partial",
+        "prelude",
+        "tailrec",
+        "tuples",
+        "type-equality",
+        "typelevel-prelude",
+        "unsafe-coerce",
+        "variant"
+      ]
+    },
     "safe-coerce": {
       "type": "registry",
       "version": "2.0.0",
@@ -1822,6 +1911,22 @@
       "version": "6.0.0",
       "integrity": "sha256-0L1QsaY20OILjfU5TV72d3U/tSjhmL9hJ32WMp857Lk=",
       "dependencies": []
+    },
+    "variant": {
+      "type": "registry",
+      "version": "8.0.0",
+      "integrity": "sha256-Ydrgl8liWEwYQOWW76PdZtg3vxKpoKgsnmFyTLgZkoU=",
+      "dependencies": [
+        "control",
+        "enums",
+        "foldable-traversable",
+        "lists",
+        "maybe",
+        "partial",
+        "prelude",
+        "type-equality",
+        "unsafe-coerce"
+      ]
     }
   }
 }

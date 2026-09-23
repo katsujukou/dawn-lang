@@ -1,14 +1,16 @@
 package:
   name: cli
-  description: The Stella Compiler Toolchain CLI
+  description: CLI common library
   dependencies:
-    - effect
+    - ansi
+    - argparse-basic
     - console
+    - dodo-printer
     - prelude
-  run:
-    main: Stella.CLI
+    - run
   test:
     main: Test.Stella.CLI
     dependencies:
+      - effect
       - spec
       - spec-node

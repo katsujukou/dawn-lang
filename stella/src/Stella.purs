@@ -1,4 +1,4 @@
-module Steam.CLI.Main where
+module Stella where
 
 import Prelude
 
@@ -7,4 +7,4 @@ import Effect.Console as Console
 
 main :: Effect Unit
 main = do
-  Console.log "STEAM - The Stella Abstract Machine"
+  Console.log "⭐️ The Stella compiler toolchain CLI"
