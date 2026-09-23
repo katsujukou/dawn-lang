@@ -51,6 +51,13 @@ side; for an imported one it comes from that module's `.dmi`, the interface file
 paired with its `.dmo`, which must therefore publish it
 ([Bytecode](../05-Backend/01-Bytecode.md)).
 
+**The arities of the imports reach translation checked.** An arity below one, and
+two interfaces of one module, are refused where the interfaces are gathered into
+the environment translation reads, and an arity is taken from that environment
+only for a module this one imports. A wrong arity is unsound rather than slow,
+and a `.dmi` file is not the only way one arrives
+([Interface](../05-Backend/03-Interface.md)).
+
 **Unknown arity is always safe.** Where an interface does not supply one,
 translation emits `callu`, which resolves application at run time and is correct
 for every callee. Arity is what allows the sharper `callk`, never what makes a

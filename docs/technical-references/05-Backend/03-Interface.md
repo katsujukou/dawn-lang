@@ -190,3 +190,28 @@ term once, where the `.dmo`'s own entry is decided, and nothing computes it twic
 **Translation is what reads one.** The arities of the imports are what let a
 saturated call to an imported value be a `callk`; without them the same call is a
 `callu` ([Translation](../04-MiddleEnd/02-Translation.md)).
+
+**What translation reads is a checked environment, not a collection of files.** An
+interface a compiler holds need not have come through a reader of these bytes — a
+name and a table of arities are ordinary data — and a wrong arity is a soundness
+matter rather than a performance one, so the reader's condition on an arity is
+checked again where the interfaces are gathered, together with one thing beyond it.
+
+| The interfaces hold | Why |
+| --- | --- |
+| An arity below one | Translation splits an application spine at the arity it is given; at zero a saturated call becomes a `callk` of no arguments, and below zero it becomes nothing that can be split |
+| Two interfaces of one module | Which arity each of that module's names has would otherwise depend on the order the two were read in |
+
+The gathering is the only thing that builds that environment, so a translation
+cannot be handed an arity nothing checked. **What it checks is the arity and nothing
+else**: whether the bytes are well formed is a reader's question, and whether an
+arity is the one the declaring module states is a loader's.
+
+**An arity is read out of that environment through the import list of the module
+being translated.** A term names a value of a module its own module imports, so an
+interface of any other module says nothing about a name that term carries — and the
+module being translated is one of those others. The arity of its own values is read
+off their right-hand sides, and an interface claiming one for a value that has none,
+a `nonrec` holding a function rather than being one, would make a `callk` of a call
+that must stay a `callu`. An interface of a module that is not imported is not
+consulted rather than refused: an absent arity costs nothing.
