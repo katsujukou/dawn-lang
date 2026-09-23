@@ -183,8 +183,8 @@ are separate fields because they are neither the same values nor evaluated at
 the same time**: a capture list holds what the body names, so mixing the initial
 values into it would have the body capture what it never names, and the initial
 values are evaluated before the handler is installed while a capture list is
-collected when the closure is built. Both are empty for a handler declaring no
-region.
+collected when the closure is built. `[v̄]` is empty for a handler declaring no
+region; `[ā]` holds the body's free locals whether one is declared or not.
 
 **A cell is reached by its key alone, and `writeCell` produces `Prim.Unit`.**
 Neither form says which region: the innermost one declaring the key is the one
