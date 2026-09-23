@@ -40,7 +40,8 @@ import Effect.Ref as Ref
 import Run (runBaseEffect)
 import Run.Except as Except
 import Steam.Eval (Bug(..), Class(..), Failure(..), enter)
-import Steam.Module (LoadError(..), Loaded, prepare)
+import Data.Tuple (Tuple(..))
+import Steam.Module (LoadError(..), Loaded, Registry, prepare)
 import Steam.Value (Closure, CtorId(..), KeyId(..), ModuleId(..), Value(..))
 import Stella.Compiler.Bytecode.Instr (ConstIx(..), CtorIx(..), FuncIx(..), Function, Instr(..), Join, JoinName(..), KeyIx(..), Node, PrimIx(..), Reg(..), Tail(..))
 import Stella.Compiler.Bytecode.Module (Constant(..))
@@ -287,6 +288,9 @@ loaded =
       [ { id: pairCtor, arity: 2 }
       , { id: nilCtor, arity: 0 }
       ]
+  -- the instructions here name neither a global nor a callee
+  , globals: []
+  , callees: []
   , functions: Array.mapMaybe prepared functions
   }
   where
@@ -310,7 +314,11 @@ runs = runsWith Map.empty
 runsWith :: Map P.Int Value -> P.Int -> P.Array Value -> Aff (Either Failure Value)
 runsWith captured i args = liftEffect do
   closure <- closureOf i captured
-  runBaseEffect (Except.runExcept (enter loaded closure args))
+  runBaseEffect (Except.runExcept (enter registry closure args))
+
+-- | The one module of this fixture, as the registry holds it.
+registry :: Registry
+registry = Map.fromFoldable [ Tuple (ModuleId 0) loaded ]
 
 -- | What a returned value holds, as far as a test needs it.
 data Held
@@ -438,15 +446,14 @@ spec = describe "Steam.Eval" do
       result <- runs 21 []
       held result `shouldEqual` Left (Bug NoBranchTaken)
 
-    it "a closure of another module" do
-      -- the closure says which function runs, so the code and the captures it
-      -- reads cannot come from two functions
+    it "a closure of a module the registry does not hold" do
+      -- the closure says which function runs, and the module it belongs to is
+      -- where that function is found
       result <- liftEffect do
         captures <- Ref.new Map.empty
         let elsewhere = { func: { module: ModuleId 1, func: FuncIx 0 }, captures }
-        runBaseEffect (Except.runExcept (enter loaded elsewhere []))
-      held result
-        `shouldEqual` Left (Bug (ClosureOfAnotherModule (ModuleId 1) (ModuleId 0)))
+        runBaseEffect (Except.runExcept (enter registry elsewhere []))
+      held result `shouldEqual` Left (Bug (NoSuchModule (ModuleId 1)))
 
   describe "what this interpreter does not carry out" do
     it "names the instruction" do

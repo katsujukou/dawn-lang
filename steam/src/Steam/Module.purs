@@ -11,8 +11,11 @@
 -- | structure survives the format, and what a running function reaches a `Join` by
 -- | is the table built below — never a search of the function's join list.
 module Steam.Module
-  ( Loaded
+  ( Registry
+  , Loaded
   , CtorRef
+  , GlobalSlot
+  , CalleeTarget(..)
   , Prepared
   , LoadError(..)
   , prepare
@@ -22,15 +25,24 @@ import Prelude
 
 import Prim as P
 
+import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Foldable (foldM)
 import Data.Generic.Rep (class Generic)
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Show.Generic (genericShow)
-import Steam.Value (CtorId, KeyId, ModuleId)
+import Data.Maybe (Maybe)
+import Effect.Ref (Ref)
+import Steam.Value (CtorId, ForeignId, KeyId, ModuleId, Value)
+import Stella.Compiler.Primitive (PrimOp)
 import Stella.Compiler.Bytecode.Instr (Function, Join, JoinName, Node)
 import Stella.Compiler.Bytecode.Module (Constant)
+
+-- | The modules loaded, under the identities the registry assigned. A closure
+-- | names the module its function belongs to, so what runs a closure reaches that
+-- | module's tables through this.
+type Registry = Map ModuleId Loaded
 
 type Loaded =
   { id :: ModuleId
@@ -41,8 +53,28 @@ type Loaded =
   -- | One entry per `CTORREFS` index: the constructors this module's code names,
   -- | its own and those of the modules it imports.
   , ctors :: P.Array CtorRef
+  -- | One entry per `GLOBALREFS` index, as the slot of the module declaring it.
+  , globals :: P.Array GlobalSlot
+  -- | One entry per `CALLEES` index: what a partial application is over.
+  , callees :: P.Array CalleeTarget
   , functions :: P.Array Prepared
   }
+
+-- | Where a top-level value stands once its module is initialized. A slot holds
+-- | nothing until then, and nothing reads one before: a module's imports are
+-- | initialized before it is, and its own globals in declaration order.
+type GlobalSlot = Ref (Maybe Value)
+
+-- | What a `CALLEES` entry resolves to.
+-- |
+-- | A constructor's and a foreign's arity is what its declaration states. An
+-- | operation's is the ABI's, with one definition in `arityOfOp`, so it is not
+-- | carried here.
+data CalleeTarget
+  = TargetGlobal GlobalSlot
+  | TargetCtor CtorId P.Int
+  | TargetForeign ForeignId P.Int
+  | TargetPrim PrimOp
 
 -- | A constructor a module's code names, with the arity its declaration states.
 -- | A constructor is applied all at once or through a partial application, so an
@@ -54,8 +86,13 @@ type CtorRef =
 
 -- | A function as loading leaves it: the body to enter, and the join points a
 -- | transfer inside it reaches, under the names its transfers carry.
+-- |
+-- | `ncaptures` is how many capture slots a closure over this function has. A
+-- | closure is built with that many and each is filled once, which is what a
+-- | recursive group needs (D14).
 type Prepared =
   { nparams :: P.Int
+  , ncaptures :: P.Int
   , body :: Node
   , joins :: Map JoinName Join
   }
@@ -70,7 +107,12 @@ data LoadError
 prepare :: Function -> Either LoadError Prepared
 prepare function = do
   joins <- foldM one Map.empty function.joins
-  pure { nparams: function.nparams, body: function.body, joins }
+  pure
+    { nparams: function.nparams
+    , ncaptures: Array.length function.captures
+    , body: function.body
+    , joins
+    }
   where
   one acc join
     | Map.member join.name acc = Left (JoinNameTwice join.name)
