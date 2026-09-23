@@ -142,11 +142,11 @@ D23 therefore closes two holes with one rule: the result side prevents handler b
 
 The rule is syntactically checkable.
 
-**Currying is still required.** `foreign writeAt : Int -> String -> IO Unit` demands a two-argument curried function, so a JavaScript `function writeAt(n, s)` must be bound as `(n) => (s) => …`. Under D23 this is a question of arity rather than of when effects occur. That neither `writeAt 0` nor `writeAt 0 "x"` does anything follows from the implementation conforming to condition (3) of `Σ ⊨ G` ([Semantics](../03-Typed-Core/06-Semantics.md)); D23 constrains the declared type, not the implementation.
+**The declared type is curried; the implementation is not.** `foreign writeAt : Int -> String -> IO Unit` declares arity 2, and a **saturated call hands both arguments at once**, so a JavaScript `function writeAt(n, s)` is the implementation and nothing binds it as `(n) => (s) => …`. A partial application is not the implementation's concern: `writeAt 0` is a value in its own right and nothing reaches the implementation until the second argument arrives, which is what a machine holds a partial application for (D30, [Bytecode](../05-Backend/01-Bytecode.md)). Under D23 this is a question of arity rather than of when effects occur. That neither `writeAt 0` nor `writeAt 0 "x"` does anything follows from the implementation conforming to condition (3) of `Σ ⊨ G` ([Semantics](../03-Typed-Core/06-Semantics.md)); D23 constrains the declared type, not the implementation.
 
 ### Uncurried FFI
 
-To avoid a chain of closures, PureScript uses `Fn2` through `Fn10`. The equivalent in Stella is a family of n-argument function types, which are manifest intrinsics of `Base.Function.Uncurried` rather than part of `Prim` ([Prim and Base](02-Prim-and-Base.md)).
+To avoid a chain of closures, PureScript uses `Fn2` through `Fn10`. The equivalent in Stella is a family of n-argument function types, which are manifest intrinsics of `Base.Function.Uncurried` rather than part of `Prim` ([Prim and Base](02-Prim-and-Base.md)). **What the family is for here is an uncurried function value** — one a program stores, passes, or returns — and not the arity of an implementation, which the rule above settles.
 
 **The family takes no effect row.** Since `runFn2`'s result arrow must also be pure, admitting `Fn2 a b ρ c` would make `runFn2 : Fn2 a b ρ c -> a -> b -{ρ}-> c` undeclarable.
 
@@ -194,13 +194,15 @@ Since `f` is called from the Stella side, the lowering takes care of driving gen
 
 This is the standard arrangement for a language with algebraic effects. Koka writes `list/map` in Koka and reserves `extern` for leaves.
 
-**What is lost is a fast path, not expressiveness.** Even when the effect row is empty, the Stella loop runs rather than JavaScript's `Array.prototype.map`. A pure variant may be declared as a separate `foreign`, since all of its arrows are pure.
+**What is lost is a fast path, not expressiveness.** Even when the effect row is empty, the Stella loop runs rather than JavaScript's `Array.prototype.map`. A pure variant would be declared as a separate `foreign`, every arrow of its type being pure.
 
 ```text
 foreign Base.Array.mapPure : forall a b. (a -> b) -> Array a -> Array b
 ```
 
-Forcing authors to choose between the two is undesirable, so the intended resolution is for `mapArray` to be an elaboration macro that inspects the effect row and emits `Base.Array.mapPure` when it resolves to empty and the Stella loop otherwise. This is exactly the typed transformation that the metaprogramming design provides, and it needs only the Phase B foundation. The equivalence of the two is asserted by the library, not derived by the compiler.
+**No such entry is admitted yet, and the obstacle is not the FFI surface.** An implementation of `mapPure` applies the function it is given, and `Σ ⊨ G` condition (3) forbids a `δ_f` from applying a Stella function value at all: the reduction rule for a saturated `foreign` is one atomic step, and an application that diverges would leave it stepping to nothing ([Semantics](../03-Typed-Core/06-Semantics.md)). What admitting one takes is recorded with the question ([Open Questions](../99-Open-Questions/01-Open-Questions.md)).
+
+Forcing authors to choose between the two is undesirable, so the intended resolution is for `mapArray` to be an elaboration macro that inspects the effect row and emits the pure entry where the row resolves to empty and the Stella loop otherwise. This is exactly the typed transformation that the metaprogramming design provides. It waits on two things: the Phase B foundation, and the operational model that admits a higher-order entry at all. The equivalence of the two is asserted by the library, not derived by the compiler.
 
 ### Keeping the FFI surface small
 
@@ -212,7 +214,7 @@ PureScript's FFI is powerful, and the power has costs.
 
 - **Implementations are raw JavaScript** and unusable from other backends, so every library with FFI must be rewritten per backend.
 - **FFI code depends on the representation of values.** Writing `xs.length` binds every backend to representing `Array` as a JavaScript array; code touching records as JavaScript objects or ADTs as tagged objects does the same. The freedom to choose a different representation — a Wasm GC struct, a layout in linear memory — is lost.
-- **Behaviour absent from the type is not declared**: exceptions, whether the function is curried, whether it retains references.
+- **Behaviour absent from the type is not declared**: exceptions, whether the function retains a reference it was given, whether it holds a resource open.
 
 Authors of alternative backends are consequently forced to reimplement FFI and to track representation choices.
 

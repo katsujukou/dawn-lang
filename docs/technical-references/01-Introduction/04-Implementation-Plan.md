@@ -28,7 +28,20 @@ Two constraints must be respected even though the constructs they concern belong
 
 **Represent partially applied constructors** ([Semantics](../03-Typed-Core/06-Semantics.md)). A constructor application with fewer arguments than its arity is a value and may be passed around. Mid IR should retain constructor application in a form that lowers either to curried functions or to a partial-application object.
 
-**The bytecode and the virtual machine belong to this step**, between it and step 6. Lowering Mid IR to a `.dmo` and executing one is what makes a program runnable before either web backend exists. See [Mid IR](../04-MiddleEnd/01-Mid-IR.md), [Translation](../04-MiddleEnd/02-Translation.md), and [Bytecode](../05-Backend/01-Bytecode.md).
+**The bytecode and the interpreter that executes it belong to this step**, between it and step 6. Lowering Mid IR to a `.dmo` and executing one is what makes a program runnable before either web backend exists. See [Mid IR](../04-MiddleEnd/01-Mid-IR.md), [Translation](../04-MiddleEnd/02-Translation.md), [Bytecode](../05-Backend/01-Bytecode.md), and [Abstract Machine](../07-Runtime/01-Abstract-Machine.md).
+
+**The interpreter is built in this order**, each step running programs the one before it cannot.
+
+1. The run-time values
+2. The pure instructions, with branches and join points
+3. Closures, partial applications, calls, and tail calls
+4. Globals, and module loading against a persistent registry
+5. The handler stack, continuations, and cells
+6. The operations, and the host's foreign registry
+7. The REPL
+8. The `IO` runner, once something needs one executed
+
+**The REPL is the interpreter's delivered use**, which is why it stands inside this order rather than after it: the module lifecycle it needs — an entry compiled to a module of its own, a redefinition adding a module rather than replacing one — is settled with the interpreter and not retrofitted to it ([Abstract Machine](../07-Runtime/01-Abstract-Machine.md)).
 
 **The machine does not replace the Core evaluator.** Preservation reduces a Typed Core term one step and re-runs the type checker; erasure compares the typed relation against the erased one. A machine state carries no types, so it serves neither — there is nothing to type check, and no typed side to compare against. The Core evaluator of step 4 is what those two properties are tested against, and it stays.
 
@@ -78,7 +91,7 @@ Extending the generator to `foreign` declarations is worthwhile once the FFI sur
 
 **Machine-checked or paper proofs are deferred.** They become worth revisiting if the work is to be published, or if one subsystem keeps producing subtle bugs that property testing does not catch.
 
-**Conformance of the global environment** is a premise of every property above, not something they establish. A test harness supplies `G` and must therefore guarantee `Σ ⊨ G` itself: global definitions are well-typed values, and each `δ_f` returns either a value of the instantiated result type — the one the spine judgement gives — or a permitted fault, performs nothing observable to Core, and terminates.
+**Conformance of the global environment** is a premise of every property above, not something they establish. A test harness supplies `G` and must therefore guarantee `Σ ⊨ G` itself: global definitions are well-typed values, and each `δ_f` returns either a value of the instantiated result type — the one the spine judgement gives — or a permitted fault, performs nothing observable to Core, applies no Stella function value, and terminates.
 
 For generated `foreign` declarations this is easy, since the harness writes `δ_f` and can make it a pure total function that never faults. For real backends it is a conformance obligation, and a backend test suite should check it directly rather than relying on the property tests above to expose a violation.
 

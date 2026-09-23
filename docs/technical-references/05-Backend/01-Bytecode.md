@@ -6,9 +6,9 @@ and WebAssembly. Its target is *Steam*, an abstract machine Stella owns.
 `lower` takes an ANF module and produces a **`.dmo` file**, a module object
 holding the module's tables and the code of its functions.
 
-The virtual machine that executes a `.dmo` is specified separately. This
-document fixes the instruction set and the container, and states what a consumer
-owes them.
+The machine that executes a `.dmo` is specified separately
+([Abstract Machine](../07-Runtime/01-Abstract-Machine.md)). This document fixes
+the instruction set and the container, and states what a consumer owes them.
 
 ## A `.dmo` is the artefact others build on
 
@@ -621,7 +621,7 @@ Nothing there adds to what a `.dmo` holds.
 | `HANDLERS` | Per handler: its key, the keys of the cells its region declares, and per clause the operation and its form |
 | `FUNCTIONS` | Per function: `nparams`, the `Rep` of each register and of each capture slot, its join points with the registers each takes its arguments in, and its body |
 | `GLOBALS` | Per top-level value: its name, whether it is run or installed, and which function |
-| `EXPORTS` | The globals this module exports |
+| `EXPORTS` | The value names this module exports, its globals and its foreigns alike |
 | `DEBUG` | Source spans, function names, and local names, keyed by function index and register. Translation produces this table beside the module and lowering carries it across, rewriting the keys ([Mid IR](../04-MiddleEnd/01-Mid-IR.md)) |
 
 `DEBUG` is the one section a reader may skip. Everything else is required, and a
@@ -658,6 +658,14 @@ arity is that module's to state.
 a `Join` by. A name is what the file holds so that the structure survives the
 format; nothing looks a name up while the function is running, and a name is
 never compared at run time.
+
+**A key, an operation, and a constructor are resolved on load as well.** A `KEYS`,
+`OPS`, or `CTORS` index is the file's own: two modules may hold one key at
+different indices, and a record one of them built is selected from by the other.
+So what a consumer compares while running is an identity it assigned as it loaded
+— one per key, one per operation name, and one per constructor across everything
+loaded — and never an index of a file. Nothing less makes `RSEL`, `BRK`, `PERF`,
+`CGET`, and `BRC` work across a module boundary.
 
 **A loader verifies a reference before it resolves one.** A qualified name must
 belong to this module or to one of its `IMPORTS`, and what it resolves to must
@@ -703,7 +711,8 @@ no section indexes anything outside the file.
 
 This is what a read-eval-print loop needs: an entered expression becomes a
 module of its own, compiled and loaded against the modules already present,
-without relinking them. Keeping the format free of whole-program indices costs
+without relinking them. Stella's REPL is a loop over the interpreter and uses
+exactly that ([Abstract Machine](../07-Runtime/01-Abstract-Machine.md)). Keeping the format free of whole-program indices costs
 nothing now and is expensive to retrofit.
 
 ## What lowering does not do
@@ -731,8 +740,9 @@ one implementation.
 5. A fault discarding the continuation entirely, handler markers and region frames included
 6. A region frame standing below its handler's marker and within the continuation, so that `CGET` and `CSET` reach the innermost frame declaring a key and a captured segment carries the values its frame held at the capture
 7. The three paths a value takes: an owner marker closing its region before its return clause runs, a reinstatement leaving that region open, and a frame no marker owns closing with no return clause at all
-8. Conformance of every foreign implementation it supplies: condition (3) of `Σ ⊨ G` — each returns a value of the instantiated result type or a fault, performs nothing observable to Core, and terminates
+8. Conformance of every foreign implementation it supplies: condition (3) of `Σ ⊨ G` — each returns a value of the instantiated result type or a fault, performs nothing observable to Core, applies no Stella function value, and terminates
 9. The runtime ABI at the profile it claims, including the execution of `main`
+10. One identity per key, per operation name, and per constructor across every module it has loaded, a table index being the file's own
 
 A consumer unable to meet (3) is non-conforming in the way D18 records, and says
 so rather than failing quietly: the v0.1 JavaScript and Wasm backends are in

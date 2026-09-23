@@ -255,10 +255,11 @@ privileges a name of its own choosing.
 
 **Whether an operation may fault is the ABI specification's to say as well**, and
 is not read off the operation. The ABI fixes one observable meaning for every
-backend, so if `Base.Int.add` wraps then a backend on a host that traps on
-overflow owes the wrapping form, and if it faults then every backend owes the
-fault. Until that is settled, a consumer treats an operation as one that may
-([Open Questions](../99-Open-Questions/01-Open-Questions.md)).
+backend: `stella-base-0.1` has `Base.Int.add` wrap, so a backend on a host that
+traps on overflow owes the wrapping form, and it has the two indexing entries fault
+outside their range ([Prim and Base](../06-Modules/02-Prim-and-Base.md)). For an
+entry the ABI has not yet fixed, a consumer treats the operation as one that may
+fault ([Open Questions](../99-Open-Questions/01-Open-Questions.md)).
 
 **An operation is how an entry is carried out, not a way of not using it.** A
 backend still owes the entry at the profile that holds it, so a `.dmo` records

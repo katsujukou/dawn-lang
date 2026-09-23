@@ -282,7 +282,8 @@ version the header names, and it is what makes `PRIMS` carry no name: what an
 operation realizes is derived from the ABI version and written nowhere else
 ([Bytecode](01-Bytecode.md)).
 
-The manifest of `stella-base-0.1` fixes these.
+The manifest of `stella-base-0.1` fixes these codes, and what each operation
+means beside them ([Prim and Base](../06-Modules/02-Prim-and-Base.md)).
 
 | Code | Operation |
 | --- | --- |

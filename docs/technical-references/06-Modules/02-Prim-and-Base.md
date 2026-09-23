@@ -489,7 +489,7 @@ Three stages then divide the work, and none of them duplicates another.
 | --- | --- |
 | type checking | the declared type is well-kinded and every arrow is pure (D23) |
 | target validation | the backend manifest records every entry the program uses — each `Base` ABI entry, through a profile it claims or beyond them, and each target ABI entry — and every target root the program imports is the selected target's |
-| linking | `Σ ⊨ G` condition (3): each `δ_f` returns what it claims, performs nothing observable to Core, and terminates ([Semantics](../03-Typed-Core/06-Semantics.md)) |
+| linking | `Σ ⊨ G` condition (3): each `δ_f` returns what it claims, performs nothing observable to Core, applies no Stella function value, and terminates ([Semantics](../03-Typed-Core/06-Semantics.md)) |
 
 **An unsupported entry is rejected at target validation, not at run time.** A
 program naming an ABI entry the chosen backend does not implement fails to
@@ -517,6 +517,30 @@ representation for every backend, and would make the ABI surface depend on the
 layer built over it. A leaf that can fail therefore faults or returns a sentinel,
 and a portable library is where a total wrapper is written. What mechanism, if
 any, should enforce this is open ([Open Questions](../99-Open-Questions/01-Open-Questions.md)).
+
+### The operations of `stella-base-0.1`
+
+Five entries of this version are **operations**: a `.dmo` names one by a code rather
+than through its foreign table, and whatever executes it carries the entry out
+itself ([Encoding](../05-Backend/02-Encoding.md)). Their meaning is fixed here, in
+terms that name no backend, and so is which of them may fault.
+
+| Entry | Meaning | Faults |
+| --- | --- | --- |
+| `Base.Int.add`, `Base.Int.sub` | addition and subtraction **modulo 2³², the result read as a 32-bit signed integer** (D37) | never |
+| `Base.String.length` | the number of Unicode scalar values in the string (D27) | never |
+| `Base.String.codePointAt` | the scalar value at a **scalar index**, counting from zero | on an index outside the string |
+| `Base.Array.unsafeIndex` | the element at an index | on an index outside the array |
+
+**Wrapping is what every backend owes**, not what each host happens to do: one on a
+host that traps wraps instead, and one on a host that wraps does not check. Either
+is implementable everywhere, which is why the choice has to be made here — two
+backends disagreeing would give one program two results, and a differential test
+between them would be comparing nothing.
+
+**An index is a scalar index and not an index of code units**, which is the split
+`String` already rests on: a backend holding UTF-16 counts and indexes scalar values
+all the same.
 
 ### `Base.IO.pure` and `Base.IO.bind`
 
@@ -638,13 +662,13 @@ equality of the bit pattern, with all NaNs taken as one, so `0.0` and `-0.0` are
 usable here, identifying the two zeros and separating a NaN from itself, so a
 backend's dispatch implements the relation above rather than `==`.
 
-Two things about literals remain open, and neither is a domain.
+**Whether arithmetic wraps or faults** on overflow is the ABI specification's, one
+answer for every backend, and `stella-base-0.1` fixes it: `Base.Int.add` and
+`Base.Int.sub` wrap and fault on nothing (above).
 
-**Whether arithmetic wraps or faults** on overflow is the ABI specification's to
-fix, one answer for every backend, as it is for every other entry that may fault.
-
-**Which surface token denotes which value** is the lexer's: `42`, `0x2a`, and
-`0b101010` are one literal, and `"\n"` and `"\u{A}"` are another. `switchLit`
+One thing about a literal remains open, and it is not a domain. **Which surface
+token denotes which value** is the lexer's: `42`, `0x2a`, and `0b101010` are one
+literal, and `"\n"` and `"\u{A}"` are another. `switchLit`
 compares the value, never the spelling
 ([Open Questions](../99-Open-Questions/01-Open-Questions.md)).
 

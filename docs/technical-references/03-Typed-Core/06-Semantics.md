@@ -238,12 +238,17 @@ A `foreign` declaration's type is trusted ([Modules](../06-Modules/01-Modules.md
         δ_f(v̄) is defined
         δ_f(v̄) is either a value of type θ(σ) or a fault
         δ_f(v̄) performs no effect observable to Core
+        δ_f(v̄) applies no Stella function value
         δ_f(v̄) terminates
 ```
 
 Condition (2) applies to the entries a `rec` group installs as well. Each `v_i` is checked under its own `k̄_i` and refers to its neighbours through `Σ`, which the declaration rules populated before any value declaration was checked.
 
 Condition (3) is stated through the cursor because the result type of a polymorphic foreign depends on the instantiation the spine carries. Applying `forall a. a -> a` at `[Int]` obliges `δ_f` to return an `Int`, and the raw declared type does not say so.
+
+**A `δ_f` may carry a function value but may not apply one.** That restriction is what lets the requirements above hold together. The rule for a saturated `foreign` is one atomic step to a value or a fault, so a `δ_f` applying a Stella function would step to neither where that application diverges — Core claims nowhere that a function terminates — and progress would fail for a term that is not stuck but running. **Where the function came from makes no difference**, so the condition names none: an argument, a field of a record or of a constructor among the arguments, a closure retained from an earlier call, or one reached through a global are one case, as D23 treats every runtime-bearing position of a declared type alike. Carrying one is untouched by this: `Base.IO.bind` takes `a -> IO b` and stores it in the `IO` value it builds, and what applies it is the runtime executing that value, which is outside this reduction relation (D25).
+
+An entry that applies a function it is given — a pure `map` over an array, say — therefore needs more of the model than this: a configuration for a foreign in progress, or a second judgement to carry the applications. Neither is here, so no such entry is admitted ([Open Questions](../99-Open-Questions/01-Open-Questions.md)).
 
 Condition (3) is what makes a `foreign` returning `IO` inert until the runtime executes it. **That property does not follow from D23.** D23 makes the declared type honest about where effects may appear; conformance of `δ_f` is what makes the implementation match the declaration. A backend is responsible for both.
 
