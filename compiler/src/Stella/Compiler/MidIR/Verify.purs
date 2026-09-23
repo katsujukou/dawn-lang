@@ -29,6 +29,7 @@ import Prim as P
 import Stella.Compiler.Primitive (PrimOp, arityOfOp)
 import Stella.Compiler.MidIR.Term as M
 import Stella.Compiler.TypedCore.Name (Ident, OpName, Qualified, TyName)
+import Stella.Compiler.TypedCore.Type (RowKey)
 import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Foldable (foldl, traverse_)
@@ -89,6 +90,13 @@ data VerifyError
   | ClauseArity M.FuncId M.FuncId P.Int P.Int
   -- | A handler naming one operation twice.
   | DuplicateOperation M.FuncId OpName
+  -- | A handler naming one cell key twice. A region's keys are distinct, and a
+  -- | repeat leaves a `readCell` on that key with two cells to name.
+  | DuplicateCell M.FuncId RowKey
+  -- | A `handle` whose initial values do not match the keys of the handler's
+  -- | region, as the keys' count and the values'. A lowering pairs the two by
+  -- | position, so a disagreement leaves a cell holding another's value.
+  | CellCount M.FuncId P.Int P.Int
   -- | A saturated call, constructor, foreign, or operation whose arguments do
   -- | not match the declared arity, as the declaration's and the site's.
   | CallArity M.FuncId (Qualified Ident) P.Int P.Int
@@ -422,12 +430,23 @@ comp ctx env = case _ of
   M.CAbsurd a -> atom ctx env a
   M.CPerform _ _ a -> atom ctx env a
 
-  M.CHandle handler func captures -> do
+  -- which region a cell key names is not a property of this function: the frame
+  -- is the one a walk of the continuation finds, and the Core type checker
+  -- established that the key is one the region declares
+  M.CReadCell _ -> Right unit
+  M.CWriteCell _ a -> atom ctx env a
+
+  M.CHandle handler func captures initial -> do
     clause ctx env 0 func captures
+    traverse_ (atom ctx env) initial
     clause ctx env 1 handler.returnClause.func handler.returnClause.captures
     case duplicate (map _.op handler.opClauses) of
       Just op -> Left (DuplicateOperation env.func op)
       Nothing -> Right unit
+    case duplicate handler.cells of
+      Just key -> Left (DuplicateCell env.func key)
+      Nothing -> Right unit
+    exactly (Array.length handler.cells) (Array.length initial) (CellCount env.func)
     traverse_
       (\oc -> clause ctx env (formArity oc.form) oc.clause.func oc.clause.captures)
       handler.opClauses

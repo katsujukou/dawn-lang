@@ -101,11 +101,17 @@ data CalleeEntry
   | CalleeCtor (Qualified Ident)
   | CalleePrim PrimOp
 
--- | A handler's key and, per clause, the operation and its form. The clauses'
--- | closures are supplied in registers at the instruction, so nothing here
--- | carries a capture list.
+-- | A handler's key, the keys of the cells its region declares, and per clause
+-- | the operation and its form. The clauses' closures and the cells' initial
+-- | values are supplied in registers at the instruction, so nothing here carries
+-- | a capture list or a value.
+-- |
+-- | `cells` is empty for a handler declaring no region, and then no frame is
+-- | installed. **No region key appears in it**: what it holds are the keys of
+-- | the cells themselves, and a region's own key is not one a term carries.
 type HandlerEntry =
   { key :: KeyIx
+  , cells :: P.Array KeyIx
   , opClauses :: P.Array ClauseEntry
   }
 

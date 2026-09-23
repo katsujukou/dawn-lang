@@ -97,10 +97,31 @@ data Instr
   -- | stage's.
   | PRIM Reg PrimIx (P.Array Reg)
   | PERF Reg KeyIx OpIx Reg
-  -- | Install the handler and call the body. The marker stands between the
-  -- | calling activation and the body's, so what the return clause gives arrives
-  -- | in the destination by the ordinary route a call's value arrives by.
-  | HNDL Reg HandlerIx Reg Reg (P.Array Reg)
+  -- | Open the handler's region, install the handler, and call the body. The
+  -- | marker stands between the calling activation and the body's, so what the
+  -- | return clause gives arrives in the destination by the ordinary route a
+  -- | call's value arrives by.
+  -- |
+  -- | The two registers are the body and the return clause, the first array the
+  -- | operation clauses in the order the handler table lists them, and the second
+  -- | the initial value of each cell of the region, one per key of the handler's
+  -- | `cells` and in that order. Every closure is built by an ordinary `CLOS`, so
+  -- | none of them carries a capture list here.
+  -- |
+  -- | **The region frame stands below the marker**, which is what places the
+  -- | cells where the clauses reach them and the handled computation does not.
+  -- | Where a handler declares a region, the marker this pushes **owns** that
+  -- | frame and finishing closes both; a marker a continuation reinstalls owns
+  -- | nothing and leaves the frame it stands in to whoever closes it. Neither
+  -- | kind is written in the file: an owner is what installing produces and a
+  -- | reinstatement what applying a continuation produces.
+  | HNDL Reg HandlerIx Reg Reg (P.Array Reg) (P.Array Reg)
+  -- | The cell keyed thus of the innermost region declaring it, found by walking
+  -- | the continuation as `PERF` walks it for a marker.
+  | CGET Reg KeyIx
+  -- | Replace what that cell holds. The destination receives `Prim.Unit`, a
+  -- | write having no result of its own; reading back what was set takes a `CGET`.
+  | CSET Reg KeyIx Reg
 
 -- | What ends a `Node`. A `Node` held inline is what keeps a decision tree a
 -- | tree; a `JoinName` is what a shared branch is reached by.
@@ -115,7 +136,7 @@ data Tail
   -- | Literals cannot be exhausted, so the default is not optional.
   | BRL Reg (P.Array LitCase) Node
   | BRK Reg (P.Array KeyCase) (Maybe Node)
-  | TAILHNDL HandlerIx Reg Reg (P.Array Reg)
+  | TAILHNDL HandlerIx Reg Reg (P.Array Reg) (P.Array Reg)
 
 -- | A straight run of instructions ending in exactly one `Tail`.
 type Node =

@@ -18,7 +18,7 @@ import Prelude
 import Prim as P
 
 import Stella.Compiler.Primitive (PrimOp)
-import Stella.Compiler.Bytecode.Instr (CalleeIx(..), ConstIx(..), CtorIx(..), ForeignIx(..), FuncIx(..), GlobalIx(..), Instr(..), Join, JoinName(..), KeyIx(..), Node, PrimIx(..), Reg(..), Tail(..))
+import Stella.Compiler.Bytecode.Instr (CalleeIx(..), ConstIx(..), CtorIx(..), ForeignIx(..), FuncIx(..), GlobalIx(..), HandlerIx(..), Instr(..), Join, JoinName(..), KeyIx(..), Node, OpIx(..), PrimIx(..), Reg(..), Tail(..))
 import Stella.Compiler.Bytecode.Instr as B
 import Stella.Compiler.Bytecode.Module (CalleeEntry(..), Constant(..), Debug, Dmo, GlobalInit(..), HandlerEntry, Key(..), abiVersion, formatVersion)
 import Stella.Compiler.Bytecode.Module as BM
@@ -40,11 +40,8 @@ import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..))
 
 data LowerError
-  -- | A construct this stage does not yet lower. The instruction it would emit
-  -- | is specified; nothing here builds it.
-  = NotYetLowered P.String
   -- | A Mid IR module that does not hold the invariants a lowering rests on.
-  | Unverified VerifyError
+  = Unverified VerifyError
   -- | A region key in a term. No erased term carries one.
   | RegionKeyInCode RowKey
 
@@ -146,6 +143,16 @@ internGlobal name = GlobalIx <$> intern _.globalRefs (\t s -> s { globalRefs = t
 
 internCallee :: M.Callee -> L CalleeIx
 internCallee callee = CalleeIx <$> intern _.callees (\t s -> s { callees = t }) (calleeOf callee)
+
+internOp :: OpName -> L OpIx
+internOp op = OpIx <$> intern _.ops (\t s -> s { ops = t }) op
+
+-- | A handler's entry. Two handlers of one key, one region, and one set of
+-- | clauses are one entry: the closures and the cells' initial values are
+-- | supplied in registers at the instruction, so an entry holds nothing that
+-- | tells two sites apart.
+internHandler :: HandlerEntry -> L HandlerIx
+internHandler entry = HandlerIx <$> intern _.handlers (\t s -> s { handlers = t }) entry
 
 -- | Every operation the module carries out is recorded, **including one waiting
 -- | in a partial application**: target validation reads this table as the use
@@ -320,17 +327,85 @@ comp d = case _ of
     a <- atomReg atom
     pure (a.code <> [ VABS d a.reg ])
 
-  M.CPerform _ _ _ -> throw (NotYetLowered "perform")
-  M.CHandle _ _ _ -> throw (NotYetLowered "handle")
+  M.CPerform key op atom -> do
+    keyIx <- internKey key
+    opIx <- internOp op
+    a <- atomReg atom
+    pure (a.code <> [ PERF d keyIx opIx a.reg ])
+
+  M.CHandle handler func captures initial -> do
+    o <- handlerOperands handler func captures initial
+    pure (o.code <> [ HNDL d o.handler o.body o.returnClause o.opClauses o.cells ])
+
+  M.CReadCell key -> do
+    ix <- internKey key
+    pure [ CGET d ix ]
+
+  M.CWriteCell key atom -> do
+    ix <- internKey key
+    a <- atomReg atom
+    pure (a.code <> [ CSET d ix a.reg ])
+
+-- | What a `HNDL` names: the handler's entry in the module's table, and the
+-- | registers its functions and its cells' initial values arrive in.
+-- |
+-- | Every closure is built here by an ordinary `CLOS`, in the order the
+-- | instruction takes them, so the entry carries no capture list of its own.
+handlerOperands
+  :: M.Handler
+  -> M.FuncId
+  -> P.Array M.Atom
+  -> P.Array M.Atom
+  -> L
+       { code :: P.Array Instr
+       , handler :: HandlerIx
+       , body :: Reg
+       , returnClause :: Reg
+       , opClauses :: P.Array Reg
+       , cells :: P.Array Reg
+       }
+handlerOperands handler func captures initial = do
+  key <- internKey handler.key
+  cellKeys <- traverse internKey handler.cells
+  ops <- traverse (internOp <<< _.op) handler.opClauses
+  ix <- internHandler
+    { key
+    , cells: cellKeys
+    , opClauses: Array.zipWith (\op oc -> { op, form: oc.form }) ops handler.opClauses
+    }
+  body <- closureReg func captures
+  returnClause <- closureReg handler.returnClause.func handler.returnClause.captures
+  clauses <- traverse (\oc -> closureReg oc.clause.func oc.clause.captures) handler.opClauses
+  values <- atomRegs initial
+  pure
+    { code:
+        body.code
+          <> returnClause.code
+          <> Array.concatMap _.code clauses
+          <> values.code
+    , handler: ix
+    , body: body.reg
+    , returnClause: returnClause.reg
+    , opClauses: map _.reg clauses
+    , cells: values.regs
+    }
+
+-- | A closure into a register of its own, which is how a handler's functions
+-- | reach the instruction that installs it.
+closureReg :: M.FuncId -> P.Array M.Atom -> L { code :: P.Array Instr, reg :: Reg }
+closureReg func captures = do
+  loaded <- atomRegs captures
+  reg <- freshReg RepClos
+  pure { code: loaded.code <> [ CLOS reg (funcIxOf func) loaded.regs ], reg }
 
 funcIxOf :: M.FuncId -> FuncIx
 funcIxOf (M.FuncId n) = FuncIx n
 
 -- | A computation in tail position.
 -- |
--- | **Only a call has a `Tail` of its own**, because only a call is a transfer
--- | of control a consumer must be told not to push a frame for. Everything else
--- | is the instruction followed by a `RET`.
+-- | **Only a transfer of control has a `Tail` of its own**, a consumer having to
+-- | be told not to push a frame for one: a call, and a `handle`, which calls its
+-- | body. Everything else is the instruction followed by a `RET`.
 -- |
 -- | `rep` is the class of the register that holds the value on its way to being
 -- | returned, which only the second case needs.
@@ -350,6 +425,13 @@ tailComp rep = case _ of
     ix <- internForeign name
     a <- atomRegs atoms
     pure { code: a.code, tail: TAILFFI ix a.regs }
+
+  M.CHandle handler func captures initial -> do
+    o <- handlerOperands handler func captures initial
+    pure
+      { code: o.code
+      , tail: TAILHNDL o.handler o.body o.returnClause o.opClauses o.cells
+      }
 
   other -> do
     d <- freshReg rep

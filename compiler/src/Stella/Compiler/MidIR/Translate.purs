@@ -31,14 +31,14 @@ import Stella.Compiler.TypedCore.Name (Ident, JoinName, ModuleName, Qualified(..
 import Stella.Compiler.TypedCore.Prim (asFunction)
 import Stella.Compiler.TypedCore.Signature (Signature, lookupCtor, lookupValue)
 import Stella.Compiler.TypedCore.Term as C
-import Stella.Compiler.TypedCore.Type (Type(..), TypeScheme)
+import Stella.Compiler.TypedCore.Type (Type(..), TypeScheme, rowEntryKey)
 import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Foldable (foldl, traverse_)
 import Data.Generic.Rep (class Generic)
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(..), fromMaybe)
+import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Show.Generic (genericShow)
@@ -57,9 +57,10 @@ data TranslateError
   -- | A path the tree mentions that neither a scrutinee nor a dispatch
   -- | established. A checked tree has none.
   | UnresolvedOccurrence C.Occurrence
-  -- | A construct this stage does not yet translate. The Mid IR it would
-  -- | produce is specified; nothing here builds it.
-  | NotYetTranslated P.String
+  -- | A control construct reached the forms that are one computation. Both
+  -- | callers take those constructs first — one to a destination, the other
+  -- | through a join point — so this reports a translator that grew a third.
+  | ControlInValuePosition
 
 derive instance Eq TranslateError
 derive instance Generic TranslateError _
@@ -435,13 +436,21 @@ value ctx expr k = case stripErased expr of
   C.VariantAbsurd _ _ e ->
     atomize ctx e \a -> k (RComp (M.CAbsurd a) (repAt ctx expr))
 
-  C.Perform _ _ _ _ _ -> throw (NotYetTranslated "perform")
-  C.Handle _ _ _ _ -> throw (NotYetTranslated "handle")
-  C.ReadCell _ _ -> throw (NotYetTranslated "readCell")
-  C.WriteCell _ _ _ -> throw (NotYetTranslated "writeCell")
+  -- the type binders are erased with every other type application, and nothing
+  -- consults the ambient row: the key is what a handler is found by
+  C.Perform _ key op _ arg ->
+    atomize ctx arg \a -> k (RComp (M.CPerform key op a) (repAt ctx expr))
+
+  C.Handle _ body handler initial ->
+    handled ctx (repAt ctx expr) body handler initial k
+
+  C.ReadCell _ key -> k (RComp (M.CReadCell key) (repAt ctx expr))
+
+  C.WriteCell _ key written ->
+    atomize ctx written \a -> k (RComp (M.CWriteCell key a) (repAt ctx expr))
 
   -- reached only through `go`, which handles these before delegating here
-  _ -> throw (NotYetTranslated "a control construct in value position")
+  _ -> throw ControlInValuePosition
 
 -- Application ----------------------------------------------------------------
 
@@ -551,6 +560,74 @@ withAtoms ctx exprs k = fromStart 0 []
     | otherwise = case Array.index exprs i of
         Nothing -> k acc
         Just e -> atomize ctx e \atom -> fromStart (i + 1) (Array.snoc acc atom)
+
+-- Handlers -------------------------------------------------------------------
+
+-- | `handle e with h @ ( ē )`, with the handled computation and every clause
+-- | lifted into the function table.
+-- |
+-- | **The initial values are atomized first.** They are evaluated before the
+-- | region is opened and the handler installed, so the bindings that name them
+-- | stand outside the `handle`; the body names none of them and captures none.
+-- |
+-- | Of a region the keys survive, in the order the layout writes them, which is
+-- | what pairs them with the initial values. The region variable and the cells'
+-- | types were annotations (D36).
+handled
+  :: forall a
+   . Ctx
+  -> Rep
+  -> C.Expr (Typed a)
+  -> C.Handler (Typed a)
+  -> P.Array (C.Expr (Typed a))
+  -> (Result -> T a M.Expr)
+  -> T a M.Expr
+handled ctx rep body handler initial k =
+  withAtoms ctx initial \cells -> do
+    lifted <- liftFunction ctx (sourceAt body) [] body
+    returnClause <- clauseRef ctx
+      [ Tuple handler.returnClause.binder handler.returnClause.ty ]
+      handler.returnClause.body
+    opClauses <- traverse (opClauseRef ctx) handler.opClauses
+    let
+      h =
+        { key: rowEntryKey handler.element
+        , cells: maybe [] (map _.key <<< _.cells) handler.cells
+        , returnClause
+        , opClauses
+        }
+    k (RComp (M.CHandle h lifted.func lifted.captures cells) rep)
+
+-- | A function a handler reaches, over its own binders as parameters.
+-- |
+-- | The parameters are the clause's binders and nothing more: a body that is
+-- | itself a lambda becomes a closure within the clause rather than a parameter
+-- | of it, the arity being what the clause's form gives it.
+clauseRef
+  :: forall a
+   . Ctx
+  -> P.Array (Tuple Ident Type)
+  -> C.Expr (Typed a)
+  -> T a M.ClauseRef
+clauseRef ctx params body = do
+  lifted <- liftFunction ctx (sourceAt body) params body
+  pure { func: lifted.func, captures: lifted.captures }
+
+-- | **A clause's form is copied, never inferred** (D28). Whether a `full` clause
+-- | resumes once cannot be read off its syntax, so Core writes the marker on
+-- | every clause and this carries it through.
+opClauseRef :: forall a. Ctx -> C.OpClause (Typed a) -> T a M.OpClauseRef
+opClauseRef ctx = case _ of
+  C.FullClause c -> do
+    clause <- clauseRef ctx
+      [ Tuple c.argBinder.name c.argBinder.ty
+      , Tuple c.contBinder.name c.contBinder.ty
+      ]
+      c.body
+    pure { op: c.op, form: M.ClauseFull, clause }
+  C.FastClause c -> do
+    clause <- clauseRef ctx [ Tuple c.argBinder.name c.argBinder.ty ] c.body
+    pure { op: c.op, form: M.ClauseFast, clause }
 
 -- Functions ------------------------------------------------------------------
 

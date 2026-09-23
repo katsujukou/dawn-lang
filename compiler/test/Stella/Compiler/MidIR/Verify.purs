@@ -85,6 +85,41 @@ bindThen :: P.Int -> M.Expr
 bindThen n =
   M.ELet (M.Local n) RepInt (M.CPure (M.ALit (LitInt 1))) (ret (M.Local n))
 
+-- | A module installing a handler of one `fast` clause over the cells given,
+-- | which is the shape the cases on a region vary.
+-- |
+-- | The body takes no parameters, and the return clause and the clause one each,
+-- | so the arities are the ones each form calls for and nothing else can be what
+-- | a case here reports.
+handling :: P.Array RowKey -> P.Array M.Atom -> M.Module
+handling cells initial = (moduleOf site) { functions = [ site, entered, body ] }
+  where
+  site =
+    { id: M.FuncId 0
+    , params: [ binder 0 ]
+    , captures: []
+    , body:
+        M.ETail
+          ( M.CHandle
+              { key: nameKey
+              , cells
+              , returnClause: { func: M.FuncId 1, captures: [] }
+              , opClauses:
+                  [ { op: OpName "next"
+                    , form: M.ClauseFast
+                    , clause: { func: M.FuncId 1, captures: [] }
+                    }
+                  ]
+              }
+              (M.FuncId 2)
+              []
+              initial
+          )
+    }
+
+  entered = { id: M.FuncId 1, params: [ binder 0 ], captures: [], body: ret (M.Local 0) }
+  body = { id: M.FuncId 2, params: [], captures: [], body: bindThen 0 }
+
 spec :: Spec Unit
 spec = describe "Stella.Compiler.MidIR.Verify » modules a lowering must not accept" do
 
@@ -309,6 +344,7 @@ spec = describe "Stella.Compiler.MidIR.Verify » modules a lowering must not acc
       clause = { id: M.FuncId 1, params: [ binder 0 ], captures: [], body: ret (M.Local 0) }
       handler =
         { key: nameKey
+        , cells: []
         , returnClause: { func: M.FuncId 1, captures: [] }
         , opClauses:
             [ { op: OpName "next"
@@ -317,8 +353,23 @@ spec = describe "Stella.Compiler.MidIR.Verify » modules a lowering must not acc
               }
             ]
         }
-      body = M.ETail (M.CHandle handler (M.FuncId 2) [])
+      body = M.ETail (M.CHandle handler (M.FuncId 2) [] [])
       site = { id: M.FuncId 0, params: [ binder 0 ], captures: [], body }
       inner = { id: M.FuncId 2, params: [], captures: [], body: ret (M.Local 0) }
     verify ((moduleOf site) { functions = [ site, clause, inner ] })
       `shouldEqual` Left (ClauseArity (M.FuncId 0) (M.FuncId 1) 2 1)
+
+  it "accepts a handler owning a region, one initial value per key" do
+    verify (handling [ nameKey ] [ M.ALit (LitInt 0) ]) `shouldEqual` Right unit
+
+  it "rejects a handle supplying more initial values than the region has keys" do
+    -- a lowering pairs the keys with the values by position, so a disagreement
+    -- leaves a cell holding another's value
+    verify (handling [ nameKey ] [ M.ALit (LitInt 0), M.ALit (LitInt 1) ])
+      `shouldEqual` Left (CellCount (M.FuncId 0) 1 2)
+
+  it "rejects a handler naming one cell key twice" do
+    -- a region's keys are distinct, and a repeat leaves a read on that key with
+    -- two cells to name
+    verify (handling [ nameKey, nameKey ] [ M.ALit (LitInt 0), M.ALit (LitInt 1) ])
+      `shouldEqual` Left (DuplicateCell (M.FuncId 0) nameKey)
