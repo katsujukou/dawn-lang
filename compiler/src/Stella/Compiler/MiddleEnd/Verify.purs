@@ -27,7 +27,7 @@ import Prelude
 import Prim as P
 
 import Stella.Compiler.Primitive (PrimOp, arityOfOp)
-import Stella.Compiler.MiddleEnd.Term as M
+import Stella.Compiler.MiddleEnd.IR as M
 import Stella.Compiler.TypedCore.Name (Ident, OpName, Qualified, TyName)
 import Stella.Compiler.TypedCore.Type (RowKey)
 import Data.Array as Array

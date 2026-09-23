@@ -7,7 +7,7 @@
 -- | table, over an explicit capture list.
 -- |
 -- | Types are gone. What survives of them is a `Rep` on each binding.
-module Stella.Compiler.MiddleEnd.Term
+module Stella.Compiler.MiddleEnd.IR
   ( Local(..)
   , JoinId(..)
   , FuncId(..)

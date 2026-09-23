@@ -24,7 +24,7 @@ import Prim as P
 import Stella.Compiler.Interface (Imports, importedArities)
 import Stella.Compiler.Primitive (PrimOp, lookupPrim)
 import Stella.Compiler.MiddleEnd.Rep (Rep(..), repOf)
-import Stella.Compiler.MiddleEnd.Term as M
+import Stella.Compiler.MiddleEnd.IR as M
 import Stella.Compiler.TypedCore.Check (Typed)
 import Stella.Compiler.TypedCore.Decl as D
 import Stella.Compiler.TypedCore.Declare (CheckedGroup, Declared)

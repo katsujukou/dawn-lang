@@ -32,7 +32,7 @@ import Prim as P
 
 import Stella.Compiler.Primitive (PrimOp)
 import Stella.Compiler.Bytecode.Instr (FuncIx, Function, KeyIx, OpIx, Reg)
-import Stella.Compiler.MiddleEnd.Term (ClauseForm)
+import Stella.Compiler.MiddleEnd.IR (ClauseForm)
 import Stella.Compiler.TypedCore.Domain (ScalarString, ScalarValue, compareNumber, sameNumber)
 import Stella.Compiler.TypedCore.Name (EffName, Ident, ModuleName, OpName, Qualified, Symbol, Tag, TyName)
 import Data.Generic.Rep (class Generic)

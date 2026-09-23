@@ -23,7 +23,7 @@ import Stella.Compiler.Bytecode.Instr as B
 import Stella.Compiler.Bytecode.Module (CalleeEntry(..), Constant(..), Debug, Dmo, GlobalInit(..), HandlerEntry, Key(..), abiVersion, formatVersion)
 import Stella.Compiler.Bytecode.Module as BM
 import Stella.Compiler.MiddleEnd.Rep (Rep(..))
-import Stella.Compiler.MiddleEnd.Term as M
+import Stella.Compiler.MiddleEnd.IR as M
 import Stella.Compiler.MiddleEnd.Verify (VerifyError, verify)
 import Stella.Compiler.TypedCore.Name (Ident, OpName, Qualified)
 import Stella.Compiler.TypedCore.Term (Literal(..))

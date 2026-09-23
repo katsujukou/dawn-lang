@@ -58,7 +58,7 @@ import Effect.Ref as Ref
 import Data.Traversable (traverse)
 import Stella.Compiler.Bytecode.Instr (FuncIx, Node, Reg)
 import Stella.Compiler.Bytecode.Module (Constant(..))
-import Stella.Compiler.MiddleEnd.Term (ClauseForm)
+import Stella.Compiler.MiddleEnd.IR (ClauseForm)
 import Stella.Compiler.Primitive (PrimOp)
 import Stella.Compiler.TypedCore.Domain (ScalarString, ScalarValue, sameNumber, textOf)
 

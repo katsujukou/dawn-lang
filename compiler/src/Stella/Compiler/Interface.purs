@@ -39,7 +39,7 @@ import Prelude
 
 import Prim as P
 
-import Stella.Compiler.MiddleEnd.Term as M
+import Stella.Compiler.MiddleEnd.IR as MIR
 import Stella.Compiler.TypedCore.Name (Ident, ModuleName, Qualified(..))
 import Data.Array as Array
 import Data.Either (Either(..))
@@ -69,7 +69,7 @@ type Dmi =
 -- |
 -- | A global installed as a function of **no** parameters has no definitional
 -- | arity either: a count of leading lambdas that is zero is what absence is.
-interfaceOf :: M.Module -> Dmi
+interfaceOf :: MIR.Module -> Dmi
 interfaceOf m =
   { name: m.name
   , arities: Map.fromFoldable (Array.mapMaybe entry m.exports)
@@ -84,7 +84,7 @@ interfaceOf m =
     Qualified moduleName name
       | moduleName /= m.name -> Nothing
       | otherwise -> case Map.lookup ref installed of
-          Just (M.GFunc id) -> case Map.lookup id functions of
+          Just (MIR.GFunc id) -> case Map.lookup id functions of
             Just f
               | Array.length f.params > 0 -> Just (Tuple name (Array.length f.params))
             _ -> Nothing
