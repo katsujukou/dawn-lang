@@ -54,13 +54,13 @@ data PrimOp
 -- | `entryOfOp`. Carrying the two independently anywhere would let a reader
 -- | check one entry while a machine ran another operation.
 -- |
--- | **Whether an operation may fault is not here, and is not the compiler's to
--- | say.** It is fixed by the ABI specification, which is what obliges every
--- | backend to the same observable meaning: were `Base.Int.add` to wrap, a
--- | backend on a host that traps on overflow would owe the wrapping form of the
--- | instruction, and were it to fault, every backend would owe the fault. Until
--- | the specification settles it, a consumer treats an operation as one that may
--- | ([Open Questions](../../../../docs/technical-references/99-Open-Questions/01-Open-Questions.md)).
+-- | **What an operation means, and whether it may fault, is not here and is not
+-- | the compiler's to say.** The ABI specification fixes it, which is what obliges
+-- | every backend to one observable meaning: `stella-base-0.1` has `Base.Int.add`
+-- | and `Base.Int.sub` wrap, so a backend on a host that traps on overflow owes the
+-- | wrapping form, and it has `Base.String.codePointAt` and `Base.Array.unsafeIndex`
+-- | fault outside their range
+-- | ([Prim and Base](../../../../docs/technical-references/06-Modules/02-Prim-and-Base.md)).
 type PrimEntry =
   { op :: PrimOp
   , entry :: Qualified Ident
