@@ -1,10 +1,9 @@
 # Bytecode and the `.dmo` module object
 
-Bytecode is one lowering of Mid IR, beside JavaScript and WebAssembly. Its
-target is a machine Stella owns, which is what lets a program be executed before
-either of the other two backends exists.
+Bytecode is one lowering of middle-end IR (ANF), beside any backend including JS
+and WebAssembly. Its target is *Steam*, an abstract machine Stella owns.
 
-`lower` takes a Mid IR module and produces a **`.dmo` file**, a module object
+`lower` takes an ANF module and produces a **`.dmo` file**, a module object
 holding the module's tables and the code of its functions.
 
 The virtual machine that executes a `.dmo` is specified separately. This
@@ -13,7 +12,7 @@ owes them.
 
 ## A `.dmo` is the artefact others build on
 
-Mid IR is an in-memory representation, and a compiler that goes on to generate
+ANF is an in-memory representation, and a compiler that goes on to generate
 JavaScript or Wasm need not write anything to disk between the two. **A `.dmo`
 is what a consumer outside this compiler reads**, and the format is fixed here
 for that reason rather than for the machine's convenience.
