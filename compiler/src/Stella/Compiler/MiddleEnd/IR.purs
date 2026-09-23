@@ -1,4 +1,4 @@
--- | The terms of Mid IR.
+-- | The Middle-end IR.
 -- |
 -- | Mid IR is an A-normal form: every intermediate result is named by a
 -- | binding, every argument is an atom, and every control construct stands in
