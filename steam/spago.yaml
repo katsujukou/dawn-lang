@@ -23,5 +23,6 @@ package:
   test:
     main: Test.Steam
     dependencies:
+      - aff
       - spec
       - spec-node

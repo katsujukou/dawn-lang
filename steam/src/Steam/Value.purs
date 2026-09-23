@@ -189,6 +189,10 @@ newtype Continuation = Continuation (P.Array StackEntry)
 -- | nothing is not a value: reading one is an interpreter bug rather than a
 -- | placeholder. **The map is mutable and is not shared between applications of a
 -- | continuation**, which is what `reinstate` sees to.
+-- |
+-- | `node` and `ip` are **where the activation resumes**, and are written where it
+-- | is suspended: the `Node` it stands in and the instruction of that node's code
+-- | to continue at.
 type Activation =
   { func :: FuncRef
   , closure :: Closure

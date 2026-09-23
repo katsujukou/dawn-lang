@@ -654,10 +654,13 @@ lets modules arrive one at a time. It is also why a `CALLEES` entry carries no
 arity: a partial application's callee may belong to another module, and the
 arity is that module's to state.
 
-**A join point's name is resolved on load too**, to whatever the machine reaches
-a `Join` by. A name is what the file holds so that the structure survives the
-format; nothing looks a name up while the function is running, and a name is
-never compared at run time.
+**A join point's name is resolved on load too**, to whatever the consumer reaches
+a `Join` by — a label where code is generated, a table built when the module is
+loaded where the code is interpreted. A name is what the file holds so that the
+structure survives the format, and what holding one must not cost is a search of
+the function's join points at each transfer. **A name stands over one join point
+of a function**, so a file writing two under one name is refused rather than
+resolved to whichever came first.
 
 **A key, an operation, and a constructor are resolved on load as well.** A `KEYS`,
 `OPS`, or `CTORS` index is the file's own: two modules may hold one key at

@@ -75,6 +75,7 @@
         },
         "test": {
           "dependencies": [
+            "aff",
             "spec",
             "spec-node"
           ]
