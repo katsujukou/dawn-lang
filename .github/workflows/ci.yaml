@@ -48,13 +48,14 @@ jobs:
 
       - name: Build
         run: |
-          for package in compiler cli; do
+          for package in compiler steam cli; do
             spago build -p "$package" --strict --pure --pedantic-packages
           done
 
       - name: Test
         run: |
           spago test -p compiler --pure
+          spago test -p steam --pure
           spago test -p cli --pure
 
       - name: Format check

@@ -40,6 +40,22 @@
           ]
         }
       },
+      "steam": {
+        "path": "steam",
+        "core": {
+          "dependencies": [
+            "console",
+            "effect",
+            "prelude"
+          ]
+        },
+        "test": {
+          "dependencies": [
+            "spec",
+            "spec-node"
+          ]
+        }
+      },
       "stella-fmt": {
         "path": "stella-fmt",
         "core": {
