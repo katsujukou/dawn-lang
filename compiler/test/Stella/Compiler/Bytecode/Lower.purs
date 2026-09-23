@@ -14,6 +14,7 @@ import Prim as P
 -- rather than going unnoticed.
 import Stella.Compiler.Primitive (PrimOp(..), entryOfOp)
 import Stella.Compiler.Bytecode (ConstIx(..), Constant(..), CtorIx(..), Debug, Dmo, FuncIx(..), Function, FunctionDebug, GlobalIx(..), GlobalInit(..), Instr(..), LowerError, PrimIx(..), Reg(..), Tail(..), lower)
+import Stella.Compiler.Interface (noImports)
 import Stella.Compiler.MidIR (Rep(..), translate)
 import Stella.Compiler.TypedCore (Ident(..), ModuleName(..), Qualified(..), TyName(..), declare, declareAnnotated, primSignature)
 import Data.Array as Array
@@ -50,7 +51,7 @@ loweredWithDebug = case declare primSignature intModule of
   Left _ -> Left "Base.Int did not declare"
   Right s1 -> case declareAnnotated s1 verticalSlice of
     Left _ -> Left "the slice did not declare"
-    Right declared -> case translate verticalSlice declared of
+    Right declared -> case translate noImports verticalSlice declared of
       Left err -> Left (show err)
       Right mid -> case lower mid of
         Left err -> Left (show (err :: LowerError))

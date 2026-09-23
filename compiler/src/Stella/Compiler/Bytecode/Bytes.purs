@@ -46,6 +46,7 @@ import Prim as P
 import Stella.Compiler.Primitive (PrimOp)
 import Stella.Compiler.Bytecode.Float as Float
 import Stella.Compiler.TypedCore.Domain (ScalarString, scalarStringOf, scalarValue)
+import Stella.Compiler.TypedCore.Name (Ident)
 import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Enum (fromEnum)
@@ -96,6 +97,10 @@ data EncodeError
   -- | A module no reader would read back. **What an encoder writes, a decoder
   -- | returns**, so what would break that is refused here rather than written.
   | Unwritable Fault
+  -- | An arity below one, as the name it stands under. A definitional arity counts
+  -- | leading lambdas, so a value with none is absent from an interface rather than
+  -- | present at zero.
+  | ArityBelowOne Ident P.Int
 
 -- Writing ------------------------------------------------------------------------
 
@@ -223,6 +228,14 @@ data DecodeError
   -- | stands, or an index naming nothing. What an encoder refuses to write, a
   -- | decoder refuses to return ([Validate](Validate.purs)).
   | Malformed Fault
+  -- | An interface entry whose arity is not positive.
+  | ArityNotPositive P.Int
+  -- | Interface entries that do not ascend strictly by name, a repeated name among
+  -- | them. The order is the format's, and one module has one file.
+  | EntriesOutOfOrder
+  -- | A byte after what the file holds. A longer file is a later format, not this
+  -- | one with something ignorable at the end.
+  | TrailingBytes
   | UnexpectedEnd
 
 type State =

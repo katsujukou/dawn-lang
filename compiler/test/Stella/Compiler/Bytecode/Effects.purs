@@ -13,6 +13,7 @@ import Prim as P
 -- machine imports. A member missing from its re-export list fails this module
 -- rather than going unnoticed.
 import Stella.Compiler.Bytecode (ConstIx(..), CtorIx(..), Dmo, FuncIx(..), Function, HandlerEntry, HandlerIx(..), Instr(..), Key(..), KeyIx(..), LowerError, OpIx(..), PrimIx(..), Reg(..), Tail(..), lower)
+import Stella.Compiler.Interface (noImports)
 import Stella.Compiler.MidIR (ClauseForm(..), Rep(..), translate)
 import Stella.Compiler.TypedCore (Module, Symbol(..), declare, declareAnnotated, primSignature)
 import Stella.Compiler.TypedCore.Prim (unitTy)
@@ -29,7 +30,7 @@ lowered m = case declare primSignature intModule of
   Left _ -> Left "Base.Int did not declare"
   Right s1 -> case declareAnnotated s1 m of
     Left _ -> Left "the slice did not declare"
-    Right declared -> case translate m declared of
+    Right declared -> case translate noImports m declared of
       Left err -> Left (show err)
       Right mid -> case lower mid of
         Left err -> Left (show (err :: LowerError))

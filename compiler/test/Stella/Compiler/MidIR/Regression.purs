@@ -9,6 +9,7 @@ import Prelude
 
 import Prim as P
 
+import Stella.Compiler.Interface (noImports)
 import Stella.Compiler.MidIR (Rep(..), TranslateError, translate)
 import Stella.Compiler.MidIR as M
 import Stella.Compiler.TypedCore (Constraint(..), Decl(..), Expr(..), Ident(..), Kind(..), Literal(..), Module, ModuleName(..), Qualified(..), RowEntry(..), RowKey(..), Symbol(..), TyVar(..), Type(..), declareAnnotated, intTy, monoScheme, primSignature, pureFn, recordTy, variantTy)
@@ -42,7 +43,7 @@ aKey = SymbolKey (Symbol "a")
 lower :: Module P.Int -> Either P.String { module :: M.Module, debug :: M.Debug P.Int }
 lower m = case declareAnnotated primSignature m of
   Left _ -> Left "the fixture did not declare"
-  Right declared -> case translate m declared of
+  Right declared -> case translate noImports m declared of
     Left err -> Left (show (err :: TranslateError))
     Right result -> Right result
 

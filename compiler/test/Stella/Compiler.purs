@@ -5,6 +5,7 @@ import Prelude
 import Effect (Effect)
 import Test.Stella.Compiler.TypedCore as TypedCore
 import Test.Stella.Compiler.Primitive as Primitive
+import Test.Stella.Compiler.Interface as Interface
 import Test.Stella.Compiler.Bytecode.Effects as BytecodeEffects
 import Test.Stella.Compiler.Bytecode.Lower as BytecodeLower
 import Test.Stella.Compiler.Bytecode.Serialize as BytecodeSerialize
@@ -43,6 +44,7 @@ main = runSpecAndExitProcess [ consoleReporter ] do
   BytecodeLower.spec
   BytecodeEffects.spec
   BytecodeSerialize.spec
+  Interface.spec
   VerticalSlice.spec
   EffectSlice.spec
   HandlerSlice.spec

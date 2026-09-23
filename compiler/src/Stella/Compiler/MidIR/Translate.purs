@@ -21,6 +21,7 @@ import Prelude
 
 import Prim as P
 
+import Stella.Compiler.Interface (Imports, importedArities)
 import Stella.Compiler.Primitive (PrimOp, lookupPrim)
 import Stella.Compiler.MidIR.Rep (Rep(..), repOf)
 import Stella.Compiler.MidIR.Term as M
@@ -200,9 +201,10 @@ type Ctx =
   { signature :: Signature
   , locals :: Map Ident Bound
   , joins :: Map JoinName M.JoinId
-  -- | The definitional arity of a top-level value of this module: the number of
-  -- | leading lambdas its erased right-hand side has. A value whose right-hand
-  -- | side is not a lambda has none, and a call to it is `callu`.
+  -- | The definitional arity of a top-level value of this module or of one it
+  -- | imports: the number of leading lambdas the erased right-hand side has. A
+  -- | value whose right-hand side is not a lambda has none, and a call to it is
+  -- | `callu`.
   , arities :: Map (Qualified Ident) P.Int
   }
 
@@ -935,12 +937,21 @@ unions = foldl Set.union Set.empty
 -- | written; the value declarations come from checking, which annotated them.
 -- | The module and the debug table beside it, which `lower` fills a `.dmo`'s
 -- | `DEBUG` section from and may discard.
+-- |
+-- | **The imports are what make a call to an imported value a known one.** A
+-- | definitional arity is a property of a right-hand side, so for a value of this
+-- | module it is read off the term and for an imported one it comes from that
+-- | module's interface, checked where the environment was assembled and read through
+-- | this module's import list ([Interface](../Interface.purs)). An arity neither
+-- | source holds costs a `callk` and nothing else: the call is a `callu`, which is
+-- | correct for every callee.
 translate
   :: forall a
-   . D.Module a
+   . Imports
+  -> D.Module a
   -> Declared a
   -> Either TranslateError { module :: M.Module, debug :: M.Debug a }
-translate m declared =
+translate imports m declared =
   case runT initialState (traverse (globalOf ctx m.name) declared.values) of
     Left err -> Left err
     Right (Tuple globals final) -> Right
@@ -970,7 +981,11 @@ translate m declared =
     { signature: declared.signature
     , locals: Map.empty
     , joins: Map.empty
-    , arities: definitionalArities m.name declared
+    -- an arity is taken from the environment only for a module this one imports,
+    -- and the names cannot collide: this module speaks for its own
+    , arities:
+        Map.union (definitionalArities m.name declared)
+          (importedArities m.imports imports)
     }
 
 -- | The number of leading lambdas a top-level right-hand side has, where it has

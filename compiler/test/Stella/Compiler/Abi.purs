@@ -14,6 +14,7 @@ import Prim as P
 
 import Stella.Compiler.Primitive (PrimOp(..), entryOfOp)
 import Stella.Compiler.Bytecode (CalleeEntry(..), Dmo, LowerError, lower)
+import Stella.Compiler.Interface (noImports)
 import Stella.Compiler.MidIR (TranslateError(..), translate)
 import Stella.Compiler.MidIR as M
 import Stella.Compiler.TypedCore (Decl(..), Export(..), Expr(..), Ident(..), Literal(..), Module, ModuleName(..), Qualified(..), TypeScheme, declare, declareAnnotated, intTy, monoScheme, primSignature, pureFn, Type(..))
@@ -73,7 +74,7 @@ midOf scheme decls = case declare primSignature (intModuleOf scheme) of
   Left _ -> Left "Base.Int did not declare"
   Right signature -> case declareAnnotated signature (mainOf decls) of
     Left _ -> Left "Main did not declare"
-    Right declared -> Right (translate (mainOf decls) declared)
+    Right declared -> Right (translate noImports (mainOf decls) declared)
 
 dmoOf :: TypeScheme -> P.Array (Decl P.Int) -> Either P.String Dmo
 dmoOf scheme decls = case midOf scheme decls of

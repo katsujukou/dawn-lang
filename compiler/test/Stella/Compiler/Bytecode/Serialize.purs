@@ -16,6 +16,7 @@ import Prim as P
 
 import Stella.Compiler.Bytecode (Bytes, Constant(..), DecodeError(..), Dmo, EncodeError(..), Fault(..), Function, Instr(..), JoinName(..), Key(..), Node, Reg(..), Tail(..), abiVersion, decode, encode, formatVersion, lower, validate)
 import Stella.Compiler.Bytecode.Bytes (byte, runR, skipR, structuralR, svar, svarR, utf8R, uvar, uvarR, vecR)
+import Stella.Compiler.Interface (noImports)
 import Stella.Compiler.MidIR (Rep(..), translate)
 import Stella.Compiler.TypedCore (Module, ModuleName(..), declare, declareAnnotated, primSignature, scalarString, scalarValue)
 import Data.Array as Array
@@ -39,7 +40,7 @@ loweredOf m = case declare primSignature intModule of
   Left _ -> Left "Base.Int did not declare"
   Right s1 -> case declareAnnotated s1 m of
     Left _ -> Left "the slice did not declare"
-    Right declared -> case translate m declared of
+    Right declared -> case translate noImports m declared of
       Left err -> Left (show err)
       Right mid -> case lower mid of
         Left err -> Left (show err)
