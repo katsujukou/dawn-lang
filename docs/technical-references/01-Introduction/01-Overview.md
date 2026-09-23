@@ -113,11 +113,14 @@ These serve as architecture tests as well as demonstrations.
 
 | Document | Content |
 | --- | --- |
+| **§1. Introduction** | |
 | [§1.2 Notation](02-Notation.md) | Metavariables, sequences, symbols |
 | [§1.3 Design Decisions](03-Design-Decisions.md) | The numbered decisions D1–D35 |
 | [§1.4 Implementation Plan](04-Implementation-Plan.md) | Order of implementation work |
+| **§2. Surface Language** | |
 | [§2.1 Elaboration](../02-Surface-Language/01-Elaboration.md) | Core⁺, metavariables, unification, synthesis |
 | [§2.2 Effect Handlers](../02-Surface-Language/02-Effect-Handlers.md) | Handler declarations, clause forms, implicit insertion |
+| **§3. Typed Core** | |
 | [§3.1 Kinds and Types](../03-Typed-Core/01-Kinds-and-Types.md) | Names, kinds, types, kinding rules |
 | [§3.2 Rows](../03-Typed-Core/02-Rows.md) | Row theory, normal form, entailment, surface syntax |
 | [§3.3 Effects](../03-Typed-Core/03-Effects.md) | Effect rows, operations, handlers, `IO` |
@@ -127,11 +130,16 @@ These serve as architecture tests as well as demonstrations.
 | [§3.7 Core Type Checker](../03-Typed-Core/07-Core-Type-Checker.md) | What the checker verifies, and what it does not |
 | [§3.8 Examples](../03-Typed-Core/08-Examples.md) | Worked examples in Core |
 | [§3.9 PureScript CoreFn](../03-Typed-Core/09-PureScript-CoreFn.md) | Correspondence with PureScript's CoreFn |
+| **§4. Middle-end** | |
 | [§4.1 Mid IR](../04-MiddleEnd/01-Mid-IR.md) | A-normal form, representation types, closures, join points, handlers |
 | [§4.2 Translation](../04-MiddleEnd/02-Translation.md) | Typed Core to Mid IR: erasure, spines, decision trees, closure conversion |
+| **§5. Backend** | |
 | [§5.1 Bytecode](../05-Backend/01-Bytecode.md) | The instruction set, continuations, and the `.dmo` module object |
 | [§5.2 Encoding](../05-Backend/02-Encoding.md) | The bytes of a `.dmo`: sections, tags, and opcodes |
 | [§5.3 Interface](../05-Backend/03-Interface.md) | The `.dmi`: the definitional arities a downstream module reads |
+| **§6. Modules** | |
 | [§6.1 Modules](../06-Modules/01-Modules.md) | Modules, declarations, FFI, entry point |
 | [§6.2 Prim and Base](../06-Modules/02-Prim-and-Base.md) | The four layers: what `Prim` holds, and what the `Base` ABI surface does |
-| [§7.1 Open Questions](../99-Open-Questions/01-Open-Questions.md) | Questions deferred beyond v0.1 |
+| **§7. Runtime** | |
+| [§7.1 Abstract Machine](../07-Runtime/01-Abstract-Machine.md) | Steam: the Stella abstract machine |
+| [Open Questions](../99-Open-Questions/01-Open-Questions.md) | Questions deferred beyond v0.1 |
