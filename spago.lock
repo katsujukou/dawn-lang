@@ -9,8 +9,12 @@
             "argparse-basic",
             "console",
             "dodo-printer",
+            "either",
+            "exceptions",
+            "maybe",
             "prelude",
-            "run"
+            "run",
+            "typelevel-prelude"
           ]
         },
         "test": {
@@ -54,11 +58,19 @@
             "argparse-basic",
             "arrays",
             "cli",
+            "compiler",
             "console",
             "effect",
             "either",
+            "foldable-traversable",
+            "maybe",
             "node-process",
-            "prelude"
+            "ordered-collections",
+            "prelude",
+            "refs",
+            "run",
+            "tuples",
+            "typelevel-prelude"
           ]
         },
         "test": {

@@ -5,11 +5,19 @@ package:
     - argparse-basic
     - arrays
     - cli
+    - compiler
     - console
     - effect
     - either
+    - foldable-traversable
+    - maybe
     - node-process
+    - ordered-collections
     - prelude
+    - refs
+    - run
+    - tuples
+    - typelevel-prelude
   run:
     main: Steam.CLI.JS
   test:
