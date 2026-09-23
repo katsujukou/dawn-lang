@@ -35,7 +35,7 @@ import Prelude
 
 import Prim as P
 
-import Stella.Compiler.MidIR.Rep (Rep)
+import Stella.Compiler.MiddleEnd.Rep (Rep)
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe)
 import Data.Show.Generic (genericShow)

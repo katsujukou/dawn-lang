@@ -4,7 +4,7 @@
 -- | operation and interprets it twice over, once with a handler owning a region
 -- | of cells. What each construct lowers to is written out in full, so that a
 -- | difference from the Translation document is a defect in one of the two.
-module Test.Stella.Compiler.MidIR.Effects (spec) where
+module Test.Stella.Compiler.MiddleEnd.Effects (spec) where
 
 import Prelude
 
@@ -15,8 +15,8 @@ import Prim as P
 -- rather than going unnoticed.
 import Stella.Compiler.Primitive (PrimOp(..))
 import Stella.Compiler.Interface (noImports)
-import Stella.Compiler.MidIR (Rep(..), TranslateError, translate)
-import Stella.Compiler.MidIR as M
+import Stella.Compiler.MiddleEnd (Rep(..), TranslateError, translate)
+import Stella.Compiler.MiddleEnd as M
 import Stella.Compiler.TypedCore (Literal(..), Module, declare, declareAnnotated, primSignature)
 import Stella.Compiler.TypedCore.Prim (unitCtor, unitTy)
 import Data.Array as Array
@@ -80,7 +80,7 @@ always0Handler =
   }
 
 spec :: Spec Unit
-spec = describe "Stella.Compiler.MidIR.Effects » the handler slice" do
+spec = describe "Stella.Compiler.MiddleEnd.Effects » the handler slice" do
 
   it "names each performed operation by its own name and its element's key" do
     -- nothing consults the ambient effect row, which is erased: a `perform`

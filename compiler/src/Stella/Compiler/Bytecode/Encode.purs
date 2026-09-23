@@ -25,8 +25,8 @@ import Stella.Compiler.Bytecode.Instr (CalleeIx(..), ConstIx(..), CtorIx(..), Fo
 import Stella.Compiler.Bytecode.Instr as B
 import Stella.Compiler.Bytecode.Module (CalleeEntry(..), Constant(..), Dmo, GlobalInit(..), Key(..), abiVersion, formatVersion)
 import Stella.Compiler.Bytecode.Module as BM
-import Stella.Compiler.MidIR.Rep (Rep(..))
-import Stella.Compiler.MidIR.Term (ClauseForm(..))
+import Stella.Compiler.MiddleEnd.Rep (Rep(..))
+import Stella.Compiler.MiddleEnd.Term (ClauseForm(..))
 import Stella.Compiler.TypedCore.Domain (codePointOf, textOf)
 import Stella.Compiler.TypedCore.Name (EffName(..), Ident(..), ModuleName(..), OpName(..), Qualified(..), Symbol(..), Tag(..), TyName(..))
 import Data.Array as Array

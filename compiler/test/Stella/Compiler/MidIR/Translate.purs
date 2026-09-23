@@ -6,7 +6,7 @@
 -- |
 -- | The cases after it are the entries the Implementation Plan singles out, each
 -- | one where a plausible translation gives the wrong answer.
-module Test.Stella.Compiler.MidIR.Translate (spec) where
+module Test.Stella.Compiler.MiddleEnd.Translate (spec) where
 
 import Prelude
 
@@ -17,8 +17,8 @@ import Prim as P
 -- rather than going unnoticed.
 import Stella.Compiler.Primitive (PrimOp(..))
 import Stella.Compiler.Interface (noImports)
-import Stella.Compiler.MidIR (Rep(..), TranslateError, translate)
-import Stella.Compiler.MidIR as M
+import Stella.Compiler.MiddleEnd (Rep(..), TranslateError, translate)
+import Stella.Compiler.MiddleEnd as M
 import Stella.Compiler.TypedCore (Ident(..), Literal(..), ModuleName(..), Qualified(..), TyName(..), declare, declareAnnotated, primSignature)
 import Data.Array as Array
 import Data.Either (Either(..))
@@ -71,7 +71,7 @@ functionOf i = do
     Nothing -> Left ("no function #" <> show i)
 
 spec :: Spec Unit
-spec = describe "Stella.Compiler.MidIR.Translate » the vertical slice" do
+spec = describe "Stella.Compiler.MiddleEnd.Translate » the vertical slice" do
 
   it "lowers `sum` to one dispatch over the scrutinee" do
     -- `λ (xs : List Int). case (xs) of switchCtor s0 { Nil -> 0 ; Cons -> … }`

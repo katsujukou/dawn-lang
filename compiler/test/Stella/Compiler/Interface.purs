@@ -17,7 +17,7 @@ import Prim as P
 import Stella.Compiler.Bytecode.Bytes (Bytes, DecodeError(..), EncodeError(..))
 import Stella.Compiler.Interface (Dmi, InterfaceError(..), importedArities, importsOf, interfaceOf, noImports)
 import Stella.Compiler.Interface.File as File
-import Stella.Compiler.MidIR as M
+import Stella.Compiler.MiddleEnd as M
 import Stella.Compiler.TypedCore (Decl(..), Export(..), Expr(..), Ident(..), Literal(..), Module, ModuleName(..), Qualified(..), Type(..), monoScheme)
 import Stella.Compiler.TypedCore.Declare (declare, declareAnnotated)
 import Stella.Compiler.TypedCore.Prim (intTy, primSignature, pureFn)

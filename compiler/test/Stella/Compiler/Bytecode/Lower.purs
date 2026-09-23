@@ -15,7 +15,7 @@ import Prim as P
 import Stella.Compiler.Primitive (PrimOp(..), entryOfOp)
 import Stella.Compiler.Bytecode (ConstIx(..), Constant(..), CtorIx(..), Debug, Dmo, FuncIx(..), Function, FunctionDebug, GlobalIx(..), GlobalInit(..), Instr(..), LowerError, PrimIx(..), Reg(..), Tail(..), lower)
 import Stella.Compiler.Interface (noImports)
-import Stella.Compiler.MidIR (Rep(..), translate)
+import Stella.Compiler.MiddleEnd (Rep(..), translate)
 import Stella.Compiler.TypedCore (Ident(..), ModuleName(..), Qualified(..), TyName(..), declare, declareAnnotated, primSignature)
 import Data.Array as Array
 import Data.Either (Either(..))

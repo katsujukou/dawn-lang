@@ -11,7 +11,7 @@
 -- | it and inserts whatever its own choice calls for.
 -- |
 -- | `Val` means unknown, and is sound wherever a type is not to hand.
-module Stella.Compiler.MidIR.Rep
+module Stella.Compiler.MiddleEnd.Rep
   ( Rep(..)
   , repOf
   ) where

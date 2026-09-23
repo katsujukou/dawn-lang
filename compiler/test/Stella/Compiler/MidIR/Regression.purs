@@ -3,15 +3,15 @@
 -- | Each fixture is a module written in Core by hand, checked, and lowered. What
 -- | is asserted is the Mid IR, so a translation that computes the right value by
 -- | a different route still fails.
-module Test.Stella.Compiler.MidIR.Regression (spec) where
+module Test.Stella.Compiler.MiddleEnd.Regression (spec) where
 
 import Prelude
 
 import Prim as P
 
 import Stella.Compiler.Interface (noImports)
-import Stella.Compiler.MidIR (Rep(..), TranslateError, translate)
-import Stella.Compiler.MidIR as M
+import Stella.Compiler.MiddleEnd (Rep(..), TranslateError, translate)
+import Stella.Compiler.MiddleEnd as M
 import Stella.Compiler.TypedCore (Constraint(..), Decl(..), Expr(..), Ident(..), Kind(..), Literal(..), Module, ModuleName(..), Qualified(..), RowEntry(..), RowKey(..), Symbol(..), TyVar(..), Type(..), declareAnnotated, intTy, monoScheme, primSignature, pureFn, recordTy, variantTy)
 import Data.Array as Array
 import Data.Either (Either(..))
@@ -190,7 +190,7 @@ weakenModule = moduleOf
   ]
 
 spec :: Spec Unit
-spec = describe "Stella.Compiler.MidIR.Translate » cases a plausible translation gets wrong" do
+spec = describe "Stella.Compiler.MiddleEnd.Translate » cases a plausible translation gets wrong" do
 
   describe "the operands of an update" do
 

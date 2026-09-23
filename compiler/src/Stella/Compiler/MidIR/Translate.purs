@@ -11,7 +11,7 @@
 -- | Types reach it through the annotation checking left on the term, so no type
 -- | is re-derived here. Where one is not to hand the binding takes `RepVal`,
 -- | which costs precision and never correctness.
-module Stella.Compiler.MidIR.Translate
+module Stella.Compiler.MiddleEnd.Translate
   ( TranslateError(..)
   , translate
   , freeVars
@@ -23,8 +23,8 @@ import Prim as P
 
 import Stella.Compiler.Interface (Imports, importedArities)
 import Stella.Compiler.Primitive (PrimOp, lookupPrim)
-import Stella.Compiler.MidIR.Rep (Rep(..), repOf)
-import Stella.Compiler.MidIR.Term as M
+import Stella.Compiler.MiddleEnd.Rep (Rep(..), repOf)
+import Stella.Compiler.MiddleEnd.Term as M
 import Stella.Compiler.TypedCore.Check (Typed)
 import Stella.Compiler.TypedCore.Decl as D
 import Stella.Compiler.TypedCore.Declare (CheckedGroup, Declared)

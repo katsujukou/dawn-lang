@@ -9,10 +9,10 @@ import Test.Stella.Compiler.Interface as Interface
 import Test.Stella.Compiler.Bytecode.Effects as BytecodeEffects
 import Test.Stella.Compiler.Bytecode.Lower as BytecodeLower
 import Test.Stella.Compiler.Bytecode.Serialize as BytecodeSerialize
-import Test.Stella.Compiler.MidIR.Regression as MidRegression
-import Test.Stella.Compiler.MidIR.Translate as MidTranslate
-import Test.Stella.Compiler.MidIR.Effects as MidEffects
-import Test.Stella.Compiler.MidIR.Verify as MidVerify
+import Test.Stella.Compiler.MiddleEnd.Regression as MidRegression
+import Test.Stella.Compiler.MiddleEnd.Translate as MidTranslate
+import Test.Stella.Compiler.MiddleEnd.Effects as MidEffects
+import Test.Stella.Compiler.MiddleEnd.Verify as MidVerify
 import Test.Stella.Compiler.TypedCore.Annotation as Annotation
 import Test.Stella.Compiler.TypedCore.Check as Check
 import Test.Stella.Compiler.TypedCore.Declare as Declare

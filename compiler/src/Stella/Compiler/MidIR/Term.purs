@@ -7,7 +7,7 @@
 -- | table, over an explicit capture list.
 -- |
 -- | Types are gone. What survives of them is a `Rep` on each binding.
-module Stella.Compiler.MidIR.Term
+module Stella.Compiler.MiddleEnd.Term
   ( Local(..)
   , JoinId(..)
   , FuncId(..)
@@ -41,7 +41,7 @@ import Prelude
 import Prim as P
 
 import Stella.Compiler.Primitive (PrimOp)
-import Stella.Compiler.MidIR.Rep (Rep)
+import Stella.Compiler.MiddleEnd.Rep (Rep)
 import Stella.Compiler.TypedCore.Name (EffName, Ident, ModuleName, OpName, Qualified, TyName)
 import Stella.Compiler.TypedCore.Term (Literal)
 import Stella.Compiler.TypedCore.Type (RowKey)

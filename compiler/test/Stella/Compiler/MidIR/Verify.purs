@@ -3,7 +3,7 @@
 -- | Each fixture is a Mid IR module written by hand with one thing wrong. A
 -- | translation produces none of them; what is asserted is that a consumer says
 -- | so rather than lowering a module whose registers do not line up.
-module Test.Stella.Compiler.MidIR.Verify (spec) where
+module Test.Stella.Compiler.MiddleEnd.Verify (spec) where
 
 import Prelude
 
@@ -12,8 +12,8 @@ import Prim as P
 import Stella.Compiler.Bytecode (lower)
 import Stella.Compiler.Bytecode as B
 import Stella.Compiler.Primitive (PrimOp(..))
-import Stella.Compiler.MidIR (Rep(..), VerifyError(..), emptyDebug, verify)
-import Stella.Compiler.MidIR as M
+import Stella.Compiler.MiddleEnd (Rep(..), VerifyError(..), emptyDebug, verify)
+import Stella.Compiler.MiddleEnd as M
 import Stella.Compiler.TypedCore (Ident(..), Literal(..), ModuleName(..), OpName(..), Qualified(..), RowKey(..), Symbol(..), TyName(..))
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
@@ -121,7 +121,7 @@ handling cells initial = (moduleOf site) { functions = [ site, entered, body ] }
   body = { id: M.FuncId 2, params: [], captures: [], body: bindThen 0 }
 
 spec :: Spec Unit
-spec = describe "Stella.Compiler.MidIR.Verify » modules a lowering must not accept" do
+spec = describe "Stella.Compiler.MiddleEnd.Verify » modules a lowering must not accept" do
 
   it "accepts a function whose locals run from zero without a gap" do
     verify (moduleOf (functionOf [ binder 0 ] [] (bindThen 1))) `shouldEqual` Right unit

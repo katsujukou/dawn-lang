@@ -39,7 +39,7 @@ import Prelude
 
 import Prim as P
 
-import Stella.Compiler.MidIR.Term as M
+import Stella.Compiler.MiddleEnd.Term as M
 import Stella.Compiler.TypedCore.Name (Ident, ModuleName, Qualified(..))
 import Data.Array as Array
 import Data.Either (Either(..))

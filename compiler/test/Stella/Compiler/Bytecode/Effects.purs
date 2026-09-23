@@ -14,7 +14,7 @@ import Prim as P
 -- rather than going unnoticed.
 import Stella.Compiler.Bytecode (ConstIx(..), CtorIx(..), Dmo, FuncIx(..), Function, HandlerEntry, HandlerIx(..), Instr(..), Key(..), KeyIx(..), LowerError, OpIx(..), PrimIx(..), Reg(..), Tail(..), lower)
 import Stella.Compiler.Interface (noImports)
-import Stella.Compiler.MidIR (ClauseForm(..), Rep(..), translate)
+import Stella.Compiler.MiddleEnd (ClauseForm(..), Rep(..), translate)
 import Stella.Compiler.TypedCore (Module, Symbol(..), declare, declareAnnotated, primSignature)
 import Stella.Compiler.TypedCore.Prim (unitTy)
 import Data.Array as Array

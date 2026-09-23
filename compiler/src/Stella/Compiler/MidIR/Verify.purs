@@ -17,7 +17,7 @@
 -- | it, and a consumer checks it where the modules are together
 -- | ([Bytecode](../../../../docs/technical-references/05-Backend/01-Bytecode.md)).
 -- | Every reference this module does declare is checked.
-module Stella.Compiler.MidIR.Verify
+module Stella.Compiler.MiddleEnd.Verify
   ( VerifyError(..)
   , verify
   ) where
@@ -27,7 +27,7 @@ import Prelude
 import Prim as P
 
 import Stella.Compiler.Primitive (PrimOp, arityOfOp)
-import Stella.Compiler.MidIR.Term as M
+import Stella.Compiler.MiddleEnd.Term as M
 import Stella.Compiler.TypedCore.Name (Ident, OpName, Qualified, TyName)
 import Stella.Compiler.TypedCore.Type (RowKey)
 import Data.Array as Array

@@ -17,7 +17,7 @@ import Prim as P
 import Stella.Compiler.Bytecode (Bytes, Constant(..), DecodeError(..), Dmo, EncodeError(..), Fault(..), Function, Instr(..), JoinName(..), Key(..), Node, Reg(..), Tail(..), abiVersion, decode, encode, formatVersion, lower, validate)
 import Stella.Compiler.Bytecode.Bytes (byte, runR, skipR, structuralR, svar, svarR, utf8R, uvar, uvarR, vecR)
 import Stella.Compiler.Interface (noImports)
-import Stella.Compiler.MidIR (Rep(..), translate)
+import Stella.Compiler.MiddleEnd (Rep(..), translate)
 import Stella.Compiler.TypedCore (Module, ModuleName(..), declare, declareAnnotated, primSignature, scalarString, scalarValue)
 import Data.Array as Array
 import Data.Char as Char
