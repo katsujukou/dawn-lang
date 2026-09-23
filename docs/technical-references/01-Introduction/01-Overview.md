@@ -130,6 +130,7 @@ These serve as architecture tests as well as demonstrations.
 | [§4.1 Mid IR](../04-MiddleEnd/01-Mid-IR.md) | A-normal form, representation types, closures, join points, handlers |
 | [§4.2 Translation](../04-MiddleEnd/02-Translation.md) | Typed Core to Mid IR: erasure, spines, decision trees, closure conversion |
 | [§5.1 Bytecode](../05-Backend/01-Bytecode.md) | The instruction set, continuations, and the `.dmo` module object |
+| [§5.2 Encoding](../05-Backend/02-Encoding.md) | The bytes of a `.dmo`: sections, tags, and opcodes |
 | [§6.1 Modules](../06-Modules/01-Modules.md) | Modules, declarations, FFI, entry point |
 | [§6.2 Prim and Base](../06-Modules/02-Prim-and-Base.md) | The four layers: what `Prim` holds, and what the `Base` ABI surface does |
 | [§7.1 Open Questions](../07-Open-Questions/01-Open-Questions.md) | Questions deferred beyond v0.1 |

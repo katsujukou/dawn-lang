@@ -596,9 +596,15 @@ header   magic "DMO\0"  |  format version  |  flags  |  ABI version
 section  id | length | payload           repeated to the end of the file
 ```
 
+**What each section holds is here and the bytes that carry it are in
+[Encoding](02-Encoding.md)**, which fixes the encoding of a primitive, the id and
+framing of a section, the tag of every form, and the opcode of every instruction.
+Nothing there adds to what a `.dmo` holds.
+
 | Section | Holds |
 | --- | --- |
 | `STRINGS` | Every string the other sections refer to, UTF-8 |
+| `MODULE` | The name of the module itself, which no other section carries |
 | `CONSTANTS` | The literal pool: tagged `Int`, `Number`, `String`, `Char`, and `Boolean` values |
 | `KEYS` | Row keys: a tag and, for three of the four, a string or an integer |
 | `OPS` | Operation names |

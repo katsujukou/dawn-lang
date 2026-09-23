@@ -32,13 +32,9 @@ It arises when `Map` or label polymorphism is introduced in Phase D, and should 
 
 Restoring it costs more than adding a row to that table. The element becomes `E [[κ̄]] τ̄`, and a row's normal form then carries a kind vector beside its argument vector. Row equality and unification compare payloads, so both would compare kinds as well. Entailment is unaffected: it decides by the keys of a normal form and the atomic facts of `Γ*`, and never examines a payload, however rich the payload becomes. Whether an effect parameterized over a kind other than `Type` is ever wanted is the question; no use has arisen. The addition is backward compatible, since an empty scheme writes nothing.
 
-**The value domains of `Int` and `Number`.** [Prim and Base](../06-Modules/02-Prim-and-Base.md) fixes the type of each literal, and fixes what `String` and `Char` range over; what `Int` and `Number` range over is open.
+**The value domains of literals — settled.** `Int` is a 32-bit signed integer, `Number` is IEEE 754 binary64, `Char` is a Unicode scalar value, and a `String` is a sequence of those (D27, D37). Literal identity is equality of the value, which for a `Number` is equality of its bit pattern with all NaNs taken as one ([Prim and Base](../06-Modules/02-Prim-and-Base.md)).
 
-What Core requires is only that literal identity be decidable, since `switchLit` demands distinct literals. What is unsettled is the range of `Int`, and the representation of `Number` together with how NaN and signed zero behave under that identity.
-
-These belong in Core rather than in the runtime ABI, because two backends disagreeing on them would give one Core term two meanings — which is exactly what the backend independence of Mid IR exists to prevent. Until they are settled, an implementation's incidental choices are not the specification.
-
-`String` is settled as a sequence of Unicode scalar values and `Char` as one of them, which leaves each backend free in its representation and fixes what a `Base.String` operation returns. What remains belongs to the ABI specification rather than to Core: which entries `Base.String` holds, and where the operations counting UTF-16 code units or UTF-8 bytes live.
+A domain belongs to Core rather than to a backend, since two backends disagreeing on one would give a Core term two meanings. Representation stays each backend's own, and what remains of the question is elsewhere: whether arithmetic wraps or faults belongs to the ABI specification, and which surface token denotes which value belongs to the lexer, below.
 
 **Label polymorphism and a `Symbol` kind.** D13 restricts labels to literals, so the kind grammar has nothing corresponding to `Symbol` and labels are not types.
 
@@ -136,6 +132,8 @@ Should that frequency prove high, the option is to **limit anonymous `...` at `R
 Neither rule is backward compatible with the other. Code that writes names works under both, so making multiple anonymous spreads a warning is a way to defer the decision.
 
 **Brackets for variant rows.** Records use `{ … }` and effects use `{| … |}`, so variants need brackets of their own. A variant element is keyed by a `TagKey` written `#Ok`, or by a `SymbolKey` where a name is wanted, and the spread `...ρ` is shared; only the brackets remain to be chosen ([Rows](../03-Typed-Core/02-Rows.md)).
+
+**The surface spelling of a literal.** The value domains are settled (D37), and which token denotes which value is not: `42`, `0x2a`, and `0b101010` are one literal, `"\n"` and `"\u{A}"` are another, and what a lexer admits — separators in a numeral, an exponent, an escape — is its own question. Nothing of it reaches Core, which holds the value and compares nothing else.
 
 **Classical monads and `do` syntax.** D17 settles effect sequencing as direct style but leaves open whether monads as data structures, such as `Maybe` or a parser, should be writable with something like `<-`. **The direction is coexistence**; the syntax is not fixed.
 

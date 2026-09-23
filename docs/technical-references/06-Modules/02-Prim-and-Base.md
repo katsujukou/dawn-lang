@@ -502,6 +502,10 @@ implements is a separate question, settled at the same stage.
 
 - **Observable meaning**, in terms that name no backend
 - **Whether it may fault**, and on which inputs ([Semantics](../03-Typed-Core/06-Semantics.md))
+- **Whether it is an operation, and the code it carries where one is.** An
+  operation is named by a code rather than by its entry in a `.dmo`, and that code
+  is the manifest's to fix for the life of a version
+  ([Encoding](../05-Backend/02-Encoding.md))
 - **Whether it returns `IO`.** An entry whose effect is observable from outside
   returns `IO`, mutable allocation included: a `Base.Array.unsafeNew` creating a
   mutable array returns one. An allocation whose mutation no one can observe may
@@ -608,25 +612,41 @@ segment — and code that is portable is distinguishable from code that is not b
 reading headers. Using UTF-16 inside a backend is unremarkable; making it
 observable through the ordinary `String` is what would cost portability.
 
-## Literal domains that remain open
+## Literal domains
 
-The types of literals are settled above, and so is what `String` and `Char`
-range over. **What `Int` and `Number` range over is not.**
+Every literal domain is fixed (D37).
 
-What Core requires of them is narrow: `switchLit` demands that its literals be
-distinct, so literal identity must be decidable. What Core does not settle is
-the range of `Int`, nor the representation of `Number` together with how NaN and
-signed zero behave under that identity.
+| Type | Domain |
+| --- | --- |
+| `Int` | a 32-bit signed integer, `-2147483648` to `2147483647` |
+| `Number` | IEEE 754 binary64 |
+| `Char` | a Unicode scalar value, so no unpaired surrogate |
+| `String` | a sequence of those, so no unpaired surrogate |
+| `Boolean` | `true` and `false` |
 
-The question is wider than the values themselves, since which surface token
-denotes which Core value belongs to it: `42`, `0x2a`, and `0b101010` are one
-literal, and `"\n"` and `"\u{A}"` are another. `switchLit` compares the value,
-never the spelling.
+**A domain belongs to Core rather than to a target**, because two backends
+disagreeing on one would give a Core term two meanings — the thing the backend
+independence of Mid IR exists to prevent. Representation is the separate matter it
+is for `String`: a backend holds an `Int` however it likes, and what it may not do
+is let that choice reach a result.
 
-These are recorded as open ([Open Questions](../07-Open-Questions/01-Open-Questions.md)). Until they
-are settled, **the choices an implementation happens to make are not the
-specification** — that the first compiler is written in PureScript does not make
-Stella's `Int` a 32-bit one.
+**Literal identity is equality of the value, and `switchLit` is what needs it**
+([Terms and Matching](../03-Typed-Core/04-Terms-and-Matching.md)). For an `Int`, a
+`Char`, a `String`, and a `Boolean` that is ordinary equality. For a `Number` it is
+equality of the bit pattern, with all NaNs taken as one, so `0.0` and `-0.0` are
+**different** literals and a NaN is one literal. IEEE equality decides nothing
+usable here, identifying the two zeros and separating a NaN from itself, so a
+backend's dispatch implements the relation above rather than `==`.
+
+Two things about literals remain open, and neither is a domain.
+
+**Whether arithmetic wraps or faults** on overflow is the ABI specification's to
+fix, one answer for every backend, as it is for every other entry that may fault.
+
+**Which surface token denotes which value** is the lexer's: `42`, `0x2a`, and
+`0b101010` are one literal, and `"\n"` and `"\u{A}"` are another. `switchLit`
+compares the value, never the spelling
+([Open Questions](../07-Open-Questions/01-Open-Questions.md)).
 
 ## Manifest intrinsics, which live outside `Prim`
 

@@ -52,9 +52,9 @@ variable and so says nothing.
 constructor or foreign, and a continuation a handler clause received. What
 unites them is that applying one is the only thing to do with it.
 
-`Rep Int` names a class and not a width. What `Int` and `Number` range over is
-unsettled ([Open Questions](../07-Open-Questions/01-Open-Questions.md)), and Mid IR
-neither settles it nor depends on it.
+`Rep Int` names a class and not a representation. What `Int` and `Number` range
+over is fixed — a 32-bit signed integer and IEEE 754 binary64 (D37) — and how a
+backend holds one is its own choice, which is what a descriptive `Rep` leaves it.
 
 ### The map from a Core type
 
