@@ -180,7 +180,7 @@ spec = describe "Stella.Compiler.Bytecode.Lower » the vertical slice" do
         dmo <- lowered
         Right { formatVersion: dmo.formatVersion, abiVersion: dmo.abiVersion, imports: dmo.imports }
     header `shouldEqual` Right
-      { formatVersion: 0, abiVersion: "Stella-base-0.1", imports: [ ModuleName "Base.Int" ] }
+      { formatVersion: 0, abiVersion: "stella-base-0.1", imports: [ ModuleName "Base.Int" ] }
 
   it "names neither a key, an operation, a callee, nor a handler" do
     -- the slice has no record, no variant, and no effect

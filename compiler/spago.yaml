@@ -8,6 +8,8 @@ package:
     - foldable-traversable
     - ordered-collections
     - prelude
+    - strings
+    - enums
     - tuples
   test:
     main: Test.Stella.Compiler

@@ -28,6 +28,7 @@ import Prelude
 
 import Prim as P
 
+import Stella.Compiler.TypedCore.Domain (ScalarString, ScalarValue, compareNumber, sameNumber)
 import Stella.Compiler.TypedCore.Kind (Kind)
 import Stella.Compiler.TypedCore.Name (Ident, JoinName, OpName, Qualified, TyVar)
 import Stella.Compiler.TypedCore.Type (Constraint, RowEntry, RowKey, TyBinder, Type)
@@ -38,11 +39,14 @@ import Data.Show.Generic (genericShow)
 -- | A literal. There is no array literal and no record literal: arrays are a
 -- | type constructor with primitives, and records are built by iterating
 -- | `RecordExtend`.
+-- |
+-- | Every domain is fixed (D27, D37), and a `Char` carries a Unicode scalar
+-- | value rather than a code unit ([Domain](Domain.purs)).
 data Literal
   = LitInt P.Int
   | LitNumber P.Number
-  | LitString P.String
-  | LitChar P.Char
+  | LitString ScalarString
+  | LitChar ScalarValue
   | LitBoolean P.Boolean
 
 -- | A Core term, written `e`.
@@ -315,8 +319,40 @@ withAnnotation a = case _ of
   WriteCell _ key value -> WriteCell a key value
   OpenEff _ row e -> OpenEff a row e
 
-derive instance Eq Literal
-derive instance Ord Literal
+-- | **Literal identity is equality of the value** (D37), which `switchLit`
+-- | requires to be decidable: its branches are distinct literals
+-- | ([Terms and Matching](../../../../docs/technical-references/03-Typed-Core/04-Terms-and-Matching.md)).
+-- | For a `Number` that is not IEEE equality, which identifies the two zeros and
+-- | separates a NaN from itself, so the instance is written out rather than
+-- | derived ([Domain](Domain.purs)).
+instance Eq Literal where
+  eq = case _, _ of
+    LitInt a, LitInt b -> a == b
+    LitNumber a, LitNumber b -> sameNumber a b
+    LitString a, LitString b -> a == b
+    LitChar a, LitChar b -> a == b
+    LitBoolean a, LitBoolean b -> a == b
+    _, _ -> false
+
+-- | A total order agreeing with the identity above, which is what lets a literal
+-- | stand in a set. The order between two constructors is the order they are
+-- | written in and carries no meaning of its own.
+instance Ord Literal where
+  compare = case _, _ of
+    LitInt a, LitInt b -> compare a b
+    LitNumber a, LitNumber b -> compareNumber a b
+    LitString a, LitString b -> compare a b
+    LitChar a, LitChar b -> compare a b
+    LitBoolean a, LitBoolean b -> compare a b
+    a, b -> compare (rank a) (rank b)
+    where
+    rank = case _ of
+      LitInt _ -> 0
+      LitNumber _ -> 1
+      LitString _ -> 2
+      LitChar _ -> 3
+      LitBoolean _ -> 4
+
 derive instance Generic Literal _
 
 instance Show Literal where

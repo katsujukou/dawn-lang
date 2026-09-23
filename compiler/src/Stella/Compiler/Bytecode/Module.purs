@@ -33,6 +33,7 @@ import Prim as P
 import Stella.Compiler.Primitive (PrimOp)
 import Stella.Compiler.Bytecode.Instr (FuncIx, Function, KeyIx, OpIx, Reg)
 import Stella.Compiler.MidIR.Term (ClauseForm)
+import Stella.Compiler.TypedCore.Domain (ScalarString, ScalarValue, compareNumber, sameNumber)
 import Stella.Compiler.TypedCore.Name (EffName, Ident, ModuleName, OpName, Qualified, Symbol, Tag, TyName)
 import Data.Generic.Rep (class Generic)
 import Data.Map (Map)
@@ -45,15 +46,17 @@ formatVersion = 0
 
 -- | The runtime contract a module was compiled against.
 abiVersion :: P.String
-abiVersion = "Stella-base-0.1"
+abiVersion = "stella-base-0.1"
 
--- | The literal pool. What `Int` and `Number` range over is unsettled, so
--- | nothing here fixes a width.
+-- | The literal pool. Every domain is fixed: an `Int` is a 32-bit signed
+-- | integer, a `Number` is IEEE 754 binary64, a `Char` is a Unicode scalar
+-- | value, and a `String` is a sequence of those (D27, D37). How a backend holds
+-- | one is its own choice, which is what `Rep` leaves it.
 data Constant
   = CInt P.Int
   | CNumber P.Number
-  | CString P.String
-  | CChar P.Char
+  | CString ScalarString
+  | CChar ScalarValue
   | CBoolean P.Boolean
 
 -- | A row key. **Keys are compared for equality and for nothing else**, so a
@@ -183,8 +186,39 @@ type Dmo =
   , exports :: P.Array (Qualified Ident)
   }
 
-derive instance Eq Constant
-derive instance Ord Constant
+-- | Literal identity, as Core decides it (D37): a `Number` is compared by its
+-- | bit pattern with all NaNs taken as one, which is not IEEE equality, so the
+-- | instances are written out rather than derived
+-- | ([Domain](../TypedCore/Domain.purs)).
+-- |
+-- | What reads them is interning: one entry of the constant pool means one
+-- | literal, and a pool that merged `0.0` with `-0.0`, or held two NaNs apart,
+-- | would decide a `switchLit` the module did not write.
+instance Eq Constant where
+  eq = case _, _ of
+    CInt a, CInt b -> a == b
+    CNumber a, CNumber b -> sameNumber a b
+    CString a, CString b -> a == b
+    CChar a, CChar b -> a == b
+    CBoolean a, CBoolean b -> a == b
+    _, _ -> false
+
+instance Ord Constant where
+  compare = case _, _ of
+    CInt a, CInt b -> compare a b
+    CNumber a, CNumber b -> compareNumber a b
+    CString a, CString b -> compare a b
+    CChar a, CChar b -> compare a b
+    CBoolean a, CBoolean b -> compare a b
+    a, b -> compare (rank a) (rank b)
+    where
+    rank = case _ of
+      CInt _ -> 0
+      CNumber _ -> 1
+      CString _ -> 2
+      CChar _ -> 3
+      CBoolean _ -> 4
+
 derive instance Generic Constant _
 
 instance Show Constant where

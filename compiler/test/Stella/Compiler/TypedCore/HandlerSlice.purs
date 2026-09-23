@@ -393,20 +393,22 @@ withoutRegionLacks = sliceWith
 -- | stands in the row the operation clauses are typed at, and without a region
 -- | there is none to name.
 withoutCells :: Module P.Int
-withoutCells = sliceWith (DeclNonRec 3
-  { name: Ident "counter"
-  , scheme: counterScheme
-  , value:
-      TyLam 0 (TyVar "e") (KRow RowEffect)
-        $ TyLam 0 (TyVar "a") KType
-        $ ConstraintLam 0 counterLacks
-        $ ConstraintLam 0 regionLacks
-        $ Lam 0 (Ident "thunk") (fn unit' counterRow tyVarA)
-        $ Handle 0 (App 0 (Var 0 (Ident "thunk")) (Global 0 unitCtor []))
-            (counterHandler Nothing)
-            []
-  , attributes: []
-  })
+withoutCells = sliceWith
+  ( DeclNonRec 3
+      { name: Ident "counter"
+      , scheme: counterScheme
+      , value:
+          TyLam 0 (TyVar "e") (KRow RowEffect)
+            $ TyLam 0 (TyVar "a") KType
+            $ ConstraintLam 0 counterLacks
+            $ ConstraintLam 0 regionLacks
+            $ Lam 0 (Ident "thunk") (fn unit' counterRow tyVarA)
+            $ Handle 0 (App 0 (Var 0 (Ident "thunk")) (Global 0 unitCtor []))
+                (counterHandler Nothing)
+                []
+      , attributes: []
+      }
+  )
 
 -- The specification -----------------------------------------------------------
 

@@ -15,11 +15,12 @@ import Stella.Compiler.TypedCore.Check (CheckError(..), Env, check, envOf, infer
 import Stella.Compiler.TypedCore.Kinding (KindError(..))
 import Stella.Compiler.TypedCore.Context (bindVar, emptyContext)
 import Stella.Compiler.TypedCore.Declare (declare)
-import Stella.Compiler.TypedCore.Prim (fn, intTy, primSignature, pureFn, stringTy, unitTy)
+import Stella.Compiler.TypedCore.Prim (fn, intTy, numberTy, primSignature, pureFn, stringTy, unitTy)
+import Stella.Compiler.TypedCore.Domain (scalarString)
 import Stella.Compiler.TypedCore.Signature (Signature)
 import Stella.Compiler.TypedCore.Type (Constraint(..))
 import Data.Either (Either(..), either)
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), fromMaybe)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 
@@ -37,6 +38,13 @@ stateEff = Qualified main (EffName "State")
 
 maybeTy :: Qualified TyName
 maybeTy = Qualified main (TyName "Maybe")
+
+number :: Type
+number = TCon numberTy []
+
+-- | A NaN, which is the one value unequal to itself.
+notANumber :: P.Number
+notANumber = 0.0 / 0.0
 
 int :: Type
 int = TCon intTy []
@@ -60,7 +68,7 @@ variant row = TApp (TCon (Qualified (ModuleName "Prim") (TyName "Variant")) []) 
 consoleRow :: Type
 consoleRow = TRowExtend (RowEffectEntry consoleEff []) TRowEmpty
 
--- | `( cache : State Int )`, oneLit effect under a written key.
+-- | `( cache : State Int )`, one effect under a written key.
 cacheRow :: Type
 cacheRow = TRowExtend (RowLabelledEffectEntry (Symbol "cache") stateEff [ int ]) TRowEmpty
 
@@ -198,6 +206,11 @@ var name = Var unit (Ident name)
 primUnit :: Expr Unit
 primUnit = Global unit (Qualified (ModuleName "Prim") (Ident "Unit")) []
 
+-- | A string literal. Every one these fixtures write is ordinary text, so the
+-- | scalar check cannot fail; the empty string stands where it cannot arise.
+strLit :: P.String -> Literal
+strLit text = LitString (fromMaybe mempty (scalarString text))
+
 oneLit :: Expr Unit
 oneLit = Lit unit (LitInt 1)
 
@@ -256,7 +269,7 @@ consoleHandler alpha returned contType =
 -- | with the clause supplied. The handle stands at `Int`.
 logging :: OpClause Unit -> Expr Unit
 logging clause =
-  Handle unit (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (LitString "x")))
+  Handle unit (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (strLit "x")))
     { element: RowEffectEntry consoleEff []
     , cells: Nothing
     , returnClause: { binder: Ident "x", ty: unitT, body: oneLit }
@@ -437,7 +450,7 @@ spec = describe "TypedCore.Check" do
       inferAt TRowEmpty
         ( RecordUpdate unit nameKey
             (RecordExtend unit nameKey oneLit emptyRecord)
-            (Lit unit (LitString "s"))
+            (Lit unit (strLit "s"))
         )
         `shouldEqual` Right (record (TRowExtend (RowTypeEntry nameKey string) TRowEmpty))
 
@@ -469,11 +482,11 @@ spec = describe "TypedCore.Check" do
 
   describe "perform" do
     it "takes the element the key names" do
-      inferAt consoleRow (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (LitString "x")))
+      inferAt consoleRow (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (strLit "x")))
         `shouldEqual` Right unitT
 
     it "requires the ambient row to carry the key" do
-      inferAt TRowEmpty (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (LitString "x")))
+      inferAt TRowEmpty (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (strLit "x")))
         `shouldEqual` Left (NoElementAt (EffectKey consoleEff) TRowEmpty)
 
     it "reads the signature from the effect the payload names" do
@@ -489,7 +502,7 @@ spec = describe "TypedCore.Check" do
     it "refuses a number of type arguments the operation does not bind" do
       -- `Console.log` binds none, so supplying one is an arity error
       inferAt consoleRow
-        (Perform unit (EffectKey consoleEff) (OpName "log") [ int ] (Lit unit (LitString "x")))
+        (Perform unit (EffectKey consoleEff) (OpName "log") [ int ] (Lit unit (strLit "x")))
         `shouldEqual` Left (OperationTypeArgCount (OpName "log") 0 1)
 
   describe "handlers" do
@@ -500,7 +513,7 @@ spec = describe "TypedCore.Check" do
 
     it "requires a clause for every operation of the effect" do
       inferAt TRowEmpty
-        ( Handle unit (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (LitString "x")))
+        ( Handle unit (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (strLit "x")))
             { element: RowEffectEntry consoleEff []
             , cells: Nothing
             , returnClause: { binder: Ident "x", ty: unitT, body: oneLit }
@@ -797,7 +810,7 @@ spec = describe "TypedCore.Check" do
             }
             [ oneLit ]
         outer =
-          Handle unit (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (LitString "x")))
+          Handle unit (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (strLit "x")))
             { element: RowEffectEntry consoleEff []
             , cells: Just { var: regionVar, cells: [ { key: sizeKey, ty: int } ] }
             , returnClause: { binder: Ident "x", ty: unitT, body: oneLit }
@@ -872,7 +885,7 @@ spec = describe "TypedCore.Check" do
     it "refuses two of them nested directly" do
       -- the inner one would stand at `( Console | ( Console ) )`
       let
-        inner = Handle unit (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (LitString "x")))
+        inner = Handle unit (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (strLit "x")))
           (consoleHandler unitT primUnit (pureFn unitT unitT))
           []
       inferAt TRowEmpty (Handle unit inner (consoleHandler unitT primUnit (pureFn unitT unitT)) [])
@@ -882,7 +895,7 @@ spec = describe "TypedCore.Check" do
       -- no row carries `Console` twice; the two handlers meet only in the
       -- run-time stack, which `openEff` is what lets them do
       let
-        handled = Handle unit (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (LitString "x")))
+        handled = Handle unit (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (strLit "x")))
           (consoleHandler unitT primUnit (pureFn unitT unitT))
           []
         f = lam "u" unitT handled
@@ -916,7 +929,7 @@ spec = describe "TypedCore.Check" do
       let expected = TForall (TyVar "a") KType (fn int consoleRow unitT)
       checkAt TRowEmpty expected
         ( TyLam unit (TyVar "b") KType
-            (lam "n" int (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (LitString "x"))))
+            (lam "n" int (Perform unit (EffectKey consoleEff) (OpName "log") [] (Lit unit (strLit "x"))))
         )
         `shouldEqual` Right unit
 
@@ -1046,6 +1059,29 @@ spec = describe "TypedCore.Check" do
         tree = SwitchCtor (OccScrutinee 0) [ branch, branch ] (Just (Leaf oneLit))
       inferIn (env { context = bindVar emptyContext (Ident "m") (maybeOf int) }) TRowEmpty
         (Case unit [ var "m" ] tree)
+        `shouldEqual` Left DuplicateBranch
+
+    it "accepts a literal dispatch that tells the two zeros apart" do
+      -- literal identity is not IEEE equality: `0.0` and `-0.0` are different
+      -- literals, so a dispatch may name both (D37)
+      let
+        tree = SwitchLit (OccScrutinee 0)
+          [ { lit: LitNumber 0.0, tree: Leaf oneLit }
+          , { lit: LitNumber (-0.0), tree: Leaf oneLit }
+          ]
+          (Leaf oneLit)
+      inferIn (env { context = bindVar emptyContext (Ident "d") number }) TRowEmpty
+        (Case unit [ var "d" ] tree)
+        `shouldEqual` Right int
+
+    it "refuses a literal dispatch naming one NaN twice" do
+      -- every NaN is one literal, so two branches on one are two branches on one
+      -- literal, which IEEE equality would have admitted
+      let
+        branch = { lit: LitNumber notANumber, tree: Leaf oneLit }
+        tree = SwitchLit (OccScrutinee 0) [ branch, branch ] (Leaf oneLit)
+      inferIn (env { context = bindVar emptyContext (Ident "d") number }) TRowEmpty
+        (Case unit [ var "d" ] tree)
         `shouldEqual` Left DuplicateBranch
 
     it "refuses a literal dispatch over a type whose values are not literals" do

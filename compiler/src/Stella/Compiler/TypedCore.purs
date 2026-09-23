@@ -14,7 +14,8 @@
 -- | `rec_i` — belong to the evaluator and are not produced by elaboration, so
 -- | they are absent here.
 module Stella.Compiler.TypedCore
-  ( module Stella.Compiler.TypedCore.Name
+  ( module Stella.Compiler.TypedCore.Domain
+  , module Stella.Compiler.TypedCore.Name
   , module Stella.Compiler.TypedCore.Kind
   , module Stella.Compiler.TypedCore.Type
   , module Stella.Compiler.TypedCore.Term
@@ -37,6 +38,7 @@ import Prim as P
 import Stella.Compiler.TypedCore.Check (CheckError(..), CheckFailure, Env, JoinInfo, Typed, check, envOf, infer, isFunVal, isValueForm, typeOf)
 import Stella.Compiler.TypedCore.Context (Context, assume, bindKindVars, bindTyVar, emptyContext, kindVarInScope, lookupTyVar)
 import Stella.Compiler.TypedCore.Declare (CheckedGroup, DeclError(..), DeclFailure, Declared, checkEffectEntries, checkTyConEntries, collectTypes, declare, declareAnnotated, initialSignature)
+import Stella.Compiler.TypedCore.Domain (ScalarString, ScalarValue, codePointOf, compareNumber, sameNumber, scalarString, scalarValue, textOf)
 import Stella.Compiler.TypedCore.Decl (AttrField, AttrValue(..), Attribute, CtorDecl, DataDecl, Decl(..), declAnnotation, EffectDecl, Export(..), ForeignDecl, Module, OpDecl, ValueBinding)
 import Stella.Compiler.TypedCore.Entailment (AtomicFacts, DecomposeError(..), addAssumption, decompose, entails, noFacts)
 import Stella.Compiler.TypedCore.Equality (constraintEquiv, rowEquiv, typeEquiv)

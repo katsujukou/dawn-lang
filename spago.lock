@@ -23,10 +23,12 @@
           "dependencies": [
             "arrays",
             "either",
+            "enums",
             "foldable-traversable",
             "maybe",
             "ordered-collections",
             "prelude",
+            "strings",
             "tuples"
           ]
         },

@@ -14,6 +14,7 @@ import Test.Stella.Compiler.MidIR.Verify as MidVerify
 import Test.Stella.Compiler.TypedCore.Annotation as Annotation
 import Test.Stella.Compiler.TypedCore.Check as Check
 import Test.Stella.Compiler.TypedCore.Declare as Declare
+import Test.Stella.Compiler.TypedCore.Domain as Domain
 import Test.Stella.Compiler.TypedCore.Kinding as Kinding
 import Test.Stella.Compiler.TypedCore.Row as Row
 import Test.Stella.Compiler.Elaborate.Unify as Unify
@@ -30,6 +31,7 @@ main = runSpecAndExitProcess [ consoleReporter ] do
   Row.spec
   Kinding.spec
   Declare.spec
+  Domain.spec
   Check.spec
   Annotation.spec
   MidTranslate.spec
