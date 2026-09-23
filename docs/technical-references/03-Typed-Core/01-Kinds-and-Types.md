@@ -176,7 +176,7 @@ Kind schemes appear **only on declarations**. The global signature `Σ` carries 
 
 The kind of a type constructor produces `Type`, that is `result(κ) = Type`. `Record : Row Type -> Type` is admitted; a constructor producing a row is not, for the reason above.
 
-**An effect constructor is not among them.** Its kind is `κ̄ -> Effect`, binding no kind variable, so an element of a `Row Effect` is written `E τ̄` and carries no `[[κ̄]]` ([Open Questions](../07-Open-Questions/01-Open-Questions.md)).
+**An effect constructor is not among them.** Its kind is `κ̄ -> Effect`, binding no kind variable, so an element of a `Row Effect` is written `E τ̄` and carries no `[[κ̄]]` ([Open Questions](../99-Open-Questions/01-Open-Questions.md)).
 
 Neither the type grammar nor the term grammar has a kind **quantifier**: there is no `forall (k : Kind). τ` and no `Λ (k : Kind). e`. Quantification happens only in declarations. A kind variable enters the local context `Γ` only while checking a declaration whose scheme binds it.
 

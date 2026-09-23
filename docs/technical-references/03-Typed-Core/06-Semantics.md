@@ -121,7 +121,7 @@ v0.1 **accepts this as a known gap**, under three conditions.
 
 1. **Failure is loud and specific.** A second resumption raises a dedicated run-time error, comparable to OCaml 5's `Continuation_already_resumed`. It must not be undefined behaviour and must not silently produce a wrong result.
 2. **A static best-effort check is performed.** Only `full` clauses are in question, a `fast` clause having no continuation to resume. Detecting multiple resumption within a `full` clause is undecidable in general, since `k` can be stored and called in a loop, but the **syntactically evident** cases are detectable: a clause that mentions `k` more than once, or passes `k` to another function, warns at compile time. Most accidents are caught there, leaving the run-time check as a backstop. Writing a clause `fast` where its shape allows removes it from the question altogether.
-3. **Closing the gap is a requirement for v1.0**, recorded in [Open Questions](../07-Open-Questions/01-Open-Questions.md).
+3. **Closing the gap is a requirement for v1.0**, recorded in [Open Questions](../99-Open-Questions/01-Open-Questions.md).
 
 The routes to closing it appear in the table above: full CPS conversion on JavaScript, or a cloning primitive entering the Wasm stack-switching proposal. Making the reference semantics target-parameterized is a third possibility, but it would mean the same Core has different meanings on different backends, which conflicts with the backend independence of Mid IR.
 
@@ -216,7 +216,7 @@ A failure of this kind is **not an effect**. It is not intercepted by `handle`, 
 
 Reduction therefore relates a term to a configuration, `G ⊢ e → c`, where `c` is a term or a fault. The rule propagating a fault out of an evaluation context appears with the contexts below.
 
-**Which entries may fault, and on which inputs, belongs to the `Base` ABI specification** ([Open Questions](../07-Open-Questions/01-Open-Questions.md)) rather than to Core. Core only records that a fault is a possible outcome of applying a `foreign`.
+**Which entries may fault, and on which inputs, belongs to the `Base` ABI specification** ([Open Questions](../99-Open-Questions/01-Open-Questions.md)) rather than to Core. Core only records that a fault is a possible outcome of applying a `foreign`.
 
 ### Conformance of the global environment
 
@@ -772,7 +772,7 @@ The two sides of the boundary carry different kinds of obligation, and conflatin
 
 That `Js.Console.log s` defers its effect therefore rests on the second row, not the first. D23 makes the declaration incapable of *claiming* to be effect-free while sitting on an effectful arrow; it cannot make an implementation behave.
 
-Placing execution outside Core keeps the trusted core free of world state and keeps the reduction relation a closed, deterministic system. The cost is that the ABI must be specified separately before a program can be run end to end ([Open Questions](../07-Open-Questions/01-Open-Questions.md)).
+Placing execution outside Core keeps the trusted core free of world state and keeps the reduction relation a closed, deterministic system. The cost is that the ABI must be specified separately before a program can be run end to end ([Open Questions](../99-Open-Questions/01-Open-Questions.md)).
 
 ## Erasure
 

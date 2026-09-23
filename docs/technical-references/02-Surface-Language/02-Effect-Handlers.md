@@ -214,7 +214,7 @@ What cells add beyond that is a way for an insertion to fail at a site where not
 
 ### What is not provided
 
-**No function written outside a handler reaches its cells.** `region r ι` has no surface spelling, by the decision that keeps `RegionKey` unwritable, so a top-level helper cannot declare the row that would let it read one. A local function in a clause body reaches cells where its type is inferred; one that must be written down does not. Whether to give the region a spelling is left open ([Open Questions](../07-Open-Questions/01-Open-Questions.md)).
+**No function written outside a handler reaches its cells.** `region r ι` has no surface spelling, by the decision that keeps `RegionKey` unwritable, so a top-level helper cannot declare the row that would let it read one. A local function in a clause body reaches cells where its type is inferred; one that must be written down does not. Whether to give the region a spelling is left open ([Open Questions](../99-Open-Questions/01-Open-Questions.md)).
 
 ## Applying a handler
 
@@ -334,7 +334,7 @@ program :: a / {| Console, File |}
 -- against the other, so this is an ambiguity rather than an insertion
 ```
 
-Such a site writes the composition itself, which is an ordinary nesting of two applications and says which order it means. Lifting the restriction is [an open question](../07-Open-Questions/01-Open-Questions.md).
+Such a site writes the composition itself, which is an ordinary nesting of two applications and says which order it means. Lifting the restriction is [an open question](../99-Open-Questions/01-Open-Questions.md).
 
 ### `IO` is not a node
 

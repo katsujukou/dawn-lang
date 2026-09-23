@@ -15,7 +15,7 @@ checked against the signature of each import, and format 0 holds no types: a
 compiler obtains `Σ` as it does today, from the modules it has in hand, and reads a
 `.dmi` beside it for the arities. What D34 describes is the file this one grows
 into — it takes over the signature when Core types are serialized
-([Open Questions](../07-Open-Questions/01-Open-Questions.md)), and separate
+([Open Questions](../99-Open-Questions/01-Open-Questions.md)), and separate
 compilation rests on the pair from then on. Until that, a `.dmi` is a sidecar and
 says so.
 
@@ -107,7 +107,7 @@ parameters is a value whose arity is absent, not a value of arity zero.
 **Nothing else, yet.** The exported types belong here too — an importing module is
 type checked against the signature of each import — and they wait on a
 serialization of Core types, which is open
-([Open Questions](../07-Open-Questions/01-Open-Questions.md)). So does everything
+([Open Questions](../99-Open-Questions/01-Open-Questions.md)). So does everything
 optimization will want, the bodies eligible for inlining among them. Until then a
 `.dmi` is a header and one table.
 

@@ -307,7 +307,7 @@ refusal as an unknown tag: what a code means is not derivable from the file.
 
 Where the ABI specification is written, the table moves there and this section
 names it instead. The specification does not exist yet
-([Open Questions](../07-Open-Questions/01-Open-Questions.md)), and a format that
+([Open Questions](../99-Open-Questions/01-Open-Questions.md)), and a format that
 carries codes needs them fixed somewhere, so they are fixed here.
 
 ### Handlers

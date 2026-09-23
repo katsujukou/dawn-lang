@@ -573,7 +573,7 @@ execution. The machine reports it; nothing in the bytecode catches it, and the
 instructions that produce one are `FFI`, `TAILFFI`, and `PRIM`.
 
 **Which entries fault, and on which inputs, belongs to the ABI specification**
-and is not something a lowering decides ([Open Questions](../07-Open-Questions/01-Open-Questions.md)).
+and is not something a lowering decides ([Open Questions](../99-Open-Questions/01-Open-Questions.md)).
 The ABI fixes one observable meaning for every backend, so the question is
 settled once for all of them rather than per target.
 

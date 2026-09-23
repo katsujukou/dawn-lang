@@ -60,7 +60,7 @@ data PrimOp
 -- | backend on a host that traps on overflow would owe the wrapping form of the
 -- | instruction, and were it to fault, every backend would owe the fault. Until
 -- | the specification settles it, a consumer treats an operation as one that may
--- | ([Open Questions](../../../../docs/technical-references/07-Open-Questions/01-Open-Questions.md)).
+-- | ([Open Questions](../../../../docs/technical-references/99-Open-Questions/01-Open-Questions.md)).
 type PrimEntry =
   { op :: PrimOp
   , entry :: Qualified Ident

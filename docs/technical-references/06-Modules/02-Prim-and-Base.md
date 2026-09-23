@@ -516,7 +516,7 @@ library type such as `Maybe` standing in one would fix that type's
 representation for every backend, and would make the ABI surface depend on the
 layer built over it. A leaf that can fail therefore faults or returns a sentinel,
 and a portable library is where a total wrapper is written. What mechanism, if
-any, should enforce this is open ([Open Questions](../07-Open-Questions/01-Open-Questions.md)).
+any, should enforce this is open ([Open Questions](../99-Open-Questions/01-Open-Questions.md)).
 
 ### `Base.IO.pure` and `Base.IO.bind`
 
@@ -646,7 +646,7 @@ fix, one answer for every backend, as it is for every other entry that may fault
 **Which surface token denotes which value** is the lexer's: `42`, `0x2a`, and
 `0b101010` are one literal, and `"\n"` and `"\u{A}"` are another. `switchLit`
 compares the value, never the spelling
-([Open Questions](../07-Open-Questions/01-Open-Questions.md)).
+([Open Questions](../99-Open-Questions/01-Open-Questions.md)).
 
 ## Manifest intrinsics, which live outside `Prim`
 
@@ -673,7 +673,7 @@ module Base.Array (Array, length, unsafeIndex) where
 signature mentions only `Prim` types and portable manifest intrinsics, so a conversion between
 the two is `Data.Array`. Which construction entries `Base.Array` does supply, and
 whether each is pure or returns `IO`, is part of the ABI content that remains
-open ([Open Questions](../07-Open-Questions/01-Open-Questions.md)).
+open ([Open Questions](../99-Open-Questions/01-Open-Questions.md)).
 
 Splitting it this way keeps the manifest to what only it can express. A `foreign` is checked wherever it is written — every arrow pure (D23), the type well-kinded — and a manifest entry would either duplicate that or become a trusted input for no reason. It also leaves the module free to hold Stella code beside its primitives, which a portable library needs: `Data.Array.mapArray` is written in Stella and uses `unsafeIndex` ([Modules](01-Modules.md)).
 

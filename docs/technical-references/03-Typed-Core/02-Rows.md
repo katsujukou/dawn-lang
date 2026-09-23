@@ -270,7 +270,7 @@ ent ::= element                 written per kind
 | effect | `{\|` `\|}` | `E τ̄` | `EffectKey E`, derived | `{\| Console, State Int \|}` |
 | labelled effect | `{\|` `\|}` | `s :: E τ̄` | `SymbolKey s` | — |
 
-The brackets of a tuple and of a variant, and the spelling a labelled effect takes, are open ([Open Questions](../07-Open-Questions/01-Open-Questions.md)). What is fixed is the element form and the key each produces.
+The brackets of a tuple and of a variant, and the spelling a labelled effect takes, are open ([Open Questions](../99-Open-Questions/01-Open-Questions.md)). What is fixed is the element form and the key each produces.
 
 Desugaring is `⊎` at every kind.
 

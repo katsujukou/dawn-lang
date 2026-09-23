@@ -38,7 +38,7 @@ Anything stronger — asserting preservation over machine states — would need 
 
 ## Notes on step 6
 
-The set of FFI the backend must implement is `stella-base-0.1`, the first version of the `Base` ABI surface ([Open Questions](../07-Open-Questions/01-Open-Questions.md)). The longer it is deferred, the more the standard library settles into a shape that depends on FFI, so it should be fixed while writing this backend.
+The set of FFI the backend must implement is `stella-base-0.1`, the first version of the `Base` ABI surface ([Open Questions](../99-Open-Questions/01-Open-Questions.md)). The longer it is deferred, the more the standard library settles into a shape that depends on FFI, so it should be fixed while writing this backend.
 
 ## Testing the properties instead of proving them
 
