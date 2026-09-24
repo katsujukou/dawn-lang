@@ -14,11 +14,12 @@ stands, and it is what the REPL runs on.
 ## What Steam is for
 
 **The REPL is Steam, and that is a delivered use.** Stella's read-eval-print loop
-is a loop over this interpreter: an entered expression is compiled to a module of
-its own and loaded against the modules already present, which is what keeps the
-container free of whole-program indices ([Bytecode](../05-Backend/01-Bytecode.md)).
-The interpreter therefore reaches users, and the module lifecycle below is written
-for that use rather than for a batch compiler's.
+is a loop over this interpreter: an entered expression is compiled to a module of its
+own and loaded against the modules already present, which is what keeps the container
+free of whole-program indices ([Bytecode](../05-Backend/01-Bytecode.md)). The
+interpreter therefore reaches users, and the module lifecycle below is written for
+that use rather than for a batch compiler's — the session mode below is what the
+shell talks to.
 
 Two uses stand beside it, and neither reaches a user.
 
@@ -29,6 +30,46 @@ Two uses stand beside it, and neither reaches a user.
 - **A way to run what the web backends cannot.** A continuation applied more than
   once is what D33 undertakes and what D18 records the v0.1 JavaScript and Wasm
   backends as lacking
+
+## Two modes
+
+Steam runs in one of two modes, and **the front end is what a user runs**: the
+Stella CLI compiles, decides what Steam is given, and prints what comes back.
+
+| | **Session** | **Run** |
+| --- | --- | --- |
+| lives | across many inputs | for one program |
+| is given | one module, then a request naming what to report | every module of the program in dependency order, and the entry point by name |
+| answers | the value that module's declaration holds | the `IO` of the entry point, executed |
+| ends | when the front end closes it | when that `IO` has been executed, or at the first failure |
+
+**Session is what the REPL is built on.** The shell belongs to the Stella CLI: it
+parses, elaborates, type checks, and compiles an entry to a module of its own, hands
+that module to a Steam running beside it, and prints the value Steam answers with
+beside the type it checked. Steam holds the modules that accumulate and nothing of
+the source.
+
+**Run is one program, once.** The CLI builds the project to `.dmo` files, orders the
+modules by their dependencies, hands Steam the list and the entry point, and Steam
+loads them in the order it was given before executing that entry point.
+
+**The entry point is named, not found.** Several modules may declare a `main`, a
+`.dmo` carries no types and marks no entry point, and a list in dependency order says
+nothing about which of them was meant — so the name comes with the list, as a
+qualified name or as the module whose own `main` is meant. It is read from the
+declaring module's globals and **not** through its exports: an entry point need not
+be exported. What a process makes of the run afterwards — an exit status, and what it
+is for a fault — belongs to the runtime ABI and is not settled
+([Open Questions](../99-Open-Questions/01-Open-Questions.md)); what the mode fixes is
+that the `IO` that global holds is executed to completion, or that a fault ends the
+run.
+
+**Steam resolves no module.** It neither reads an import graph to decide an order
+nor looks for a file: what it is given is what it loads, and in the order it is
+given. A module's `imports` is read as a **condition** — every one of them is
+already in the registry, or the load fails — and never as a way to find anything.
+Ordering is the front end's, which is where the source, the search paths, and the
+build plan are.
 
 ## Scope
 
@@ -255,21 +296,47 @@ loading one is a short procedure against it.
 
 ```text
 loadModule(dmo):
-  every import is already in the registry
-  intern the keys and operations, and resolve every reference
-  initialize the globals in declaration order
-  add the module to the registry
+  every import is already in the registry, and every condition below holds
+  intern the keys, the operations, and the constructors it declares
+  open a slot for each global it declares, holding nothing
+  build the tables of what it declares, under the names it declares them at
+  resolve every reference against those tables and the registry
+  initialize the globals in declaration order, against the working registry
+  commit the module to the registry
 ```
 
-**A module is added only once it has initialized.** One whose initialization faults
-leaves the registry as it was, which is what keeps a failed entry from being visible
-to the next one.
+**The slots come before the references because a resolved reference is a slot.** A
+`GLOBALREFS` entry of this module's own name resolves to the slot this load has just
+opened, and so does a `CALLEES` entry over one; resolving either against a registry
+that does not hold the module yet is what the order above avoids.
+
+**Initialization runs against a working registry**, which is the persistent one with
+the candidate module beside it. It has to: a `run` global's own code reads that
+module's constants, calls the closures its earlier `func` globals installed, and
+names its own globals through `GLOBALREFS`, all of which need the candidate's tables
+and slots to be reachable while nothing of it is yet loaded. The working registry is
+private to the load.
+
+**A module is committed only once it has initialized.** One whose initialization
+faults leaves the persistent registry as it was, and the working registry is
+discarded with it — which is what keeps a failed entry from being visible to the next
+one.
+
+**An interned identity is not taken back.** An identity belongs to a name rather than
+to a module: two modules writing one key get one `KeyId`, and a failed load leaves at
+most an identity nothing refers to. A later module declaring the same name is given
+the same identity, which is the rule the tables exist for, so undoing an interning
+would buy nothing and would need the machine to count what refers to one.
 
 What loading refuses:
 
 | | |
 | --- | --- |
 | A module whose name is already in the registry | one name is one module |
+| A declaration whose qualified name belongs to another module | `CTORS`, `EFFECTS`, `FOREIGNS`, and `GLOBALS` are what **this** module declares ([Bytecode](../05-Backend/01-Bytecode.md)) |
+| A constructor whose owner type belongs to another module | a `CTORS` entry comes from a `data` declaration of this module, so the constructor's name and the type it belongs to are both of it |
+| Two declarations of one name in one namespace: two constructors, two effects, or two values — a global and a foreign among them | the tables are arrays and a name table is what loading makes of them, so which of two a name meant would otherwise depend on the order they were written in |
+| An exported name that is not a value this module declares | `EXPORTS` names its own globals and foreigns, and nothing else |
 | An import that is not loaded | nothing is resolved against a module that is not there |
 | A global or foreign an imported module does not export | `EXPORTS` holds the value names a module publishes, its initialized globals and its foreign declarations alike |
 | A reference that reaches the wrong kind of declaration | a `CTORREFS` entry must reach a constructor, a `FOREIGNREFS` entry a foreign, a `GLOBALREFS` entry a top-level value ([Bytecode](../05-Backend/01-Bytecode.md)) |
@@ -300,6 +367,41 @@ value the user is still holding.
 **A `.dmi` is not read at run time.** It is what a compiler reads in order to emit
 a `CALLK`; what the interpreter checks that call against is the declaring module's
 own `.dmo`.
+
+### What each mode asks of loading
+
+**Initialization is the evaluation.** A `run` global is evaluated once as its module
+is loaded, so a module that has loaded has already computed what its declarations
+hold ([Bytecode](../05-Backend/01-Bytecode.md)). A session's request therefore names
+a global and reads its slot; there is no second step in which a declaration is run.
+
+| | Session | Run |
+| --- | --- | --- |
+| one module arrives | loaded against the registry as it stands | the same, for each of the list in turn |
+| a load fails | the registry is as it was, and the next input is answered | the run ends, and the entry point is not executed |
+| a fault while initializing | the same: the module is not committed | the same, and the run ends |
+| what is reported | the value a named global holds | the named entry point's `IO`, executed |
+
+**A session outlives its failures.** That is the whole of why a module is committed
+only once it has initialized: an entry that faulted must leave nothing behind for the
+next entry to trip over.
+
+### Rendering a value
+
+A session answers with a value, and what it can say about one is **structural**: a
+scalar as itself, a constructor by the name its declaration carries with its fields
+beside it, a record by its keys, and a closure, a continuation, or an `IO` as what it
+is and nothing more.
+
+**So interning keeps both directions.** A value carries an identity and an identity
+is compared, not read, so rendering one needs the way back: a `CtorId` to the
+qualified constructor name it was assigned for, a `KeyId` to the key, and an `OpId`
+to the operation's name where a report names one. Loading is where those are kept,
+which is what stops a session's answer from depending on the `DEBUG` section — a
+section a file need not carry ([Bytecode](../05-Backend/01-Bytecode.md)).
+
+**Type-directed printing is the front end's.** Steam holds no types (D34), so
+rendering by a `Show` instance is the CLI's to do beside the type it checked.
 
 ## Foreign implementations
 
@@ -403,13 +505,13 @@ no effect of its own and reaches no marker outside that run.
 continuation, and nothing of Core observes the wait: executing an `IO` is outside
 the reduction, and the reduction is not re-entered while the loop is waiting.
 
-**The REPL does not execute an `IO` of its own accord.** Recognizing one is not the
+**A session does not execute an `IO` of its own accord.** Recognizing one is not the
 difficulty — an `IO` value is one of the three forms above, and the interpreter can
-see which. What the interpreter cannot know is whether the value was meant to be
-run: a `.dmo` carries no types, and the REPL keeps evaluating an entry and executing
-an action apart on purpose. So an entry whose value is an `IO` prints as one, and
-execution is asked for — by a command (`:run`), or by the invocation of `main` from
-the command line.
+see which. What it cannot know is whether the value was meant to be run: a `.dmo`
+carries no types, and a session keeps evaluating an entry and executing an action
+apart on purpose. So an entry whose value is an `IO` is answered as one, and
+executing it is asked for: by a request of its own in a session, which is what a
+`:run` becomes, and by the invocation of `main` in the run mode.
 
 ## Failures
 

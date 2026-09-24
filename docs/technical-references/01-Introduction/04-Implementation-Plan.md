@@ -38,7 +38,7 @@ Two constraints must be respected even though the constructs they concern belong
 4. Globals, and module loading against a persistent registry
 5. The handler stack, continuations, and cells
 6. The operations, and the host's foreign registry
-7. The REPL
+7. The REPL, whose shell belongs to the CLI and whose evaluator is a session of the interpreter
 8. The `IO` runner, once something needs one executed
 
 **The REPL is the interpreter's delivered use**, which is why it stands inside this order rather than after it: the module lifecycle it needs — an entry compiled to a module of its own, a redefinition adding a module rather than replacing one — is settled with the interpreter and not retrofitted to it ([Abstract Machine](../07-Runtime/01-Abstract-Machine.md)).
