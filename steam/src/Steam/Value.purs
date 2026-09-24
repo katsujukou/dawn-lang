@@ -223,6 +223,10 @@ data StackEntry
 -- | return clause every value passes through.
 type Marker =
   { kind :: MarkerKind
+  -- | Whether the frame directly below it is the region this marker opened. An
+  -- | owner closes that frame before its return clause runs; a reinstatement owns
+  -- | nothing, the frame it stands in belonging to whoever opened it.
+  , ownsRegion :: P.Boolean
   , key :: KeyId
   , clauses :: P.Array Clause
   , returnClause :: Value
@@ -310,7 +314,9 @@ reinstate (Continuation entries) = traverse entry (reinstated entries)
 reinstated :: P.Array StackEntry -> P.Array StackEntry
 reinstated entries = case Array.head entries of
   Just (HandlerMarker marker) ->
-    Array.updateAtIndices [ Tuple 0 (HandlerMarker (marker { kind = Reinstatement })) ] entries
+    Array.updateAtIndices
+      [ Tuple 0 (HandlerMarker (marker { kind = Reinstatement, ownsRegion = false })) ]
+      entries
   _ -> entries
 
 -- Constants ---------------------------------------------------------------------

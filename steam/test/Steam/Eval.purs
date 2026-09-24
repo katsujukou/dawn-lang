@@ -248,7 +248,7 @@ functions =
   -- 17: `VABS`, which nothing reaches
   , plain 2 (returning [ LOADK (Reg 0) (ConstIx 0), VABS (Reg 1) (Reg 0) ] (Reg 1))
 
-  -- 18: an instruction outside what this interpreter carries out
+  -- 18: a cell read where no region declares it
   , plain 3
       ( returning
           [ LOADK (Reg 0) (ConstIx 0)
@@ -303,6 +303,8 @@ loaded =
   , globals: []
   , callees: []
   , prims: []
+  , handlers: []
+  , unit: VData (CtorId 999) []
   , functions: Array.mapMaybe prepared functions
   }
   where
@@ -470,10 +472,11 @@ spec = describe "Steam.Eval" do
         runBaseEffect (Except.runExcept (enter registry elsewhere []))
       held result `shouldEqual` Left (Bug (NoSuchModule (ModuleId 1)))
 
-  describe "what this interpreter does not carry out" do
-    it "names the instruction" do
+    it "a cell no region declares" do
+      -- effect safety rules this out: a handler owning the region encloses every
+      -- read of one of its cells
       result <- runs 18 []
-      held result `shouldEqual` Left (Unimplemented "CGET")
+      held result `shouldEqual` Left (Bug (NoCellDeclared keyA))
 
 derive instance Eq Held
 derive instance Generic Held _

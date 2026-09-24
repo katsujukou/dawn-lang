@@ -37,7 +37,7 @@ import Stella.Compiler.Bytecode.Module (CalleeEntry(..), GlobalInit(..))
 import Stella.Compiler.MiddleEnd.Rep (Rep(..))
 import Stella.Compiler.Primitive (PrimOp(..))
 import Stella.Compiler.TypedCore (Decl(..), Export(..), Expr(..), Ident(..), Kind(..), Literal(..), Module, ModuleName(..), Qualified(..), TyName(..), TyVar(..), Type(..), declareAnnotated, monoScheme, primSignature)
-import Stella.Compiler.TypedCore.Prim (intTy, pureFn)
+import Stella.Compiler.TypedCore.Prim (intTy, primModule, pureFn, unitCtor, unitTy)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
 
@@ -60,6 +60,9 @@ libAdd2 = Qualified libModuleName (Ident "add2")
 
 libPair :: Qualified Ident
 libPair = Qualified libModuleName (Ident "Pair")
+
+libNothing :: Qualified Ident
+libNothing = Qualified libModuleName (Ident "nothing")
 
 libOne :: Qualified Ident
 libOne = Qualified libModuleName (Ident "one")
@@ -120,6 +123,14 @@ libModule =
           { name: Ident "one"
           , scheme: monoScheme int
           , value: Lit 0 (LitInt 1)
+          , attributes: []
+          }
+      -- `Prim.Unit`: the one value of the implicit environment, which every module
+      -- may name and no header mentions
+      , DeclNonRec 4
+          { name: Ident "nothing"
+          , scheme: monoScheme (TCon unitTy [])
+          , value: Global 0 unitCtor []
           , attributes: []
           }
       ]
@@ -230,6 +241,17 @@ spec = describe "Steam.Load" do
               map holds function `shouldEqual` Just AClosure
               map holds value `shouldEqual` Just (AnInt 1)
 
+    it "resolves `Prim.Unit`, which stands in no header" do
+      case compiled of
+        Left err -> fail err
+        Right dmos -> do
+          outcome <- loading [ dmos.int, dmos.lib ]
+          case outcome of
+            Left err -> fail (show err)
+            Right store -> do
+              value <- valueOf store libNothing
+              map holds value `shouldEqual` Just (AData 0)
+
     it "holds each module under an identity of its own" do
       case compiled of
         Left err -> fail err
@@ -245,6 +267,11 @@ spec = describe "Steam.Load" do
   describe "what loading refuses" do
     it "a module whose name is already loaded" do
       refusedBy (\dmos -> [ dmos.int, dmos.int ]) (ModuleTwice intModuleName)
+
+    it "a module under the name the implicit environment holds" do
+      -- `Prim` is Core's own vocabulary and no file declares it
+      refusedBy (\dmos -> [ dmos.int { name = primModule } ])
+        (ReservedModuleName primModule)
 
     it "an import that is not loaded" do
       -- Steam resolves no module: the order is the front end's
@@ -466,12 +493,14 @@ asFunction entry = entry { init = GFunc (funcOf entry.init) }
 data Held
   = AnInt P.Int
   | AClosure
+  | AData P.Int
   | Elsewhere
 
 holds :: Value -> Held
 holds = case _ of
   VInt n -> AnInt n
   VClos _ -> AClosure
+  VData _ fields -> AData (Array.length fields)
   _ -> Elsewhere
 
 -- | That loading the modules a change produces is refused for that reason.
@@ -491,4 +520,5 @@ instance Show Held where
   show = case _ of
     AnInt n -> "AnInt " <> show n
     AClosure -> "AClosure"
+    AData n -> "AData " <> show n
     Elsewhere -> "Elsewhere"

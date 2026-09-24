@@ -52,13 +52,14 @@ import Run (EFFECT, Run, liftEffect)
 import Run.Except (EXCEPT)
 import Run.Except as Except
 import Steam.Eval (Failure, enter)
-import Steam.Module (CalleeTarget(..), CtorRef, ForeignRef, GlobalSlot, Loaded, Prepared, Registry, prepare)
+import Steam.Module (CalleeTarget(..), CtorRef, ForeignRef, GlobalSlot, HandlerRef, Loaded, Prepared, Registry, prepare)
 import Steam.Op as Op
 import Steam.Value (Closure, CtorId(..), Foreign(..), KeyId(..), ModuleId(..), OpId(..), Value(..))
-import Stella.Compiler.Bytecode.Instr (CalleeIx(..), CtorIx(..), ForeignIx(..), FuncIx(..), Function, GlobalIx(..), Instr(..), Join, JoinName, Node, PrimIx(..), Tail(..))
-import Stella.Compiler.Bytecode.Module (CalleeEntry(..), Dmo, GlobalInit(..), Key)
+import Stella.Compiler.Bytecode.Instr (CalleeIx(..), CtorIx(..), ForeignIx(..), FuncIx(..), Function, GlobalIx(..), Instr(..), Join, JoinName, KeyIx(..), Node, OpIx(..), PrimIx(..), Tail(..))
+import Stella.Compiler.Bytecode.Module (CalleeEntry(..), Dmo, GlobalInit(..), HandlerEntry, Key)
 import Stella.Compiler.Primitive (PrimOp, arityOfOp, entryOfOp)
 import Stella.Compiler.TypedCore.Name (EffName, Ident, ModuleName, OpName, Qualified(..))
+import Stella.Compiler.TypedCore.Prim (primModule, unitCtor)
 import Type.Row (type (+))
 
 -- The store ------------------------------------------------------------------------
@@ -142,6 +143,10 @@ globalNamed store name = Map.lookup name store.globals
 
 data LoadError
   = ModuleTwice ModuleName
+  -- | A module under a name the implicit environment holds. `Prim` is Core's own
+  -- | vocabulary and no file declares it, so a file claiming the name would be
+  -- | declaring what every module already names.
+  | ReservedModuleName ModuleName
   -- | A declaration whose qualified name belongs to another module, or a
   -- | constructor whose owner type does.
   | NotThisModule ModuleName (Qualified Ident)
@@ -188,6 +193,13 @@ data LoadError
   | RunGlobalWithParameters (Qualified Ident) P.Int
   -- | An index naming nothing in a table of this module.
   | IndexOutOfRange P.String P.Int
+  -- | A handler naming a key or an operation its module's tables do not hold.
+  | NoSuchKeyIndex P.Int
+  | NoSuchOpIndex P.Int
+  -- | A handler declaring one cell twice, or holding two clauses for one operation.
+  -- | Two indices may intern to one identity, so what is compared is the identity.
+  | CellKeyTwice KeyId
+  | ClauseTwice OpId
   -- | Two join points of one function under one name.
   | JoinNameTwice JoinName
   -- | A foreign this interpreter has no implementation for. Resolution happens at
@@ -209,6 +221,7 @@ refuse = Except.throw
 -- | Load one module against the store, or refuse it.
 load :: forall r. Store -> Dmo -> Run (LOAD r) Store
 load store dmo = do
+  when (dmo.name == primModule) (refuse (ReservedModuleName dmo.name))
   when (isJust (Map.lookup dmo.name store.byName)) (refuse (ModuleTwice dmo.name))
   checkDeclarations dmo
   traverse_ (\name -> when (not (isJust (Map.lookup name store.byName))) (refuse (ImportNotLoaded name)))
@@ -223,6 +236,11 @@ load store dmo = do
   ops <- traverse (internOp store) dmo.ops
   ctorIds <- traverse (\entry -> map { id: _, arity: entry.arity } (internCtor store entry.name))
     dmo.ctors
+
+  -- `Prim.Unit` is the one value the implicit environment holds, and every module
+  -- may name it: it stands among the declarations before a reference is resolved,
+  -- under the identity every module shares
+  unitCtorId <- internCtor store unitCtor
 
   -- the slots, and the tables of what this module declares
   slots <- traverse (\entry -> map (Tuple entry.name) (liftEffect (Ref.new Nothing)))
@@ -241,7 +259,8 @@ load store dmo = do
       { foreigns = Map.union declaredForeigns store.foreigns
       , globals = Map.union declaredGlobals store.globals
       , arities = Map.union declaredArities store.arities
-      , ctors = Map.union declaredCtors store.ctors
+      , ctors = Map.union declaredCtors
+          (Map.union (Map.singleton unitCtor { id: unitCtorId, arity: 0 }) store.ctors)
       , exports = Map.insert dmo.name (Set.fromFoldable (map unqualify dmo.exports)) store.exports
       }
 
@@ -253,6 +272,7 @@ load store dmo = do
   foreigns <- traverse (resolveForeign withDeclarations scope) dmo.foreignRefs
   globalRefs <- traverse (resolveGlobal withDeclarations scope) dmo.globalRefs
   callees <- traverse (resolveCallee withDeclarations scope) dmo.callees
+  handlers <- traverse (resolveHandler keys ops) dmo.handlers
   checkGlobals functions dmo
   checkArities withDeclarations dmo
 
@@ -267,6 +287,8 @@ load store dmo = do
       , globals: globalRefs
       , callees
       , prims: dmo.prims
+      , handlers
+      , unit: VData unitCtorId []
       , functions
       }
 
@@ -397,9 +419,14 @@ type Scope =
   }
 
 -- | That a reference names a module this one imports, or this one itself.
+-- |
+-- | **`Prim` is the exception**, being the implicit environment: it is the vocabulary
+-- | the rules of Core name, it stands in no header, and the one value it holds is
+-- | `Prim.Unit` ([Prim and Base](../../../docs/technical-references/06-Modules/02-Prim-and-Base.md)).
 imported :: forall r. Scope -> Qualified Ident -> Run (LOAD r) Unit
 imported scope name@(Qualified moduleName _) =
-  when (not (Set.member moduleName scope.allowed)) (refuse (NotImported scope.here name))
+  when (moduleName /= primModule && not (Set.member moduleName scope.allowed))
+    (refuse (NotImported scope.here name))
 
 -- | That the module declaring a name published it, where that module is not this
 -- | one. A constructor is not checked this way: `EXPORTS` holds value names, and
@@ -488,6 +515,43 @@ checkGlobals functions dmo = traverse_ one dmo.globals
   functionAt (FuncIx i) = case Array.index functions i of
     Just function -> pure function
     Nothing -> refuse (IndexOutOfRange "FUNCTIONS" i)
+
+-- | A handler with the key it answers, its cells' keys, and its clauses resolved. A
+-- | `HANDLERS` entry indexes this module's own `KEYS` and `OPS`, so nothing is
+-- | looked up where the handler is installed.
+resolveHandler
+  :: forall r
+   . P.Array KeyId
+  -> P.Array OpId
+  -> HandlerEntry
+  -> Run (LOAD r) HandlerRef
+resolveHandler keys ops entry = do
+  key <- keyAt entry.key
+  cells <- traverse keyAt entry.cells
+  opClauses <- traverse clause entry.opClauses
+  unique CellKeyTwice cells
+  unique ClauseTwice (map _.op opClauses)
+  pure { key, cells, opClauses }
+  where
+  keyAt (KeyIx i) = case Array.index keys i of
+    Just key -> pure key
+    Nothing -> refuse (NoSuchKeyIndex i)
+
+  clause c = do
+    op <- case c.op of
+      OpIx i -> case Array.index ops i of
+        Just op -> pure op
+        Nothing -> refuse (NoSuchOpIndex i)
+    pure { op, form: c.form }
+
+  -- a cell is found by its key and a clause by its operation, so either standing
+  -- twice would leave which one a `CGET` or a `PERF` means to the order of a table
+  unique :: forall r2 a. Ord a => (a -> LoadError) -> P.Array a -> Run (LOAD r2) Unit
+  unique twice names = void (foldM one Set.empty names)
+    where
+    one seen name
+      | Set.member name seen = refuse (twice name)
+      | otherwise = pure (Set.insert name seen)
 
 -- | That every call in the code supplies a count the declaration it reaches admits.
 -- |

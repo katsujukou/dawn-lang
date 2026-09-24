@@ -86,6 +86,7 @@ markedSegment = do
     closure = { func, captures }
     marker =
       { kind: Owner
+      , ownsRegion: false
       , key: KeyId 0
       , clauses: []
       , returnClause: VClos closure

@@ -378,6 +378,8 @@ libModule = pure
   , globals: []
   , callees: []
   , prims: []
+  , handlers: []
+  , unit: VData (CtorId 999) []
   , functions: Array.mapMaybe prepared libFunctions
   }
 
@@ -407,6 +409,8 @@ loadedModule lib = do
         , TargetForeign (ForeignOperation IntSub) 2
         ]
     , prims: [ IntAdd ]
+    , handlers: []
+    , unit: VData (CtorId 999) []
     , functions: Array.mapMaybe prepared functions
     }
   where

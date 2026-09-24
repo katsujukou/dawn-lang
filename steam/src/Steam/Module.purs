@@ -15,6 +15,8 @@ module Steam.Module
   , Loaded
   , CtorRef
   , ForeignRef
+  , HandlerRef
+  , ClauseRef
   , GlobalSlot
   , CalleeTarget(..)
   , Prepared
@@ -35,6 +37,7 @@ import Effect.Ref (Ref)
 import Steam.Value (CtorId, Foreign, KeyId, ModuleId, OpId, Value)
 import Stella.Compiler.Primitive (PrimOp)
 import Stella.Compiler.Bytecode.Instr (Function, Join, JoinName, Node)
+import Stella.Compiler.MiddleEnd.IR (ClauseForm)
 import Stella.Compiler.Bytecode.Module (Constant)
 
 -- | The modules loaded, under the identities the registry assigned. A closure
@@ -64,7 +67,25 @@ type Loaded =
   , callees :: P.Array CalleeTarget
   -- | One entry per `PRIMS` index: the operations this module carries out.
   , prims :: P.Array PrimOp
+  -- | One entry per `HANDLERS` index, with every key and operation resolved.
+  , handlers :: P.Array HandlerRef
+  -- | `Prim.Unit`, which a write to a cell produces. Core names the constructor and
+  -- | no module declares it, so the identity is the registry's like any other.
+  , unit :: Value
   , functions :: P.Array Prepared
+  }
+
+-- | A handler as a file states it: the key it answers, the keys of the cells its
+-- | region opens, and a clause per operation.
+type HandlerRef =
+  { key :: KeyId
+  , cells :: P.Array KeyId
+  , opClauses :: P.Array ClauseRef
+  }
+
+type ClauseRef =
+  { op :: OpId
+  , form :: ClauseForm
   }
 
 -- | Where a top-level value stands once its module is initialized. A slot holds
