@@ -4,6 +4,7 @@ package:
   dependencies:
     - ansi
     - argparse-basic
+    - compiler
     - console
     - dodo-printer
     - either
