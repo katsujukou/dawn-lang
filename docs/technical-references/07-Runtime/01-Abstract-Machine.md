@@ -21,7 +21,22 @@ interpreter therefore reaches users, and the module lifecycle below is written f
 that use rather than for a batch compiler's — the session mode below is what the
 shell talks to.
 
-Two uses stand beside it, and neither reaches a user.
+**The compiler is a user too.** Elaboration is split into policy, which is guest
+Stella, and mechanism, which is the compiler's (D39): a synthesizer named by a
+`⟨ τ by f ⟩` is an ordinary Stella function, and the compiler runs it on this
+interpreter, reaching it by the resolved qualified name the constraint carries
+([Elaborator API](../02-Surface-Language/03-Elaborator-API.md)).
+
+**What that use shares is the machine, and not a protocol.** The registry, loading a
+module at a time, resolving a name, and the interpreter running the code are the same
+for it as for anything else. What it asks for beyond them is its own: a synthesizer is
+a function, so it is **applied** to a goal the host holds; an `Elab` operation it
+performs is answered by the host and **the same attempt continues** from that answer;
+and an attempt the host abandons **discards what the run had reached**. Whether that
+becomes a mode of its own or a capability the session mode gains is not settled
+([Open Questions](../99-Open-Questions/01-Open-Questions.md)).
+
+Two uses stand beside those, and neither reaches a user.
 
 - **A second evaluator to compare the Core evaluator against.** One program run
   both ways gives the same value and the same sequence of observable effects, which
@@ -42,6 +57,10 @@ Stella CLI compiles, decides what Steam is given, and prints what comes back.
 | is given | one module, then a request naming what to report | every module of the program in dependency order, and the entry point by name |
 | answers | the value that module's declaration holds | the `IO` of the entry point, executed |
 | ends | when the front end closes it | when that `IO` has been executed, or at the first failure |
+
+**What this mode fixes is the loading half**, which the compiler's use shares: a
+module at a time, and a request naming what to report. Running a synthesizer asks for
+more than that, and how it asks is open (above).
 
 **Session is what the REPL is built on.** The shell belongs to the Stella CLI: it
 parses, elaborates, type checks, and compiles an entry to a module of its own, hands
@@ -95,6 +114,11 @@ FFI before it could run anything, and the REPL gains nothing from them.
 A **host** is what the interpreter runs on and reaches the outside world through.
 The **core** is everything an instruction means, and it is written once so that a
 second host changes no rule.
+
+**A host is not always a command line.** For a session the compiler opens, the
+compiler is the host: an `Elab` operation — unify these two, make a metavariable,
+abandon the attempt — is a capability it supplies where another host supplies a
+native action ([Elaborator API](../02-Surface-Language/03-Elaborator-API.md)).
 
 | The core holds | The host supplies |
 | --- | --- |
@@ -337,12 +361,40 @@ What loading refuses:
 | A constructor whose owner type belongs to another module | a `CTORS` entry comes from a `data` declaration of this module, so the constructor's name and the type it belongs to are both of it |
 | Two declarations of one name in one namespace: two constructors, two effects, or two values — a global and a foreign among them | the tables are arrays and a name table is what loading makes of them, so which of two a name meant would otherwise depend on the order they were written in |
 | An exported name that is not a value this module declares | `EXPORTS` names its own globals and foreigns, and nothing else |
+| Two join points of one function under one name | a transfer names one of them ([Bytecode](../05-Backend/01-Bytecode.md)) |
 | An import that is not loaded | nothing is resolved against a module that is not there |
+| A reference to a module this one does not import | **a header says which modules a term may name**, and the order modules happen to be loaded in adds nothing to it. This is not the row above: the module may be loaded and still be one this one never imported |
 | A global or foreign an imported module does not export | `EXPORTS` holds the value names a module publishes, its initialized globals and its foreign declarations alike |
 | A reference that reaches the wrong kind of declaration | a `CTORREFS` entry must reach a constructor, a `FOREIGNREFS` entry a foreign, a `GLOBALREFS` entry a top-level value ([Bytecode](../05-Backend/01-Bytecode.md)) |
-| A `CALLK`, or a `PAP` over a global, whose arity the declaring module's function table does not admit | this is where an interface that published a wrong arity is caught ([Interface](../05-Backend/03-Interface.md)) |
 | A foreign with no implementation | resolution happens at load, so a program whose foreigns are incomplete does not start |
 | An operation code the interpreter does not implement | at the profile it claims ([Prim and Base](../06-Modules/02-Prim-and-Base.md)) |
+
+**What a count must be is the declaring module's to say, and this is where the
+modules are together.** Every call in the code is read against the declaration it
+reaches, so **a call a wrong arity produced is caught here** rather than where it
+would run.
+
+**What is checked are the calls and not the interface.** A `.dmi` is not read at
+load, and nothing establishes that one was right: an entry no call used is caught by
+nothing, and a `PAP` a wrong arity produced passes wherever it is still below the
+true one — which is a partial application meaning exactly what it means
+([Interface](../05-Backend/03-Interface.md)).
+
+| The code holds | Why |
+| --- | --- |
+| A `CALLK` or `TAILK` supplying other than the definitional arity the declaring module states, or reaching a global that states none | a known call is a transfer to an entry whose arity is settled (D30) |
+| A `PAP` supplying the callee's arity or more, **whatever kind of callee it stands over** — a global, a constructor, a foreign, or an operation | a partial application is what is applied below an arity; at or above one it is a call |
+| A `CTOR` supplying other than the constructor's arity, or a `LOADC` naming a constructor that takes fields | a saturated constructor application is what either is |
+| An `FFI` or `TAILFFI` supplying other than the arity the foreign declares | a foreign takes all of its arguments at once (D23) |
+| A `PRIM` supplying other than the operation's arity | an operation's arity is the ABI's ([Prim and Base](../06-Modules/02-Prim-and-Base.md)) |
+
+**How a global is installed is read against the function it names.**
+
+| The module holds | Why |
+| --- | --- |
+| A `func` global whose function takes no parameters | a definitional arity counts leading lambdas and is at least one, so a value with none is a `run` global instead |
+| A `run` global whose function takes parameters | it is entered with no arguments |
+| Either, where the function expects captures | a global installs a closure over an empty capture list: at the top level every free name is a global, so there is nothing to capture |
 
 **A constructor's export is not in the file.** `EXPORTS` holds value names — a
 global's and a foreign's — so what a loader establishes about a constructor
