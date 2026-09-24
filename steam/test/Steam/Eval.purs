@@ -41,7 +41,7 @@ import Run (runBaseEffect)
 import Run.Except as Except
 import Steam.Eval (Bug(..), Class(..), Failure(..), enter)
 import Data.Tuple (Tuple(..))
-import Steam.Module (LoadError(..), Loaded, Registry, prepare)
+import Steam.Module (Loaded, Registry, prepare)
 import Steam.Value (Closure, CtorId(..), KeyId(..), ModuleId(..), Value(..))
 import Stella.Compiler.Bytecode.Instr (ConstIx(..), CtorIx(..), FuncIx(..), Function, Instr(..), Join, JoinName(..), KeyIx(..), Node, PrimIx(..), Reg(..), Tail(..))
 import Stella.Compiler.Bytecode.Module (Constant(..))
@@ -249,10 +249,10 @@ functions =
   , plain 2 (returning [ LOADK (Reg 0) (ConstIx 0), VABS (Reg 1) (Reg 0) ] (Reg 1))
 
   -- 18: an instruction outside what this interpreter carries out
-  , plain 2
+  , plain 3
       ( returning
           [ LOADK (Reg 0) (ConstIx 0)
-          , PRIM (Reg 1) (PrimIx 0) [ Reg 0, Reg 0 ]
+          , CGET (Reg 1) (KeyIx 0)
           ]
           (Reg 1)
       )
@@ -263,7 +263,16 @@ functions =
   -- 20: an index naming nothing
   , plain 1 (returning [ LOADK (Reg 0) (ConstIx 9) ] (Reg 0))
 
-  -- 21: a dispatch whose cases do not match and which carries no default
+  -- 21: an operation this module's `PRIMS` does not hold
+  , plain 2
+      ( returning
+          [ LOADK (Reg 0) (ConstIx 0)
+          , PRIM (Reg 1) (PrimIx 0) [ Reg 0, Reg 0 ]
+          ]
+          (Reg 1)
+      )
+
+  -- 22: a dispatch whose cases do not match and which carries no default
   , plain 1
       { code: [ LOADC (Reg 0) (CtorIx 1) ]
       , tail: BRC (Reg 0) [ { ctor: CtorIx 0, body: returning [] (Reg 0) } ] Nothing
@@ -284,13 +293,16 @@ loaded =
   { id: ModuleId 0
   , constants: [ CInt 1, CInt 2, CNumber 0.0, CNumber (-0.0), CBoolean true ]
   , keys: [ keyA, keyB ]
+  , ops: []
   , ctors:
       [ { id: pairCtor, arity: 2 }
       , { id: nilCtor, arity: 0 }
       ]
-  -- the instructions here name neither a global nor a callee
+  , foreigns: []
+  -- the instructions here name no global, callee, or operation
   , globals: []
   , callees: []
+  , prims: []
   , functions: Array.mapMaybe prepared functions
   }
   where
@@ -345,8 +357,7 @@ spec = describe "Steam.Eval" do
       Array.length loaded.functions `shouldEqual` Array.length functions
 
     it "is refused where one name stands over two join points" do
-      map (const unit) (prepare nameTwice)
-        `shouldEqual` Left (JoinNameTwice (JoinName 0))
+      map (const unit) (prepare nameTwice) `shouldEqual` Left (JoinName 0)
 
   describe "records" do
     it "extends and selects" do
@@ -442,8 +453,12 @@ spec = describe "Steam.Eval" do
       result <- runs 0 [ VInt 1 ]
       held result `shouldEqual` Left (Bug (WrongArgumentCount (FuncIx 0) 0 1))
 
-    it "a dispatch with no case and no default" do
+    it "an index naming nothing in PRIMS" do
       result <- runs 21 []
+      held result `shouldEqual` Left (Bug (NoSuchPrim (PrimIx 0)))
+
+    it "a dispatch with no case and no default" do
+      result <- runs 22 []
       held result `shouldEqual` Left (Bug NoBranchTaken)
 
     it "a closure of a module the registry does not hold" do
@@ -458,7 +473,7 @@ spec = describe "Steam.Eval" do
   describe "what this interpreter does not carry out" do
     it "names the instruction" do
       result <- runs 18 []
-      held result `shouldEqual` Left (Unimplemented "PRIM")
+      held result `shouldEqual` Left (Unimplemented "CGET")
 
 derive instance Eq Held
 derive instance Generic Held _

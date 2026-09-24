@@ -36,6 +36,7 @@ import Prelude
 import Prim as P
 
 import Data.Array as Array
+import Data.Either (Either(..))
 import Data.Foldable (traverse_)
 import Data.Generic.Rep (class Generic)
 import Data.Map as Map
@@ -48,9 +49,11 @@ import Effect.Ref as Ref
 import Run (EFFECT, Run, liftEffect)
 import Run.Except (EXCEPT)
 import Run.Except as Except
-import Steam.Module (CalleeTarget(..), CtorRef, GlobalSlot, Loaded, Prepared, Registry)
-import Steam.Value (Activation, Callee(..), Closure, Continuation, CtorId, ForeignId, KeyId, ModuleId, StackEntry(..), Value(..), matchesConstant, reinstate, valueOfConstant)
-import Stella.Compiler.Bytecode.Instr (CalleeIx(..), ConstIx(..), CtorIx(..), FuncIx(..), GlobalIx(..), Instr(..), Join, JoinName, KeyIx(..), Reg(..), Tail(..))
+import Steam.Module (CalleeTarget(..), CtorRef, ForeignRef, GlobalSlot, Loaded, Prepared, Registry)
+import Steam.Op (Fault)
+import Steam.Op as Op
+import Steam.Value (Activation, Callee(..), Closure, Continuation, CtorId, Foreign(..), KeyId, ModuleId, StackEntry(..), Value(..), matchesConstant, reinstate, valueOfConstant)
+import Stella.Compiler.Bytecode.Instr (CalleeIx(..), ConstIx(..), CtorIx(..), ForeignIx(..), FuncIx(..), GlobalIx(..), Instr(..), Join, JoinName, KeyIx(..), PrimIx(..), Reg(..), Tail(..))
 import Stella.Compiler.Bytecode.Module (Constant)
 import Stella.Compiler.Primitive (PrimOp, arityOfOp)
 import Type.Row (type (+))
@@ -101,6 +104,11 @@ data Bug
   | WrongJumpArity JoinName P.Int P.Int
   -- | A partial application that is not partial, as the arity and the count.
   | PapNotBelowArity P.Int P.Int
+  -- | Operands an operation does not take, by the operation.
+  | WrongOperands PrimOp
+  -- | An index naming nothing in the module's `PRIMS`.
+  | NoSuchPrim PrimIx
+  | NoSuchForeign ForeignIx
   -- | An application supplying no argument, which nothing produces.
   | NoArgument
   -- | A field of a constructor value the constructor does not have.
@@ -122,6 +130,9 @@ data Bug
 -- | What ends a run before its value.
 data Failure
   = Bug Bug
+  -- | An operation or a foreign failing as the ABI says it may. Nothing catches one
+  -- | ([Bytecode](../../../docs/technical-references/05-Backend/01-Bytecode.md)).
+  | Faults Fault
   -- | An instruction outside what this interpreter carries out, by its mnemonic.
   | Unimplemented P.String
 
@@ -232,6 +243,20 @@ bug = Except.throw <<< Bug
 
 unimplemented :: forall r a. P.String -> Run (EVAL r) a
 unimplemented = Except.throw <<< Unimplemented
+
+-- | A fault discards the stack and ends the run.
+fault :: forall r a. Fault -> Run (EVAL r) a
+fault = Except.throw <<< Faults
+
+foreignAt :: forall r. Loaded -> ForeignIx -> Run (EVAL r) ForeignRef
+foreignAt loaded ix@(ForeignIx i) = case Array.index loaded.foreigns i of
+  Just entry -> pure entry
+  Nothing -> bug (NoSuchForeign ix)
+
+primAt :: forall r. Loaded -> PrimIx -> Run (EVAL r) PrimOp
+primAt loaded ix@(PrimIx i) = case Array.index loaded.prims i of
+  Just op -> pure op
+  Nothing -> bug (NoSuchPrim ix)
 
 -- The stack ------------------------------------------------------------------------
 
@@ -345,14 +370,14 @@ applyCallee machine callee args = do
 data Resolved
   = ResolvedClosure Closure Prepared
   | ResolvedCtor CtorId P.Int
-  | ResolvedForeign ForeignId P.Int
+  | ResolvedForeign Foreign P.Int
   | ResolvedPrim PrimOp P.Int
 
 resolve :: forall r. Machine -> Callee -> Run (EVAL r) Resolved
 resolve machine = case _ of
   CalleeClosure closure -> map (ResolvedClosure closure) (functionOf machine closure)
   CalleeCtor ctor arity -> pure (ResolvedCtor ctor arity)
-  CalleeForeign entry arity -> pure (ResolvedForeign entry arity)
+  CalleeForeign carriedOutBy arity -> pure (ResolvedForeign carriedOutBy arity)
   CalleePrim op -> pure (ResolvedPrim op (arityOfOp op))
 
 arityOf :: Resolved -> P.Int
@@ -372,8 +397,12 @@ saturated :: forall r. Machine -> Resolved -> P.Array Value -> Run (EVAL r) Stat
 saturated _ resolved args = case resolved of
   ResolvedClosure closure function -> map Running (activationIn closure function args)
   ResolvedCtor ctor _ -> pure (Returning (VData ctor args))
-  ResolvedForeign _ _ -> unimplemented "a foreign"
-  ResolvedPrim _ _ -> unimplemented "an operation"
+  ResolvedForeign carriedOutBy _ -> carryOutForeign carriedOutBy args
+  ResolvedPrim op _ -> case Op.carryOut op args of
+    Right value -> pure (Returning value)
+    Left (Op.Faulted reason) -> fault reason
+    Left Op.WrongOperands -> bug (WrongOperands op)
+    Left (Op.NotImplemented _) -> unimplemented "an operation"
 
 -- | Apply a continuation, which takes one argument.
 -- |
@@ -486,7 +515,10 @@ transfer machine loaded activation = do
       values <- traverse (readReg activation) args
       applyTo machine callee values
 
-    TAILFFI _ _ -> unimplemented "TAILFFI"
+    TAILFFI ix args -> do
+      entry <- foreignAt loaded ix
+      values <- traverse (readReg activation) args
+      carryOutForeign entry.carriedOutBy values
     TAILHNDL _ _ _ _ _ -> unimplemented "TAILHNDL"
   where
   enters node = Running (activation { node = node, ip = 0 })
@@ -640,8 +672,26 @@ exec machine loaded activation = case _ of
 
   VABS _ _ -> bug Unreachable
 
-  FFI _ _ _ -> unimplemented "FFI"
-  PRIM _ _ _ -> unimplemented "PRIM"
+  -- a `Base` entry the interpreter claims is carried out by the interpreter, and
+  -- what it means is the ABI's
+  FFI d ix args -> do
+    entry <- foreignAt loaded ix
+    values <- traverse (readReg activation) args
+    state <- carryOutForeign entry.carriedOutBy values
+    case state of
+      Returning value -> advance (writeReg activation d value)
+      _ -> bug (NotOfClass ACallable)
+
+  -- an operation is a `Base` entry this interpreter carries out itself, and what
+  -- each one means is the ABI's ([Op](Op.purs))
+  PRIM d ix args -> do
+    op <- primAt loaded ix
+    values <- traverse (readReg activation) args
+    case Op.carryOut op values of
+      Right value -> advance (writeReg activation d value)
+      Left (Op.Faulted reason) -> fault reason
+      Left Op.WrongOperands -> bug (WrongOperands op)
+      Left (Op.NotImplemented _) -> unimplemented "an operation"
   PERF _ _ _ _ -> unimplemented "PERF"
   HNDL _ _ _ _ _ _ -> unimplemented "HNDL"
   CGET _ _ -> unimplemented "CGET"
@@ -665,6 +715,16 @@ expectCaptures loaded func given = do
   when (given /= function.ncaptures)
     (bug (WrongCaptureCount func function.ncaptures given))
 
+-- | Carry out a foreign, which for a `Base` entry the interpreter claims is
+-- | carrying out the operation it stands for.
+carryOutForeign :: forall r. Foreign -> P.Array Value -> Run (EVAL r) State
+carryOutForeign carriedOutBy args = case carriedOutBy of
+  ForeignOperation op -> case Op.carryOut op args of
+    Right value -> pure (Returning value)
+    Left (Op.Faulted reason) -> fault reason
+    Left Op.WrongOperands -> bug (WrongOperands op)
+    Left (Op.NotImplemented _) -> unimplemented "an operation"
+
 -- | The callee a `CALLEES` entry stands for.
 calleeOf :: forall r. CalleeTarget -> Run (EVAL r) Callee
 calleeOf = case _ of
@@ -674,7 +734,7 @@ calleeOf = case _ of
       Just (VClos closure) -> pure (CalleeClosure closure)
       _ -> bug (NotOfClass AClosure)
   TargetCtor ctor arity -> pure (CalleeCtor ctor arity)
-  TargetForeign entry arity -> pure (CalleeForeign entry arity)
+  TargetForeign carriedOutBy arity -> pure (CalleeForeign carriedOutBy arity)
   TargetPrim op -> pure (CalleePrim op)
 
 readRecord :: forall r. Activation -> Reg -> Run (EVAL r) (Map.Map KeyId Value)

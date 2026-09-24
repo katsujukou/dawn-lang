@@ -38,7 +38,7 @@ import Run.Except as Except
 import Steam.Eval (Bug(..), Class(..), Failure(..), enter)
 import Data.Tuple (Tuple(..))
 import Steam.Module (CalleeTarget(..), GlobalSlot, Loaded, Prepared, Registry, prepare)
-import Steam.Value (Closure, Continuation(..), CtorId(..), ForeignId(..), ModuleId(..), StackEntry(..), Value(..))
+import Steam.Value (Closure, Continuation(..), CtorId(..), Foreign(..), ModuleId(..), StackEntry(..), Value(..))
 import Stella.Compiler.Primitive (PrimOp(..))
 import Stella.Compiler.Bytecode.Instr (CalleeIx(..), ConstIx(..), FuncIx(..), Function, GlobalIx(..), Instr(..), Node, Reg(..), Tail(..))
 import Stella.Compiler.Bytecode.Module (Constant(..))
@@ -372,9 +372,12 @@ libModule = pure
   { id: ModuleId 1
   , constants: [ CInt 42 ]
   , keys: []
+  , ops: []
   , ctors: []
+  , foreigns: []
   , globals: []
   , callees: []
+  , prims: []
   , functions: Array.mapMaybe prepared libFunctions
   }
 
@@ -393,14 +396,17 @@ loadedModule lib = do
     { id: ModuleId 0
     , constants: [ CInt 1, CInt 2, CBoolean false, CBoolean true ]
     , keys: []
+    , ops: []
     , ctors: [ { id: pairCtor, arity: 2 } ]
+    , foreigns: []
     , globals: [ identity', second, higher, middle, self, value, empty, elsewhere ]
     , callees:
         [ TargetGlobal second
         , TargetCtor pairCtor 2
         , TargetPrim IntAdd
-        , TargetForeign (ForeignId 0) 2
+        , TargetForeign (ForeignOperation IntSub) 2
         ]
+    , prims: [ IntAdd ]
     , functions: Array.mapMaybe prepared functions
     }
   where
@@ -528,17 +534,20 @@ spec = describe "Steam.Calls" do
       result <- runs 28 []
       held result `shouldEqual` Right (APap 1)
 
-    it "reaches the operation once saturated" do
+    it "carries out the operation once saturated" do
+      -- the count decides before the kind: at the last argument the entry runs
       result <- runs 29 []
-      held result `shouldEqual` Left (Unimplemented "an operation")
+      held result `shouldEqual` Right (AnInt 2)
 
     it "stores the arguments a foreign has so far" do
       result <- runs 30 []
       held result `shouldEqual` Right (APap 1)
 
-    it "reaches the foreign once saturated" do
+    it "carries out the foreign once saturated" do
+      -- the fixture stands over `Base.Int.sub`, which the interpreter carries out
+      -- itself: 1 - 1
       result <- runs 31 []
-      held result `shouldEqual` Left (Unimplemented "a foreign")
+      held result `shouldEqual` Right (AnInt 0)
 
   describe "a known call" do
     it "reaches a global of another module, and that module's own tables" do

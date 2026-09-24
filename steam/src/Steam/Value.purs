@@ -20,7 +20,7 @@ module Steam.Value
   , CtorId(..)
   , KeyId(..)
   , OpId(..)
-  , ForeignId(..)
+  , Foreign(..)
   , FuncRef
   , Value(..)
   , Opaque
@@ -78,8 +78,12 @@ newtype KeyId = KeyId P.Int
 -- | An operation name, which is what a clause of a handler is found by.
 newtype OpId = OpId P.Int
 
--- | A foreign entry, and with it the adapter the registry holds for it.
-newtype ForeignId = ForeignId P.Int
+-- | What a foreign entry is carried out by.
+-- |
+-- | A `Base` ABI entry the interpreter claims is carried out by the interpreter
+-- | itself: its meaning is one for every backend and what it computes over is this
+-- | representation ([Op](Op.purs)).
+data Foreign = ForeignOperation PrimOp
 
 -- | A function table entry of a loaded module.
 type FuncRef =
@@ -159,7 +163,7 @@ type Closure =
 data Callee
   = CalleeClosure Closure
   | CalleeCtor CtorId P.Int
-  | CalleeForeign ForeignId P.Int
+  | CalleeForeign Foreign P.Int
   | CalleePrim PrimOp
 
 -- | A callee and the arguments supplied so far, which are always fewer than the
@@ -356,9 +360,7 @@ derive instance Eq OpId
 derive instance Ord OpId
 derive newtype instance Show OpId
 
-derive instance Eq ForeignId
-derive instance Ord ForeignId
-derive newtype instance Show ForeignId
+derive instance Eq Foreign
 
 derive instance Eq MarkerKind
 derive instance Generic MarkerKind _

@@ -14,10 +14,10 @@ module Steam.Module
   ( Registry
   , Loaded
   , CtorRef
+  , ForeignRef
   , GlobalSlot
   , CalleeTarget(..)
   , Prepared
-  , LoadError(..)
   , prepare
   ) where
 
@@ -28,13 +28,11 @@ import Prim as P
 import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Foldable (foldM)
-import Data.Generic.Rep (class Generic)
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Show.Generic (genericShow)
 import Data.Maybe (Maybe)
 import Effect.Ref (Ref)
-import Steam.Value (CtorId, ForeignId, KeyId, ModuleId, Value)
+import Steam.Value (CtorId, Foreign, KeyId, ModuleId, OpId, Value)
 import Stella.Compiler.Primitive (PrimOp)
 import Stella.Compiler.Bytecode.Instr (Function, Join, JoinName, Node)
 import Stella.Compiler.Bytecode.Module (Constant)
@@ -50,13 +48,22 @@ type Loaded =
   , constants :: P.Array Constant
   -- | One entry per `KEYS` index, as the key it resolves to.
   , keys :: P.Array KeyId
+  -- | One entry per `OPS` index, as the operation name it resolves to. A clause of
+  -- | a handler is found by one, and the `perform` and the handler need not be in
+  -- | one module.
+  , ops :: P.Array OpId
   -- | One entry per `CTORREFS` index: the constructors this module's code names,
   -- | its own and those of the modules it imports.
   , ctors :: P.Array CtorRef
   -- | One entry per `GLOBALREFS` index, as the slot of the module declaring it.
   , globals :: P.Array GlobalSlot
+  -- | One entry per `FOREIGNREFS` index: what carries out the foreign this
+  -- | module's code names.
+  , foreigns :: P.Array ForeignRef
   -- | One entry per `CALLEES` index: what a partial application is over.
   , callees :: P.Array CalleeTarget
+  -- | One entry per `PRIMS` index: the operations this module carries out.
+  , prims :: P.Array PrimOp
   , functions :: P.Array Prepared
   }
 
@@ -73,8 +80,14 @@ type GlobalSlot = Ref (Maybe Value)
 data CalleeTarget
   = TargetGlobal GlobalSlot
   | TargetCtor CtorId P.Int
-  | TargetForeign ForeignId P.Int
+  | TargetForeign Foreign P.Int
   | TargetPrim PrimOp
+
+-- | A foreign a module's code names, with the arity its declaration states.
+type ForeignRef =
+  { carriedOutBy :: Foreign
+  , arity :: P.Int
+  }
 
 -- | A constructor a module's code names, with the arity its declaration states.
 -- | A constructor is applied all at once or through a partial application, so an
@@ -97,14 +110,13 @@ type Prepared =
   , joins :: Map JoinName Join
   }
 
--- | What a module may hold that cannot be loaded.
-data LoadError
-  -- | Two join points of one function under one name. Which one a transfer means
-  -- | would otherwise depend on the order they were written in.
-  = JoinNameTwice JoinName
-
--- | What loading makes of a function.
-prepare :: Function -> Either LoadError Prepared
+-- | What loading makes of a function: the body to enter, and its join points under
+-- | the names its transfers carry.
+-- |
+-- | **A name stands over one join point of a function**, so a file writing two under
+-- | one name has no reading and is refused; what comes back is the name it wrote
+-- | twice.
+prepare :: Function -> Either JoinName Prepared
 prepare function = do
   joins <- foldM one Map.empty function.joins
   pure
@@ -115,11 +127,5 @@ prepare function = do
     }
   where
   one acc join
-    | Map.member join.name acc = Left (JoinNameTwice join.name)
+    | Map.member join.name acc = Left join.name
     | otherwise = Right (Map.insert join.name join acc)
-
-derive instance Eq LoadError
-derive instance Generic LoadError _
-
-instance Show LoadError where
-  show = genericShow
