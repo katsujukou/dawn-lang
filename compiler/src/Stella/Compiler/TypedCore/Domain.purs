@@ -20,6 +20,8 @@ module Stella.Compiler.TypedCore.Domain
   , scalarString
   , scalarStringOf
   , textOf
+  , scalarLength
+  , scalarAt
   , sameNumber
   , compareNumber
   ) where
@@ -79,6 +81,18 @@ scalarStringOf values =
 
 textOf :: ScalarString -> P.String
 textOf (ScalarString text) = text
+
+-- | How many scalar values a string holds, which is what its length is (D27). A
+-- | count of code units is the host's and is not this.
+scalarLength :: ScalarString -> P.Int
+scalarLength (ScalarString text) = Array.length (toCodePointArray text)
+
+-- | The scalar value at an index, counting scalar values from zero. The only way
+-- | this has none is an index outside the string: every element of one is a scalar
+-- | value, which is what the type carries.
+scalarAt :: P.Int -> ScalarString -> Maybe ScalarValue
+scalarAt i (ScalarString text) =
+  map ScalarValue (Array.index (toCodePointArray text) i)
 
 surrogate :: P.Int -> P.Boolean
 surrogate code = code >= 0xD800 && code <= 0xDFFF
