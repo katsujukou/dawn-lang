@@ -7,6 +7,7 @@ import ArgParse.Basic as ArgParser
 import Data.Either (note)
 import Data.Maybe (Maybe(..))
 import Stella.CLI.Effect.Log (LogLevel(..))
+import Stella.Compiler.TypedCore (ModuleName(..))
 
 loglevel :: ArgParser String -> ArgParser LogLevel
 loglevel = ArgParser.unformat "LOG_LEVEL" parseLogLevel
@@ -22,3 +23,6 @@ loglevel = ArgParser.unformat "LOG_LEVEL" parseLogLevel
       "Error" -> Just Error
       "error" -> Just Error
       _ -> Nothing
+
+moduleName :: ArgParser String -> ArgParser ModuleName
+moduleName = (ModuleName <$> _)
