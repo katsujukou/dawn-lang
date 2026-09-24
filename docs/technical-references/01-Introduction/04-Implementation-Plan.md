@@ -53,6 +53,39 @@ Anything stronger — asserting preservation over machine states — would need 
 
 The set of FFI the backend must implement is `stella-base-0.1`, the first version of the `Base` ABI surface ([Open Questions](../99-Open-Questions/01-Open-Questions.md)). The longer it is deferred, the more the standard library settles into a shape that depends on FFI, so it should be fixed while writing this backend.
 
+## Notes on step 7
+
+**The elaborator's kernel precedes the parser rather than following it.** What a synthesizer needs — the metavariable operations, unification, entailment, observation of the environment, and the construction of Core⁺ terms — depends on no surface syntax, and a goal can be reached from a hand-written Core⁺ term exactly as a Core module is hand-written in step 4. `check`, `infer`, quotation, and hygiene are the part that waits for the Surface AST ([Elaborator API](../02-Surface-Language/03-Elaborator-API.md)).
+
+The step therefore divides, and the divisions are ordered by what each is the first thing to make testable.
+
+1. **The execution contract** — the two layers, a pending job's envelope and the three jobs, the three outcomes, the attempt transaction, and `SynthRef` (D39, D40)
+2. **Kind and type unification** — `?k`, `unifyKind`, `unifyType`, and the discharge of the payload equations row unification emits
+3. **The transaction and the scheduler**, tested first against scripted jobs rather than real goals: registration under an identifier, rollback, wakeup, and the diagnostic at quiescence
+4. **Core⁺ terms** — `?m`, the synthesis goal, the typed hole, zonking, and `toCore`
+5. **A host runner, and the elaboration vertical slice**
+6. **A guest runner**: one small `f` in hand-written Typed Core, run on Steam, through the same scenario
+7. **The standard type class resolver** — recursive search, coherence, ambiguity, and search trace diagnostics
+
+Division 3 is testable before any synthesizer exists, which is what makes scripted jobs worth writing: a scheduler exercised only through real goals is one whose failures are attributed to whichever resolver was running.
+
+### The elaboration vertical slice
+
+The counterpart of step 4, and it needs no parser.
+
+```text
+a hand-written Core⁺ term carrying one synthesis goal
+  → the goal is attempted and postpones, awaiting a metavariable
+  → an unrelated part of the term assigns that metavariable
+  → the goal is re-run from its beginning and solves
+  → the term is zonked, and toCore succeeds
+  → the Core type checker accepts the result
+```
+
+Passing it exercises the goal record, the three-way outcome, the blocked table, the rollback, type unification, and the boundary invariant at once. The regression cases that belong with it are in [Elaborator API](../02-Surface-Language/03-Elaborator-API.md).
+
+Division 6 is what establishes that the bootstrap cycle is cut, and it does not wait on a complete resolver: one `f` solving one goal is the whole of what is being shown.
+
 ## Testing the properties instead of proving them
 
 [Semantics](../03-Typed-Core/06-Semantics.md) states progress, preservation, effect safety, and erasure without proof. Proving them for a calculus with rows, effect rows, and handlers is a substantial undertaking, and most of the confidence it would buy is available more cheaply: **each property can be turned into a property test.**

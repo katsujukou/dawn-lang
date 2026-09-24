@@ -146,7 +146,9 @@ Neglecting this produces Core that is not well-kinded. The Core type checker re-
 
 The elaborator turns this into the constraint `Synth ?m τ f` and places `?m` in term position. Running `f` later assigns the result to `?m`.
 
-**`f` is not a compiler builtin.** The type class resolver is an ordinary value in the standard library. The compiler carries only the goal's type and the synthesizer's name; it holds no algorithm specific to type classes.
+**`f` is not a compiler builtin.** The type class resolver is an ordinary value in the standard library, and `f` is carried as a **`SynthRef`** — a resolved qualified global name — rather than as a host function (D39).
+
+The compiler holds no algorithm specific to type classes. That is a statement about what it knows and not about how little it records: the scheduler keeps a goal record, because re-running a goal has to put it back in the context it was created in, and every field of that record is a fact about a goal rather than about a class, an instance, or a dictionary ([Elaborator API](03-Elaborator-API.md)).
 
 ## Scheduling synthesis
 
@@ -157,17 +159,21 @@ data SynthesisResult
   | Failed   Diagnostic
 ```
 
-The scheduler is not specific to type classes. A `Stuck` goal is registered in a queue for each metavariable it awaits.
+The scheduler is not specific to type classes. A `Stuck` goal is registered in a queue for each metavariable it awaits, under an identifier rather than as the job itself, since one goal waits on several metavariables at once.
 
 ```text
-blocked : Meta ⇀ Set Goal
+blocked : Meta ⇀ Set PendingId
 
 assign(?α := τ):
-  record the substitution in Ψ
-  for g in blocked[?α]:
-    remove g from blocked and re-run it
-  re-solve the constraints that propagated
+  record the substitution in the current transactional Ψ
+  for each id in blocked[?α]:
+    remove id from every dependency it is registered under
+    push id onto the ready queue
 ```
+
+**`assign` enqueues and runs nothing**, the scheduler loop being the only thing that attempts a job.
+
+**An attempt is a transaction, and a `Stuck` goal is re-run from its beginning rather than resumed** (D40). A goal that postpones therefore leaves behind neither the metavariables it created nor the constraints it emitted, and what the blocked table holds is a description of work rather than a machine state. [Elaborator API](03-Elaborator-API.md) fixes what a rollback restores, what it deliberately does not, and why a synthesizer must be a function of its goal record.
 
 Termination:
 
@@ -178,6 +184,8 @@ Termination:
 Distinguishing "unsolvable" from "not enough information yet" is exactly this three-way split. `Show (Array ?a)` is `Stuck {?a}`, not `Failed`.
 
 Case (d) of row unification joins the same queue, and so does the search for an implicit effect handler ([Effect Handlers](02-Effect-Handlers.md)). The row solver, the handler search, and the synthesis scheduler share one resumption mechanism.
+
+**A postponed equality carries the site it was written at**, as a synthesis goal does. Deciding one consults the Lacks and Disjoint assumptions of a context — a substitution is checked against the constraints the metavariable carries, and those are discharged from the atomic facts of `Γ` — so an equality re-decided under whatever context elaboration has since reached would admit a substitution its own site forbids, or reject one it allows ([Elaborator API](03-Elaborator-API.md)).
 
 ## Operations available to metaprograms
 
@@ -205,7 +213,6 @@ entails         : Constraint -> Elab Boolean
 require         : Constraint -> Elab Unit
 
 -- construction
-quote           : Syntax                        -- quotation and antiquotation
 check           : Syntax -> Type -> Elab Expr
 infer           : Syntax -> Elab (Tuple Expr Type)
 freshIdent      : Elab Ident
@@ -218,9 +225,21 @@ throw           : Diagnostic -> Elab a
 warn            : Diagnostic -> Elab Unit
 ```
 
-`transact` supports trying candidates transactionally. A rollback restores `Ψ`, the constraint set, the queues, and any terms constructed.
+**Quotation and antiquotation are syntactic forms producing a `Syntax`, not operations of this table.** They belong with the Surface AST, as `check` and `infer` do.
+
+**The table divides by what it depends on.** Observation, the metavariable operations, the constraints, and control are the **kernel**, which a synthesizer needs and a parser is not required for. `check`, `infer`, quotation, and hygiene require a Surface AST and are separate, which is what lets the first guest synthesizer run before a parser exists ([Elaborator API](03-Elaborator-API.md)).
+
+**A `Type`, an `Expr`, and a `Goal` reach a metaprogram as opaque handles**, and what it does with one it does through a view rather than by matching on a representation. Publishing Core⁺'s own representation would make an internal one part of an interface the compiler could no longer change.
+
+`transact` supports trying candidates transactionally. A rollback restores `Ψ`, the constraint set, the queues, and any terms constructed. Running one goal is the outermost such transaction and is not written anywhere (D40).
+
+**What `transact` catches is a diagnostic and not a postponement.** A `postpone` inside one rolls that checkpoint back and propagates to the attempt root, so a candidate search never reads "not enough information yet" as "this candidate failed" ([Elaborator API](03-Elaborator-API.md)).
+
+**`postpone` names metavariables that outlive the attempt.** The set is non-empty, and each of its metavariables existed before the attempt began and is still unsolved. One the attempt itself created is deleted by the rollback, so a job registered under it would wait on an assignment nothing can make.
 
 `declsWithAttr` supports finding declarations that carry an attribute. It must work across modules, which is why attributes are persisted in a compiled interface ([Modules](../06-Modules/01-Modules.md)).
+
+**What these two read is fixed before any goal exists.** The module's own declarations — their names, their attributes, and their schemes, provisional where one is still being inferred — are assembled once, before the first right-hand side is elaborated, and the set does not grow as the binding groups are folded. Otherwise the candidates a synthesizer finds would depend on when its goal was attempted ([Elaborator API](03-Elaborator-API.md)).
 
 `localConstraints` exposes row constraints to elaborators, so that a derive mechanism working over rows can consult which Lacks constraints are already assumed.
 
@@ -240,3 +259,6 @@ An elaborator may not:
 - pass a term that has not been type checked to Mid IR
 - fabricate a derivation of `Γ ⊨ C` — there is nothing to fabricate, since no proof term is carried
 - change the behaviour of type checking through attributes
+- carry state from one attempt of a goal into the next
+
+The last is the one the host cannot check. A goal is re-run from its beginning, so a synthesizer reading a mutable global of its own, or caching a candidate between attempts, gives two runs of one goal two results — and the second run is the one whose term reaches Core (D40).

@@ -20,7 +20,7 @@ decl ::= data    T forall k̄. (ā : κ̄) = Ctor_1 τ̄1 | … | Ctor_n τ̄n  
 
 `forall k̄.` may be omitted from any declaration that admits one, and an `effect` declaration admits none ([Kinds](../03-Typed-Core/01-Kinds-and-Types.md)). A declaration that binds kind variables is instantiated at each use site by `[[κ̄]]`.
 
-**The order of value declarations is a dependency order.** A `nonrec` does not refer backwards, and every cycle is contained in a `rec` group.
+**The order of value declarations is a dependency order.** A `nonrec` does not refer forwards, and every cycle is contained in a `rec` group.
 
 `import` records the dependencies that name resolution established. Since every Core name is fully qualified, `import` has no effect on type checking; it is retained for build ordering and linking.
 
@@ -338,6 +338,8 @@ Value declarations are folded from `Σ_decl` leftwards.
 ```
 
 The right-hand side of `nonrec x : σκ = e` must not refer to `x` itself or to any later value declaration; every cycle belongs to a `rec` group. Elaboration performs the dependency analysis, gathers strongly connected components into `rec` groups, and emits them in topological order. This invariant lets the fold close in a single left-to-right pass.
+
+**The fold is the rule for Core, and the order it folds is settled after elaboration rather than before it.** Elaboration reads a catalog of every name, attribute, and scheme it may resolve against — the imported interfaces and this module's own declarations — assembled before any right-hand side is elaborated, which is what a synthesis goal woken between two binding groups requires. The dependency edges are a separate matter: a synthesizer inserts a reference to the dictionary it found, and an inserted handler is another such reference, neither of which stands in any right-hand side as written. So the strongly connected components and the topological order are computed once elaboration has solved every goal, over the `Global` references the committed right-hand sides actually carry ([Elaborator API](../02-Surface-Language/03-Elaborator-API.md)). What the catalog says exists and what a right-hand side refers to are separate, and only the second decides the order.
 
 A design collecting signatures first and permitting forward references is also possible. Stella takes the form of CoreFn's binding groups, in which order carries meaning, because order being readable from the term is what makes Core determine its semantics uniquely.
 

@@ -1,0 +1,352 @@
+# The Elaborator API
+
+[Elaboration](01-Elaboration.md) gives the representation elaborators work with — Core⁺, the metavariable context `Ψ`, the constraint forms, and row unification. This document fixes **who runs what**: which part of elaboration is a library the standard library owns, which part is the compiler's, and what the two say to each other.
+
+The subject is the mechanism a synthesizer runs under, not any one synthesizer. The standard type class resolver is the first user of it and settles none of it.
+
+## Two layers
+
+Elaboration is split into **policy**, which is guest Stella code, and **mechanism**, which is the compiler's (D39).
+
+| | Owns | Which is |
+| --- | --- | --- |
+| guest | policy | the search for a candidate, which candidate is taken, coherence, ambiguity, and the diagnostic a failure produces |
+| host | mechanism | `Ψ`, the metavariables of types and of terms, unification, scope checking, the transaction, the ready and blocked queues, and fuel |
+
+`Elab` is the boundary. A synthesizer asks the host to unify, to create a metavariable, to look a declaration up, or to abandon the attempt, and the host answers; nothing of the solver's state is the guest's.
+
+**The split is what makes resolution policy replaceable**, which is one of the properties the design claims ([Overview](../01-Introduction/01-Overview.md)). A policy living in the compiler would be replaceable only by editing the compiler, and library-defined type classes would be a description of an arrangement rather than the arrangement itself.
+
+**What must not move to the guest is the solver's state.** Rollback has to be exact, and a guest holding a copy of `Ψ` would give two answers to one question — the host's, and whatever survived the guest's own restart. The same argument settles every other piece of mechanism above: each is something an attempt must be able to undo.
+
+**A host synthesizer is a reference implementation and not a provisional standard resolver.** One is worth having, for testing the scheduler and for the bootstrap below. Writing the standard type class resolver as one is not: the claim the design most needs evidence for is that a library can carry that resolver, and a host implementation postpones the evidence indefinitely.
+
+### The compiler is the host of a compile-time session
+
+`f` runs on Steam, in a session the compiler opens for elaboration. The compiler is that session's **host** in the sense [Abstract Machine](../07-Runtime/01-Abstract-Machine.md) gives the word: what the interpreter runs on, and what it reaches anything outside itself through. An `Elab` operation is a capability the host supplies, as a native leaf action is on Node.
+
+## What a synthesis goal carries
+
+`⟨ τ by f ⟩` becomes the constraint `Synth ?m τ f`, and `f` is a **`SynthRef`**: a resolved, fully qualified global name.
+
+```text
+SynthRef = Qualified Ident        the synthesizer, as name resolution settled it
+```
+
+It is not a pointer to a host function. Three things follow. The compiler holds no algorithm, only a name to call. The name is resolved where every other global name is, against `Σ`, so a synthesizer that does not exist is reported there rather than at the goal. And one Core⁺ term means one thing however it travels, a name being stable where an address is not.
+
+## What a pending job carries
+
+Everything the scheduler can postpone has two parts: an **envelope**, which is the same for all of them, and a **job**, which is not.
+
+```text
+Pending =
+  { id        PendingId, which the blocked table registers
+  , site      the envelope below
+  , awaiting  the metavariables it last postponed on
+  , job       one of the three below
+  }
+
+Site =
+  { context   Γ as it stood where the job was created, the row constraints
+              assumed there among it, decomposed as entailment reads them
+  , origin    where it came from, for diagnostics
+  }
+
+job = JobUnify           EqualityGoal    two types, two rows, or two kinds
+    | JobSynthesis       GoalRecord      { targetTermMeta, expectedType, synthesizer }
+    | JobImplicitHandler HandlerGoal     { sourceRow, targetRow, thunk, Ξ }
+```
+
+**The envelope is shared because every one of the three is decided against its site.** An equality is no exception, and this is the case easiest to get wrong: deciding `?s := D ⊎ R` requires the Lacks and Disjoint assumptions the metavariable carries to hold of the solution, and those are discharged from the atomic facts of a context ([Elaboration](01-Elaboration.md), [Rows](../03-Typed-Core/02-Rows.md)). An equality postponed at case (d) and woken later must be solved against the facts of **where it was written**, not against whatever context elaboration has reached. One re-decided against another site either admits a substitution the site forbids or rejects one it allows.
+
+**The context is a snapshot and not a reference.** A job is created deep inside a term and woken much later, when elaboration stands somewhere else entirely; `localContext` answering with whatever is current at that moment would answer about another part of the program. The snapshot is what makes an attempt a function of its job rather than of the schedule.
+
+**What is snapshotted is lexical belonging and not solutions.** The types in `context`, and the rows its assumptions mention, may contain metavariables, and those are read against `Ψ` as it stands — zonked afresh at each attempt. Freezing their solutions instead would have a later attempt reason about a `Ψ` the rest of elaboration has moved past, which is the error the snapshot exists to prevent, met from the other side.
+
+**`localContext` and `localConstraints` are two views of one field.** A context carries its assumptions with it, decomposed, because that is the form entailment decides from ([Rows](../03-Typed-Core/02-Rows.md)); the two operations project the bindings and the assumptions of the same snapshot rather than reading two stores that could disagree.
+
+What the **guest** sees of a synthesis job is the expected type, with its site reached through `localContext` and `localConstraints`. None of the record above is specific to type classes: every field is a fact about a job, and none is a fact about a class, an instance, or a dictionary.
+
+### The module environment is built once, before any job exists
+
+**What `lookupGlobal` and `declsWithAttr` read is assembled before the first job is created, and its domain does not grow.** It holds two things: the entries the interfaces of the imported modules publish, immutable throughout, and every top-level name this module declares, with that declaration's attributes and its scheme — the written one where a signature is given, and one carrying metavariables where the scheme is to be inferred. `Ξ`, the implicit handlers the imports make visible, is assembled at the same point ([Effect Handlers](02-Effect-Handlers.md)).
+
+**Both halves are there because `declsWithAttr` reaches across modules.** An attribute is persisted in a compiled interface exactly so that a resolver can find an instance another module declares ([Modules](../06-Modules/01-Modules.md)); a catalog of local declarations alone would answer half of every question put to it.
+
+**Were it to grow, a synthesizer's candidates would depend on when its goal was attempted.** A goal created while one binding group is being elaborated and woken while a later one is would see declarations the first attempt could not. This is not a corner: an instance is an ordinary declaration carrying an attribute ([Modules](../06-Modules/01-Modules.md)), so a growing environment is one in which coherence turns on the schedule — the thing the restart contract exists to rule out.
+
+**Neither half needs anything elaborated, and that is what lets the catalog precede everything.** This module's top-level names and the attributes written on them are read off its text, and a scheme is the one written at the declaration or a provisional one carrying metavariables where none is; the imported entries are read off interfaces compiled already. No right-hand side of this module has to have been elaborated, and the dependency graph does not have to exist.
+
+**The domain is fixed and the schemes sharpen.** A provisional scheme carries metavariables, and those are read against `Ψ` as it stands — zonked at each attempt, exactly as a site's context is. What is frozen is which names exist and what each is called, never what has been solved about them.
+
+**The catalog is not in the envelope**, having nothing to do with a site. Only what varies from one site to another is snapshotted per job.
+
+### The dependency graph is settled after elaboration, not before it
+
+**The catalog and the graph are different things and are fixed at different times.** A synthesizer inserts a reference to the dictionary `declsWithAttr` found for it, and that edge stands in no surface right-hand side; an implicit handler the elaborator supplies is another such reference ([Effect Handlers](02-Effect-Handlers.md)). An order computed before elaboration would have seen neither.
+
+```text
+1. before any job exists, and so before the first right-hand side is elaborated
+   the visible catalog:
+   immutable imported entries plus every local name, attribute, and scheme
+
+2. during elaboration
+   references are written into tentative Core⁺ terms;
+   attempts may commit or discard those terms
+
+3. after all jobs solve and the right-hand sides are zonked
+   collect local-to-local edges from the committed terms,
+   then compute SCCs, rec groups, and the Core order
+```
+
+**The graph is read off the terms rather than recorded as elaboration goes.** A candidate search builds a reference to a dictionary and then throws or postpones; the term is rolled back, but an edge recorded beside it would not be — what a rollback restores is `Ψ`, the constraints, the constructed terms, the queues, the warnings, and the names, and an edge set is none of those. An edge a failed candidate left behind points at a declaration nothing refers to, and it can close a cycle that does not exist or force two declarations into a `rec` group neither belongs in.
+
+Reading the graph from the committed right-hand sides dissolves the question instead of answering it, and it buys three things besides. Nothing is added to what a rollback must restore. Every kind of reference is taken in one pass, a dictionary a synthesizer inserted, a handler the elaborator supplied, and one the author wrote being occurrences of `Global` in the same term. And the order is reproducible from the module's own output, which is what makes it checkable.
+
+**The nodes are the local value declarations.** A reference to an imported global is a sink rather than an edge: another module's declarations are settled before this one is elaborated, nothing about them can be reordered, and they take part in no cycle here. The catalog and the graph therefore have different domains, and the catalog's is the wider of the two.
+
+**A synthesizer adds edges and never nodes.** What it produces is a term for `?m` and not a declaration, so the catalog's domain is settled while the graph does not yet exist. That is what lets the environment a woken goal reads be immutable even though the order the module is emitted in is not yet known.
+
+**Stage 3 is what owes Core its condition**, that a `nonrec` refer to no later declaration and that every cycle sit in a `rec` group ([Modules](../06-Modules/01-Modules.md)). A cycle a generated reference closes is subject to it exactly as a written one is, and guardedness is what decides whether such a group is admissible (D14); two dictionaries referring to one another are the case recorded with the open questions ([Open Questions](../99-Open-Questions/01-Open-Questions.md)).
+
+**Stage 3 runs only where elaboration reaches quiescence with everything solved.** Where a pending job remains, or one has failed, there is no committed term to scan and no order to compute, and what is reported is the diagnostic the scheduler's quiescence rule below gives.
+
+**How inference and generalization interleave with stages 2 and 3 belongs with the design of inference** and is not fixed here. What is fixed is that the order Core sees is read off the terms elaboration finally committed, and never off the surface alone.
+
+## An attempt is a transaction
+
+Running one pending job is one attempt, and an attempt over the host's mechanism state commits or leaves nothing behind (D40).
+
+```text
+attempt(pending):
+  checkpoint
+
+  Solved x       commit, and record the result
+  Stuck ms       rollback, admit ms against Ψ, and register this pending under each of ms
+  Failed d       rollback, and report d
+```
+
+**The guest's heap is not part of that.** It is not the host's to restore, so the contract has two sides: the host restores what the lists below give, and the guest owes **observational restartability**, defined after them. Neither side alone is enough, and the second is the one nothing checks.
+
+**What a rollback restores:**
+
+- the assignments in `Ψ`, and the metavariables the attempt created
+- the constraint set
+- the Core⁺ terms the attempt constructed
+- the attempt's changes to the ready and blocked queues
+- the warnings it raised
+- the fresh terms and identifiers it took, so that a name does not depend on how many times a goal has run
+
+**What a rollback does not restore:**
+
+- the resource counters — fuel, a deadline, and cancellation — which bound the loop, and one that rolled back would let an attempt restart forever
+- **the generation counter handles are stamped from**, for the reason below
+
+**The two supplies are governed oppositely, and each rule is what its guarantee rests on.** The supply of fresh names — metavariables, and what `freshIdent` gives — **is** restored, so that a second run of one goal builds the same term. The supply of generations is **not**, so that a handle issued before a rollback can never be mistaken for one issued after it: were the counter restored, the next attempt would allocate into the freed slot and stamp it with the generation just given back, and a handle the rollback invalidated would validate against an object it never named. Restoring one and not the other is deliberate, and an implementation that draws both from one counter has neither property.
+
+The two halves say different things, and both are needed. What is restored is what would otherwise **accumulate** across attempts: a duplicate metavariable, a constraint emitted twice, a warning reported once per try. What is not restored is what must **not** be undone, or the loop would not terminate and a stale handle would not be detectable.
+
+### Observational restartability
+
+> Run against the same job and the same observable host state, a synthesizer issues the same sequence of `Elab` requests and reaches the same outcome.
+
+**It does not say that two attempts of one goal agree.** The reason a postponed goal is woken at all is that `Ψ` has moved, so the second attempt is expected to reach further than the first; and an attempt that was `Stuck` had no result to repeat. Nor does it put the counters outside the picture: fuel spent is spent, and an attempt may fail on exhaustion where its predecessor did not.
+
+**What those two have in common is that they are inputs.** `Ψ` and the resource counters are things the host shows the guest, and a run that differs because they differ is one function applied to different arguments. What the property forbids is a difference with **no input behind it** — a mutable global of the guest session, a candidate cached between attempts, a handle held across a rollback. There the two runs differ for a reason nothing records, and the term that reaches Core is the last run's.
+
+### A dependency must survive the rollback
+
+A rollback deletes the metavariables the attempt created, so the set a `postpone` names cannot be taken as given. It is **admitted against `Ψ` as the rollback leaves it**, and three conditions decide it.
+
+```text
+admit(ms):
+  ms is not empty
+  every ?α ∈ ms existed before the checkpoint
+  every ?α ∈ ms is unsolved in Ψ
+```
+
+**A metavariable the attempt created is gone.** Registering a job under one blocks it on an assignment that can never happen: nothing holds that metavariable any longer, so nothing will assign it, and the loop reaches quiescence reporting insufficient information about a name `Ψ` does not have. An empty set is the same job with nothing even to name.
+
+**A metavariable already solved would not wake it either**, `assign` having run for it before the attempt began. A synthesizer reaching one has read a type it did not zonk, which is a defect worth reporting where it happens rather than one to wait out.
+
+**A `postpone` failing any of the three is a contract violation**, and the attempt fails with a diagnostic naming the synthesizer. It is not reported as a property of the program being compiled: nothing the author wrote is wrong, and the program may well be solvable by the goal the synthesizer meant to wait on.
+
+The alternative is to keep such a `postpone` and **project** its dependencies onto the outer metavariables the attempt-local ones arose from. That needs a rule saying which outer metavariable an inner one's solution would come from, and none of the mechanism supplies one — a fresh row tail stands for what two sides share and not for either of them ([Elaboration](01-Elaboration.md)). Until such a rule exists, admission is what keeps every blocked entry wakeable.
+
+### `transact` catches a failure and not a postponement
+
+`transact` is this same checkpoint made available to a synthesizer for trying candidates ([Elaboration](01-Elaboration.md)); an attempt is the outermost one and is not written anywhere.
+
+**What it catches is a diagnostic**, which its result type says: `Either Diagnostic a` holds what `throw` produces and what `Failed` is. A `postpone` inside a `transact` rolls that checkpoint back and **propagates outward**, to be caught at the attempt root and nowhere before it.
+
+The two outcomes mean opposite things where `transact` is used, and that is the whole of the reason. `Failed` says the candidate under trial is not the one, so the search takes the next. `Stuck` says nothing about the candidate: it says the goal cannot be decided yet. A `transact` returning `Left` for both would have a resolver discard a candidate a later assignment would have accepted and commit to whatever came after it — the three-way split the scheduler rests on, lost inside one attempt.
+
+A propagated postponement is admitted at the attempt root, against that checkpoint rather than the `transact`'s, every inner checkpoint having been rolled back with it.
+
+## `postpone` restarts, and saves no continuation
+
+`postpone` abandons the current attempt. When the metavariables it named are assigned, the goal runs **again from its beginning**, against the state the host has by then (D40).
+
+**What is not needed is a continuation saved across a wait for a metavariable.** Within one attempt the guest **is** held, and holding it is an obligation rather than a liberty: the guest issues an `Elab` request and its execution stands while the host answers, then continues. What nothing has to hold is a guest computation **between attempts** — from a `postpone` until the metavariables it named are assigned — because `postpone` discards it along with everything else the attempt did.
+
+The blocked table therefore holds **descriptions of work rather than machine states**. Three things follow. A compile-time session holds a suspended guest computation for the length of one request and never **while a job is blocked**, which is the difference between a protocol Steam can be given and a second continuation mechanism beside the one it has. A blocked entry can be compared, counted, and reported on. And a synthesizer is re-entered at a point its author wrote rather than at one the scheduler chose.
+
+**A synthesizer is therefore a function of its job and of what the host shows it.** This is observational restartability read as a property of the code rather than of a run, and it is the guest's half of the contract. The host restores no guest heap, so nothing but the author of a synthesizer keeps it.
+
+**A stale handle is the one consequence the host does catch.** A handle names a host object and a rollback may delete what it names, so a guest cache outliving the attempt would hand such a handle back and read whatever stands there now. Handles carry a generation for that reason, below.
+
+## The scheduler
+
+### What is queued
+
+The three jobs arrive here for the same reason. Row unification's case (d) waits on two flexible tails ([Elaboration](01-Elaboration.md)), a synthesis goal waits on what its type mentions, and the search for an implicit handler waits on a flexible tail that survives cancellation ([Effect Handlers](02-Effect-Handlers.md)). One queue serves all three, and the resumption mechanism is written once.
+
+**What is shared is the envelope, and what differs is the job.** Scheduling, the site, the dependency set, the transaction, and fuel are the same machinery whichever job is inside; the payloads are not, and pressing them into one record buys nothing. Which fields each holds is above.
+
+### The blocked table registers an id
+
+```text
+ready   : [PendingId]
+blocked : Meta ⇀ Set PendingId
+pending : PendingId ⇀ Pending
+```
+
+**A pending waits on several metavariables at once**, so it is registered under each of them. Waking it removes its id from **every** dependency it was registered under, not only from the one that woke it. A stale entry left behind runs a job that is already running, or one that has already been solved.
+
+Registering the id rather than the job is what makes that removal possible: two entries of one job would otherwise have to be recognized as one.
+
+**`awaiting` is what the removal reads**, so that waking a job costs no scan of the blocked table. Its lifecycle is three steps and nothing else touches it.
+
+```text
+on admitting Stuck ms      pending[id].awaiting := ms
+                           blocked[?α] gains id, for each ?α ∈ ms
+
+on waking id               blocked[?α] loses id, for each ?α ∈ pending[id].awaiting
+                           pending[id].awaiting := ∅
+                           id is pushed onto the ready queue
+
+on Solved or Failed        id is removed from pending
+```
+
+**`awaiting` is assigned and never accumulated.** A second postponement names whatever set it names then, which need not contain what the job waited on before: one stuck on `?a` and `?b`, woken by `?a`, and stuck again on `?b` alone is registered under `?b` and under nothing else. Adding to the set instead would wake it on assignments it no longer cares about.
+
+**Quiescence reports from `awaiting`**, which is why it is emptied at the wake rather than at the next postponement. A diagnostic reading a set the job has already been woken past would name a metavariable that is no longer the reason anything is waiting.
+
+### `assign` enqueues, and runs nothing
+
+```text
+assign(?α := τ):
+  record the substitution in the current transactional Ψ
+  for each id in blocked[?α]:
+    remove id from every dependency it is registered under
+    push id onto the ready queue
+```
+
+**Recording is not publishing.** An `assign` happens inside an attempt, and the substitution together with every queue change above is part of that attempt: where it goes on to postpone or to fail, the assignment is rolled back and the jobs it woke go back to waiting where they were. What makes an assignment visible to anything else is the enclosing attempt committing.
+
+**Nothing is executed here.** Running a job from within `assign` would start an attempt while another is open — a nested checkpoint whose rollback would have to undo part of the outer one — and a job reachable from two assignments of one attempt would start twice. Leaving the loop as the only thing that runs a job removes both, and it is what makes the paragraph above simple to hold to: a woken job is an entry on a queue, which a rollback restores like any other.
+
+### The loop
+
+```text
+while the ready queue is not empty:
+    take an id, and attempt it
+
+on quiescence:
+    every pending solved        zonk, and hand the term to the Core type checker
+    pendings remain             report insufficient information, naming the
+                                metavariables each awaits
+    any pending Failed          report that diagnostic
+```
+
+The three-way outcome is what separates "unsolvable" from "not enough information yet", and it is the same split at each of the three job kinds.
+
+**Termination rests on fuel rather than on a measure.** The number of unsolved metavariables is not decreasing: refining two flexible tails introduces a fresh one ([Elaboration](01-Elaboration.md)), so a loop of assignments can create as much work as it discharges. Fuel is what bounds it, which is why it is the one thing a rollback leaves alone.
+
+**What fuel bounds is the scheduler's retries, and not a guest computation.** A synthesizer that loops inside one attempt returns no outcome for fuel to count, so stopping it is Steam's — an instruction budget, or a cancellation the host raises. The two answer separate questions and neither stands in for the other.
+
+## The kernel API
+
+What the host offers the guest is divided by what it depends on.
+
+**The kernel** is what a synthesizer needs and a parser is not required for: the metavariable operations, unification and entailment, the observation of types and of the environment, the construction of Core⁺ terms, and control.
+
+**The syntax API** — `quote`, `check`, `infer`, and hygiene — requires a Surface AST and is separate. The first guest synthesizer uses the kernel alone, which is what lets it run before a parser exists.
+
+### Types and terms cross as handles
+
+A `Type`, an `Expr`, and a `Goal` reach the guest as **session-local opaque handles**, and what the guest does with one it does through a view.
+
+```text
+goalType : Goal -> Elab Type
+viewType : Type -> Elab TypeView
+```
+
+**Fixing the compiler's own representation of a type in the Steam ABI is what this avoids.** An internal representation published as an interface is one the compiler can no longer change, and Core⁺'s types are a representation that row unification and the solver are still shaping. A view is a projection with a shape of its own, which the guest pattern-matches; the handle behind it stays the host's.
+
+A handle is session-local: it means nothing outside the compile-time session that issued it, and nothing serializes one.
+
+**A handle is generation-tagged, and a rollback invalidates the handles to what it deleted.** Presenting an invalid one is reported as a defect in the synthesizer and is never resolved to whatever occupies that place now. This is what keeps the guest's half of the contract from failing silently: a synthesizer is obliged to hold nothing across an attempt, and a cache that does so anyway is caught at the first handle it reuses rather than by the wrong term reaching Core.
+
+**The generation is drawn from a counter no rollback restores**, which is the whole of what makes that true: a slot freed by a rollback and filled again by the next attempt receives a generation that has never been issued, so the old handle matches nothing. A counter restored with everything else would hand the new object the number the old handle carries. It is a safety counter and not part of the state an attempt owns, and it is kept apart from the supply of fresh names for that reason.
+
+## What a compile-time session asks of Steam
+
+Running a guest synthesizer needs more of the interpreter than either of the modes [Abstract Machine](../07-Runtime/01-Abstract-Machine.md) fixes.
+
+| | |
+| --- | --- |
+| apply a guest value to arguments | a session today is asked for the value a declaration holds, which is a load and not a call |
+| carry a handle across | a `Goal`, a `Type`, and an `Expr` pass in both directions without being read |
+| serve an `Elab` request | the guest asks, the host answers, and the same attempt continues |
+| discard guest execution state | what `postpone` abandons includes the guest's stack |
+| bound or cancel a guest computation | fuel bounds the scheduler's retries, so a loop inside one attempt is Steam's to stop |
+
+Discarding rather than keeping is what the restart reading buys: nothing has to hold a guest computation once its attempt is abandoned. **The protocol itself is not settled here** and is recorded with the open questions ([Open Questions](../99-Open-Questions/01-Open-Questions.md)); what this document fixes is what it is obliged to carry.
+
+## The bootstrap
+
+A synthesizer written in Stella has to be compiled by an elaborator, and the elaborator that compiles it must therefore not need one. The circle is cut by layers rather than by an exception.
+
+```text
+1. a kernel elaborator in the host, using no class, no macro, and no synthesis
+2. with it, compile Stella.Elab and a small guest synthesizer
+3. run that synthesizer on Steam, against the host's mechanism
+4. build the standard type class resolver on top
+```
+
+Layer 1 is Phase A, and it is a complete elaborator for the class-free subset rather than a stepping stone to be thrown away. Layer 2 requires only that the library's own source use no class and no macro.
+
+**The first guest demonstration need not be a resolver.** One hand-written Typed Core `f` that solves one goal establishes that the cycle is cut; everything after that is policy, and policy is the part the guest was chosen for.
+
+## Regression tests
+
+Each is a case where a plausible implementation gives the wrong answer, and each is worth writing before the code it concerns.
+
+| Input | Required outcome |
+| --- | --- |
+| A goal that creates metavariables, emits constraints, and raises a warning, then postpones | None of the three survives. A warning that survived would be reported once per attempt |
+| The same goal, run a second time | It creates the same metavariables and emits the same constraints, and neither is duplicated. Reading a counter that the rollback left alone is what makes a second run differ |
+| A `postpone` naming a metavariable the attempt itself created | The attempt fails, naming the synthesizer. Registering the job blocks it on an assignment nothing can make, and quiescence then reports a name `Ψ` does not hold |
+| A `postpone` naming the empty set, or a metavariable already solved | The same failure. Neither can wake a job, and the second is a type that was not zonked |
+| A `postpone` inside a `transact` | It rolls that checkpoint back and propagates to the attempt root. A `transact` returning `Left` has a resolver reject a candidate for lack of information and commit to the next |
+| A `throw` inside a `transact` | Caught there, which is what `Either Diagnostic a` says |
+| A `PendingUnify` whose solution needs a Lacks assumption of its site, woken later | Solved against the facts of that site. Deciding it against the context elaboration has reached admits a substitution the site forbids, or rejects one it allows |
+| A handle a rollback invalidated, presented again | Reported as a defect in the synthesizer. Resolving it to whatever occupies that place now is how a guest cache corrupts a later attempt |
+| A different object allocated into a slot a rollback freed, and the old handle presented | Still rejected. A generation counter restored with the rest of the attempt would stamp the new object with the number the old handle carries |
+| An `assign` inside an attempt that goes on to postpone | The substitution and the wakeups it made are both rolled back, and the jobs it woke are waiting where they were. Publishing at the `assign` leaves a job on the ready queue for an assignment that was undone |
+| A goal awaiting `?a` and `?b`, with `?a` assigned | It wakes once, and it is registered under `?b` no longer. Leaving the entry under `?b` runs a job that is already on the ready queue |
+| The same goal, postponing again on `?b` alone | It waits on `?b` and on nothing else. A dependency set accumulated across attempts would wake it on an assignment it no longer cares about |
+| A goal woken far from where it was created | `localContext` and `localConstraints` answer with the goal's own site. Answering with the elaborator's current position is what the snapshot exists to prevent |
+| A goal created under one binding group and woken while a later one is being elaborated | `declsWithAttr` answers with what the first attempt saw. A catalog that grew with the fold would have a resolver's candidates, and so coherence, turn on the schedule |
+| A synthesizer inserting a reference to a declaration standing later in the text | The groups are ordered over the final graph, so that reference is backwards in the Core emitted. An order computed before elaboration leaves a `nonrec` referring forwards, which the Core type checker rejects |
+| A candidate that builds a dictionary reference and is then discarded | Contributes no edge. The graph is read off the committed right-hand sides, so a reference a rollback removed is in none of them; an edge recorded as elaboration went would survive, none of D40's list covering one |
+| A generated reference closing a cycle between two declarations | Treated as any other cycle: one `rec` group, admissible only under guardedness (D14) |
+| A reference to an imported global | A sink, and no edge. Treating one as a node puts a module's imports into its own dependency order |
+| Quiescence, with a job woken and not yet postponed again | Its `awaiting` is empty and it names nothing. A set left standing from before the wake names a metavariable that is no longer why anything waits |
+| An assignment reaching a blocked goal | The goal is on the ready queue and has not run. Running it inside `assign` opens an attempt within an attempt |
+| A synthesizer that succeeds on its second attempt | The term that reaches Core is the second attempt's, and the first attempt's metavariables are absent from `Ψ` |
+| Fuel, across a postpone | Not restored. Restoring it leaves a goal that postpones unconditionally running forever |
+| One scripted synthesizer, run by the host runner and by the guest Steam runner | The same result, the same diagnostics, and the same sequence of requests. This is what makes the host implementation a reference rather than a second design |
+| A synthesizer holding state between attempts | Out of contract. The host cannot detect it; what the test establishes is that the reference synthesizer does not |
