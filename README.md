@@ -14,8 +14,8 @@ Stella is a functional programming language inspired by PureScript.
 
 As you all know, PureScript is an excellent language.
 Thanks to its brilliant design, it keeps the language core remarkably minimal
-while remaining incredibly expressive. However, after years of writing PureScript, 
-I've come across a few areas where I couldn't help but think, 
+while remaining incredibly expressive. However, after years of writing PureScript,
+I've come across a few areas where I couldn't help but think,
 *"Man, I wish it did this differently..."*
 
 - Row operations are handled through type class resolution.
@@ -35,7 +35,7 @@ Specifically, what sets Stella apart from PureScript comes down to three main pi
 - direct-style algebraic effect & handlers ... inspired by Koka
 - Metaprogramming with first-class macro ... inspired by Lean and F*
 
-The third pillar is a vital and powerful feature. It ensures we don't over-minimize the core, but it also stops the language from becoming bloated. 
+The third pillar is a vital and powerful feature. It ensures we don't over-minimize the core, but it also stops the language from becoming bloated.
 Interestingly, Stella's compiler doesn't actually have built-in support for Typeclasses!
 Instead, they are just dictionary records passed as arguments with method field access.
 The dedicated syntax for them is implemented as macros **at the library level** (planned)!
