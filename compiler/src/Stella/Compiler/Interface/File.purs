@@ -26,15 +26,12 @@ import Prim as P
 
 import Stella.Compiler.Bytecode.Bytes (Bytes, DecodeError(..), EncodeError(..), R, atEndR, expect, runR, structuralR, throwR, utf8, utf8R, uvar, uvarR, vecR)
 import Stella.Compiler.Interface (Dmi)
-import Stella.Compiler.TypedCore.Domain (textOf)
+import Stella.Compiler.TypedCore.Domain (compareByScalar, textOf)
 import Stella.Compiler.TypedCore.Name (Ident(..), ModuleName(..))
 import Data.Array as Array
 import Data.Either (Either(..))
-import Data.Enum (fromEnum)
 import Data.Foldable (traverse_)
 import Data.Map as Map
-import Data.Maybe (Maybe(..))
-import Data.String.CodePoints (toCodePointArray)
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..))
 
@@ -78,7 +75,7 @@ encode dmi = do
     name <- text e.name
     pure (name <> uvar e.arity)
 
-  order a b = compareScalars a.name b.name
+  order a b = compareByScalar a.name b.name
 
 -- | A length-prefixed run of UTF-8.
 text :: P.String -> Either EncodeError Bytes
@@ -123,21 +120,6 @@ entryR = do
 ascending :: P.Array Entry -> R Unit
 ascending entries = traverse_ pair (Array.zip entries (Array.drop 1 entries))
   where
-  pair (Tuple a b) = case compareScalars a.name b.name of
+  pair (Tuple a b) = case compareByScalar a.name b.name of
     LT -> pure unit
     _ -> throwR EntriesOutOfOrder
-
--- | Two names by their scalar values, which is the order of their UTF-8 bytes,
--- | that encoding being order-preserving.
-compareScalars :: P.String -> P.String -> Ordering
-compareScalars a b = go 0 (codes a) (codes b)
-  where
-  codes = map fromEnum <<< toCodePointArray
-
-  go i x y = case Array.index x i, Array.index y i of
-    Nothing, Nothing -> EQ
-    Nothing, _ -> LT
-    _, Nothing -> GT
-    Just p, Just q -> case compare p q of
-      EQ -> go (i + 1) x y
-      other -> other

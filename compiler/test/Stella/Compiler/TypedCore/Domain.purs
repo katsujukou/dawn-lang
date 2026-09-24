@@ -11,7 +11,8 @@ import Prelude
 
 import Prim as P
 
-import Stella.Compiler.TypedCore (Literal(..), codePointOf, scalarString, scalarValue, textOf)
+import Stella.Compiler.TypedCore (Literal(..), codePointOf, scalarString, scalarStringOf, scalarValue, textOf)
+import Stella.Compiler.TypedCore.Domain (scalarsOf)
 import Data.Char as Char
 import Data.Maybe (Maybe(..), isNothing)
 import Data.String.CodeUnits as CodeUnits
@@ -67,6 +68,13 @@ spec = describe "Stella.Compiler.TypedCore.Domain" do
       -- scalar value in this one
       map textOf (scalarString "😀") `shouldEqual` Just "😀"
       map textOf (scalarString "") `shouldEqual` Just ""
+
+    it "gives back the scalar values it holds, an astral character as one" do
+      map (map codePointOf <<< scalarsOf) (scalarString "a😀")
+        `shouldEqual` Just [ 0x61, 0x1F600 ]
+      -- the inverse of `scalarStringOf`, so text survives the round trip
+      map (textOf <<< scalarStringOf <<< scalarsOf) (scalarString "a😀b")
+        `shouldEqual` Just "a😀b"
 
     it "refuses text carrying an unpaired surrogate" do
       -- D27: a Stella String is a sequence of scalar values, so the host's

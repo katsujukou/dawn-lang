@@ -22,6 +22,8 @@ module Stella.Compiler.TypedCore.Domain
   , textOf
   , scalarLength
   , scalarAt
+  , scalarsOf
+  , compareByScalar
   , sameNumber
   , compareNumber
   ) where
@@ -93,6 +95,30 @@ scalarLength (ScalarString text) = Array.length (toCodePointArray text)
 scalarAt :: P.Int -> ScalarString -> Maybe ScalarValue
 scalarAt i (ScalarString text) =
   map ScalarValue (Array.index (toCodePointArray text) i)
+
+-- | The scalar values a string holds, in the order it holds them: the inverse of
+-- | `scalarStringOf`, and what a walk over the elements of a string takes.
+scalarsOf :: ScalarString -> P.Array ScalarValue
+scalarsOf (ScalarString text) = map ScalarValue (toCodePointArray text)
+
+-- | Two pieces of text by their scalar values, which is the order of their UTF-8
+-- | bytes, that encoding being order-preserving.
+-- |
+-- | **This is not the host's order.** A host compares the code units it holds text
+-- | in, which puts an astral character below `U+E000` where a scalar value puts it
+-- | above, so anything whose meaning is an order over text compares it here.
+compareByScalar :: P.String -> P.String -> Ordering
+compareByScalar a b = go 0 (codes a) (codes b)
+  where
+  codes = map fromEnum <<< toCodePointArray
+
+  go i x y = case Array.index x i, Array.index y i of
+    Nothing, Nothing -> EQ
+    Nothing, _ -> LT
+    _, Nothing -> GT
+    Just p, Just q -> case compare p q of
+      EQ -> go (i + 1) x y
+      other -> other
 
 surrogate :: P.Int -> P.Boolean
 surrogate code = code >= 0xD800 && code <= 0xDFFF
