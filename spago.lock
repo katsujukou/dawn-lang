@@ -7,6 +7,7 @@
           "dependencies": [
             "ansi",
             "argparse-basic",
+            "compiler",
             "console",
             "dodo-printer",
             "either",
@@ -63,12 +64,14 @@
             "effect",
             "either",
             "foldable-traversable",
+            "integers",
             "maybe",
             "node-process",
             "ordered-collections",
             "prelude",
             "refs",
             "run",
+            "strings",
             "tuples",
             "typelevel-prelude"
           ]
