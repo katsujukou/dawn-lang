@@ -20,6 +20,7 @@
 module Stella.Compiler.Elaborate.Unify
   ( MetaInfo
   , MetaBinding(..)
+  , KindRequirement(..)
   , KindMetaInfo
   , KindMetaBinding(..)
   , MetaContext
@@ -32,6 +33,8 @@ module Stella.Compiler.Elaborate.Unify
   , lookupKindMeta
   , substitute
   , substituteKind
+  , requireQuantifiable
+  , requireProducesType
   , unifyKind
   , unifyRow
   ) where
@@ -78,6 +81,20 @@ data MetaBinding
   = Unsolved MetaInfo
   | Assigned XType
 
+-- | What a site that created a kind metavariable requires of whatever solves it.
+-- |
+-- | Kind equality decides nothing about these: `?k ≡ Effect` is a kind equation
+-- | that solves, and it is wrong only where `?k` stands somewhere a quantifiable
+-- | kind is called for (D24). So a requirement is carried by the metavariable and
+-- | re-applied at every assignment, rather than being a condition on equality.
+data KindRequirement
+  -- | `Γ ⊢ κ qkind`: the kind may stand where a type variable is introduced, and
+  -- | in a `[[κ̄]]`.
+  = Quantifiable
+  -- | `result(κ) = Type`: the kind produces `Type` once fully applied, which is
+  -- | what the right-hand side of a quantifiable arrow must do.
+  | ProducesType
+
 -- | What `Ψ` records of an unsolved kind metavariable, that is, `?k [Γ]`.
 -- |
 -- | A kind variable enters `Γ` only while a declaration whose scheme binds it is
@@ -85,6 +102,7 @@ data MetaBinding
 -- | created under keeps that variable alive past its declaration.
 type KindMetaInfo =
   { scope :: Set KindVar
+  , requirements :: Set KindRequirement
   }
 
 data KindMetaBinding
@@ -135,6 +153,10 @@ data UnifyError
   -- | A kind solution mentions a kind variable that was not in scope where the
   -- | metavariable was created.
   | KindEscapingVariable KindMetaVar KindVar
+  -- | A kind required to be quantifiable that is not (D24).
+  | KindNotQuantifiable XKind
+  -- | A kind required to produce `Type` once fully applied that does not.
+  | KindDoesNotProduceType XKind
   -- | A kind metavariable the context does not hold, which is a caller error.
   | KindMetaUnbound KindMetaVar
   -- | A metavariable the context does not hold, and one it holds solved. Both
@@ -248,20 +270,83 @@ unifyKind ctx kind1 kind2 = go ctx kind1 kind2
     left, right -> Left (KindNotEqual left right)
 
 -- | Every kind substitution performs an occurs check and a scope check, as a
--- | type substitution does.
+-- | type substitution does, and then holds the solution to what the
+-- | metavariable requires of it.
 assignKind :: MetaContext -> KindMetaVar -> XKind -> Either UnifyError MetaContext
-assignKind ctx m solution = case Map.lookup m ctx.kindBindings of
+assignKind ctx m given = case Map.lookup m ctx.kindBindings of
   Just (KindUnsolved info) ->
-    if occursInKind m solution then
-      Left (KindOccursCheck m solution)
-    else case Set.findMin (Set.difference (kindVarsOf solution) info.scope) of
-      Just escaping ->
-        Left (KindEscapingVariable m escaping)
-      Nothing -> do
-        narrowed <- foldM (narrowKindTo info.scope) ctx
-          (Set.toUnfoldable (kindMetasOf solution) :: P.Array KindMetaVar)
-        pure narrowed { kindBindings = Map.insert m (KindAssigned solution) narrowed.kindBindings }
+    let
+      solution = substituteKind ctx given
+    in
+      if occursInKind m solution then
+        Left (KindOccursCheck m solution)
+      else case Set.findMin (Set.difference (kindVarsOf solution) info.scope) of
+        Just escaping ->
+          Left (KindEscapingVariable m escaping)
+        Nothing -> do
+          -- A requirement reaching an unsolved kind attaches itself there, so
+          -- assigning one metavariable to another moves the requirements across
+          -- and the two sets merge.
+          required <- foldM (applyRequirement solution) ctx
+            (Set.toUnfoldable info.requirements :: P.Array KindRequirement)
+          narrowed <- foldM (narrowKindTo info.scope) required
+            (Set.toUnfoldable (kindMetasOf solution) :: P.Array KindMetaVar)
+          pure narrowed { kindBindings = Map.insert m (KindAssigned solution) narrowed.kindBindings }
 
+  _ ->
+    Left (KindMetaUnbound m)
+
+applyRequirement :: XKind -> MetaContext -> KindRequirement -> Either UnifyError MetaContext
+applyRequirement kind ctx = case _ of
+  Quantifiable -> requireQuantifiable ctx kind
+  ProducesType -> requireProducesType ctx kind
+
+-- | `Γ ⊢ κ qkind`, as an obligation rather than as a judgement.
+-- |
+-- | Where the kind is unsolved there is nothing to decide yet, so the
+-- | requirement is attached to the metavariable and decided when it is
+-- | assigned. An arrow is quantifiable only where it produces `Type`, so both
+-- | sides carry the requirement and the right-hand one carries a second.
+-- |
+-- | **A rigid kind variable is admitted unconditionally, and that it is bound is
+-- | the caller's to establish.** This takes no `Γ`: every kind variable of a
+-- | well-formed kind is bound by the scheme of the declaration being checked
+-- | (D3), so the judgement `k ∈ Γ` belongs where the kind is built. A caller
+-- | that skips it leaves an unbound kind variable for the Core kind checker to
+-- | find rather than reporting it where it was written.
+requireQuantifiable :: MetaContext -> XKind -> Either UnifyError MetaContext
+requireQuantifiable ctx kind = case substituteKind ctx kind of
+  XKType -> Right ctx
+  XKRow _ -> Right ctx
+  XKVar _ -> Right ctx
+  XKMeta m -> attachRequirement Quantifiable m ctx
+  XKEffect -> Left (KindNotQuantifiable XKEffect)
+  XKFun a b -> do
+    ctx1 <- requireQuantifiable ctx a
+    ctx2 <- requireQuantifiable ctx1 b
+    requireProducesType ctx2 b
+
+-- | `result(κ) = Type`.
+-- |
+-- | A rigid kind variable fails: a scheme says nothing about what instantiates
+-- | it, and a row kind is among the possibilities.
+requireProducesType :: MetaContext -> XKind -> Either UnifyError MetaContext
+requireProducesType ctx kind = case substituteKind ctx kind of
+  XKType -> Right ctx
+  XKFun _ b -> requireProducesType ctx b
+  XKMeta m -> attachRequirement ProducesType m ctx
+  other -> Left (KindDoesNotProduceType other)
+
+attachRequirement :: KindRequirement -> KindMetaVar -> MetaContext -> Either UnifyError MetaContext
+attachRequirement requirement m ctx = case Map.lookup m ctx.kindBindings of
+  Just (KindUnsolved info) ->
+    Right ctx
+      { kindBindings = Map.insert m
+          (KindUnsolved (info { requirements = Set.insert requirement info.requirements }))
+          ctx.kindBindings
+      }
+
+  -- Substituting leaves no assigned metavariable in the position this reaches.
   _ ->
     Left (KindMetaUnbound m)
 
@@ -681,6 +766,13 @@ derive instance Generic MetaBinding _
 
 instance Show MetaBinding where
   show x = genericShow x
+
+derive instance Eq KindRequirement
+derive instance Ord KindRequirement
+derive instance Generic KindRequirement _
+
+instance Show KindRequirement where
+  show = genericShow
 
 derive instance Eq KindMetaBinding
 derive instance Generic KindMetaBinding _

@@ -13,13 +13,14 @@ import Prim as P
 import Stella.Compiler.Elaborate.Kind (KindMetaVar(..), XKind(..))
 import Stella.Compiler.Elaborate.Row (xnf)
 import Stella.Compiler.Elaborate.Type (MetaVar(..), Scope, XConstraint(..), XRowEntry(..), XType(..), emptyScope)
-import Stella.Compiler.Elaborate.Unify (KindMetaBinding(..), KindMetaInfo, MetaBinding(..), MetaContext, MetaInfo, UnifyError(..), UnifyResult(..), emptyContext, freshKindMeta, freshMeta, lookupKindMeta, lookupMeta, substitute, substituteKind, unifyKind, unifyRow)
+import Stella.Compiler.Elaborate.Unify (KindMetaBinding(..), KindMetaInfo, KindRequirement(..), MetaBinding(..), MetaContext, MetaInfo, UnifyError(..), UnifyResult(..), emptyContext, freshKindMeta, freshMeta, lookupKindMeta, lookupMeta, requireProducesType, requireQuantifiable, substitute, substituteKind, unifyKind, unifyRow)
 import Stella.Compiler.TypedCore (Constraint(..), EffName(..), KindVar(..), ModuleName(..), Qualified(..), RowElemKind(..), RowKey(..), Symbol(..), TyName(..), TyVar(..), Type(..))
 import Stella.Compiler.TypedCore.Entailment (AtomicFacts, decompose, noFacts)
 import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
+import Data.Set (Set)
 import Data.Set as Set
 import Data.Tuple (Tuple(..), fst, snd)
 import Test.Spec (Spec, describe, it)
@@ -122,7 +123,11 @@ tailOf ctx m = case solutionOf ctx m of
 
 -- | A kind metavariable created where no kind variable is in scope.
 closedKindInfo :: KindMetaInfo
-closedKindInfo = { scope: Set.empty }
+closedKindInfo = { scope: Set.empty, requirements: Set.empty }
+
+-- | A kind metavariable created under one kind variable.
+kindInfoUnder :: KindVar -> KindMetaInfo
+kindInfoUnder k = closedKindInfo { scope = Set.singleton k }
 
 -- | Two fresh kind metavariables over an empty context.
 twoKindMetas :: KindMetaInfo -> KindMetaInfo -> { j :: KindMetaVar, k :: KindMetaVar, ctx :: MetaContext }
@@ -141,6 +146,11 @@ kindSolutionOf ctx m = case lookupKindMeta ctx m of
 scopeOfMeta :: MetaContext -> MetaVar -> Maybe Scope
 scopeOfMeta ctx m = case lookupMeta ctx m of
   Just (Unsolved info) -> Just info.scope
+  _ -> Nothing
+
+requirementsOf :: MetaContext -> KindMetaVar -> Maybe (Set KindRequirement)
+requirementsOf ctx m = case lookupKindMeta ctx m of
+  Just (KindUnsolved info) -> Just info.requirements
   _ -> Nothing
 
 spec :: Spec Unit
@@ -219,7 +229,7 @@ spec = describe "Stella.Compiler.Elaborate.Unify" do
     it "accepts that kind variable when the metavariable was created under it" do
       let
         k = KindVar "k"
-        m = twoKindMetas { scope: Set.singleton k } closedKindInfo
+        m = twoKindMetas (kindInfoUnder k) closedKindInfo
       case unifyKind m.ctx (XKMeta m.j) (XKVar k) of
         Right ctx -> kindSolutionOf ctx m.j `shouldEqual` Just (XKVar k)
         Left err -> show err `shouldEqual` "Right"
@@ -248,6 +258,76 @@ spec = describe "Stella.Compiler.Elaborate.Unify" do
       case fst result of
         Solved ctx' -> kindSolutionOf ctx' (fst kindMeta) `shouldEqual` Just (XKRow RowType)
         other -> show other `shouldEqual` "Solved …"
+
+  describe "kind requirements" do
+    it "rejects Effect where a quantifiable kind is required" do
+      case requireQuantifiable emptyContext XKEffect of
+        Left (KindNotQuantifiable _) -> pure unit
+        other -> show other `shouldEqual` "Left (KindNotQuantifiable …)"
+
+    it "accepts an arrow that consumes a row and produces Type" do
+      case requireQuantifiable emptyContext (XKFun (XKRow RowType) XKType) of
+        Right _ -> pure unit
+        Left err -> show err `shouldEqual` "Right"
+
+    it "rejects an arrow that produces a row" do
+      -- only row syntax produces a row, so this is not quantifiable however its
+      -- argument reads
+      case requireQuantifiable emptyContext (XKFun (XKRow RowType) (XKRow RowType)) of
+        Left (KindDoesNotProduceType _) -> pure unit
+        other -> show other `shouldEqual` "Left (KindDoesNotProduceType …)"
+
+    it "rejects a rigid kind variable where Type must be produced" do
+      -- a scheme says nothing about what instantiates `k`, and a row kind is
+      -- among the possibilities
+      case requireProducesType emptyContext (XKVar (KindVar "k")) of
+        Left (KindDoesNotProduceType _) -> pure unit
+        other -> show other `shouldEqual` "Left (KindDoesNotProduceType …)"
+
+    it "attaches a requirement to an unsolved metavariable and decides it later" do
+      let m = twoKindMetas closedKindInfo closedKindInfo
+      case requireQuantifiable m.ctx (XKMeta m.j) of
+        Right ctx -> do
+          requirementsOf ctx m.j `shouldEqual` Just (Set.singleton Quantifiable)
+          case unifyKind ctx (XKMeta m.j) XKEffect of
+            Left (KindNotQuantifiable _) -> pure unit
+            other -> show other `shouldEqual` "Left (KindNotQuantifiable …)"
+        Left err -> show err `shouldEqual` "Right"
+
+    it "decides ProducesType at the assignment" do
+      let m = twoKindMetas closedKindInfo closedKindInfo
+      case requireProducesType m.ctx (XKMeta m.j) of
+        Right ctx -> case unifyKind ctx (XKMeta m.j) (XKRow RowType) of
+          Left (KindDoesNotProduceType _) -> pure unit
+          other -> show other `shouldEqual` "Left (KindDoesNotProduceType …)"
+        Left err -> show err `shouldEqual` "Right"
+
+    it "keeps both requirements where it identifies two metavariables" do
+      let m = twoKindMetas closedKindInfo closedKindInfo
+      case requireQuantifiable m.ctx (XKMeta m.j) >>= \c -> requireProducesType c (XKMeta m.k) of
+        Right ctx -> case unifyKind ctx (XKMeta m.j) (XKMeta m.k) of
+          Right ctx' -> do
+            requirementsOf ctx' m.k `shouldEqual` Just (Set.fromFoldable [ Quantifiable, ProducesType ])
+            case unifyKind ctx' (XKMeta m.k) (XKRow RowType) of
+              Left (KindDoesNotProduceType _) -> pure unit
+              other -> show other `shouldEqual` "Left (KindDoesNotProduceType …)"
+          Left err -> show err `shouldEqual` "Right"
+        Left err -> show err `shouldEqual` "Right"
+
+    it "carries a requirement into the arrow a metavariable is solved to" do
+      -- ?j is quantifiable and ?j := ?k1 -> ?k2, so ?k2 owes `ProducesType`
+      let
+        first = freshKindMeta closedKindInfo emptyContext
+        second = freshKindMeta closedKindInfo (snd first)
+        third = freshKindMeta closedKindInfo (snd second)
+        arrow = XKFun (XKMeta (fst second)) (XKMeta (fst third))
+      case requireQuantifiable (snd third) (XKMeta (fst first)) of
+        Right ctx1 -> case unifyKind ctx1 (XKMeta (fst first)) arrow of
+          Right ctx2 -> case unifyKind ctx2 (XKMeta (fst third)) (XKRow RowType) of
+            Left (KindDoesNotProduceType _) -> pure unit
+            other -> show other `shouldEqual` "Left (KindDoesNotProduceType …)"
+          Left err -> show err `shouldEqual` "Right"
+        Left err -> show err `shouldEqual` "Right"
 
   describe "a flexible tail the context does not hold unsolved" do
     it "reports one standing against itself" do
@@ -283,7 +363,7 @@ spec = describe "Stella.Compiler.Elaborate.Unify" do
       -- an unsolved kind inside it mentions none until it is solved
       let
         k = KindVar "k"
-        kindMeta = freshKindMeta { scope: Set.singleton k } emptyContext
+        kindMeta = freshKindMeta (kindInfoUnder k) emptyContext
         outer = rowTypeInfo { scope = emptyScope }
         first = freshMeta outer (snd kindMeta)
         proxied = XCon (Qualified prim (TyName "Proxy")) [ XKMeta (fst kindMeta) ]
@@ -325,7 +405,7 @@ spec = describe "Stella.Compiler.Elaborate.Unify" do
     it "narrows a kind metavariable standing in the narrowed metavariable's kind" do
       let
         k = KindVar "k"
-        kindMeta = freshKindMeta { scope: Set.singleton k } emptyContext
+        kindMeta = freshKindMeta (kindInfoUnder k) emptyContext
         outer = rowTypeInfo { scope = emptyScope }
         payload = rowTypeInfo { kind = XKMeta (fst kindMeta), scope = emptyScope }
         first = freshMeta outer (snd kindMeta)
@@ -342,7 +422,7 @@ spec = describe "Stella.Compiler.Elaborate.Unify" do
       -- variable, so what `?p` holds is that variable however it reads
       let
         k = KindVar "k"
-        kindMeta = freshKindMeta { scope: Set.singleton k } emptyContext
+        kindMeta = freshKindMeta (kindInfoUnder k) emptyContext
         outer = rowTypeInfo { scope = emptyScope }
         payload = rowTypeInfo
           { kind = XKMeta (fst kindMeta)
@@ -363,7 +443,7 @@ spec = describe "Stella.Compiler.Elaborate.Unify" do
     it "narrows a kind metavariable a kind solution mentions" do
       let
         k = KindVar "k"
-        m = twoKindMetas closedKindInfo { scope: Set.singleton k }
+        m = twoKindMetas closedKindInfo (kindInfoUnder k)
       case unifyKind m.ctx (XKMeta m.j) (XKFun (XKMeta m.k) XKType) of
         Right ctx -> case unifyKind ctx (XKMeta m.k) (XKVar k) of
           Left (KindEscapingVariable _ escaping) -> escaping `shouldEqual` k
