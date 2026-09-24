@@ -24,6 +24,7 @@ module Steam.Load
   , emptyStore
   , noIdentities
   , registryOf
+  , namesOf
   , moduleNamed
   , globalNamed
   , LoadError(..)
@@ -46,6 +47,7 @@ import Data.Set as Set
 import Data.Show.Generic (genericShow)
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..))
+import Effect (Effect)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Run (EFFECT, Run, liftEffect)
@@ -54,6 +56,7 @@ import Run.Except as Except
 import Steam.Eval (Failure, enter)
 import Steam.Module (CalleeTarget(..), CtorRef, ForeignRef, GlobalSlot, HandlerRef, Loaded, Prepared, Registry, prepare)
 import Steam.Op as Op
+import Steam.Structural (RuntimeNames)
 import Steam.Value (Closure, CtorId(..), Foreign(..), KeyId(..), ModuleId(..), OpId(..), Value(..))
 import Stella.Compiler.Bytecode.Instr (CalleeIx(..), CtorIx(..), ForeignIx(..), FuncIx(..), Function, GlobalIx(..), Instr(..), Join, JoinName, KeyIx(..), Node, OpIx(..), PrimIx(..), Tail(..))
 import Stella.Compiler.Bytecode.Module (CalleeEntry(..), Dmo, GlobalInit(..), HandlerEntry, Key)
@@ -129,6 +132,18 @@ emptyStore identities =
 -- | What a run reads: the modules, under the identities assigned to them.
 registryOf :: Store -> Registry
 registryOf store = store.modules
+
+-- | The way back from an identity to the name it was assigned for, which is what a
+-- | snapshot of a value reads ([Structural](Structural.purs)). A value carries an
+-- | identity and an identity is compared rather than read, so a report needs this.
+namesOf :: Store -> Effect RuntimeNames
+namesOf store = do
+  identities <- Ref.read store.identities
+  pure
+    { ctors: identities.ctorNames
+    , keys: identities.keyNames
+    , ops: identities.opNames
+    }
 
 moduleNamed :: Store -> ModuleName -> Maybe ModuleId
 moduleNamed store name = Map.lookup name store.byName

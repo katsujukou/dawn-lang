@@ -9,15 +9,19 @@ package:
     - console
     - effect
     - either
+    - enums
     - foldable-traversable
+    - integers
     - maybe
     - node-process
     - ordered-collections
     - prelude
     - refs
     - run
+    - strings
     - tuples
     - typelevel-prelude
+    - unicode
   run:
     main: Steam.CLI.JS
   test:

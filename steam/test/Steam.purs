@@ -10,6 +10,7 @@ import Test.Steam.Eval as Eval
 import Test.Steam.Effectful as Effectful
 import Test.Steam.Handlers as Handlers
 import Test.Steam.Load as Load
+import Test.Steam.Structural as Structural
 import Test.Steam.Ops as Ops
 import Test.Steam.Value as Value
 
@@ -22,3 +23,4 @@ main = runSpecAndExitProcess [ consoleReporter ] do
   Load.spec
   Handlers.spec
   Effectful.spec
+  Structural.spec
