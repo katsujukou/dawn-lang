@@ -153,7 +153,8 @@ This is the interpreter's internal representation and **not a published ABI**: n
 | closure | `{ function, captures }` |
 | partial application | `{ callee, args }` |
 | continuation | a captured stack segment |
-| `IO` | an opaque action |
+| `IO` | one of `pure v`, `bind io k`, and a native action. **Opaque to the instruction set and not to the interpreter**: no instruction examines one (D25), and the loop that executes one takes it apart |
+| a value only a foreign observes | whatever the foreign gave, which nothing here takes apart |
 
 **Everything but a closure's capture vector and a region cell is immutable**, which
 is what lets the host's collector be the whole of memory management.
@@ -447,22 +448,138 @@ a global and reads its slot; there is no second step in which a declaration is r
 only once it has initialized: an entry that faulted must leave nothing behind for the
 next entry to trip over.
 
-### Rendering a value
+### What a report answers with
 
-A session answers with a value, and what it can say about one is **structural**: a
-scalar as itself, a constructor by the name its declaration carries with its fields
-beside it, a record by its keys, and a closure, a continuation, or an `IO` as what it
-is and nothing more.
+**A request naming a global is answered with a snapshot of the value it holds, and not
+with text.** A snapshot is **structural**:
 
-**So interning keeps both directions.** A value carries an identity and an identity
-is compared, not read, so rendering one needs the way back: a `CtorId` to the
-qualified constructor name it was assigned for, a `KeyId` to the key, and an `OpId`
-to the operation's name where a report names one. Loading is where those are kept,
-which is what stops a session's answer from depending on the `DEBUG` section — a
-section a file need not carry ([Bytecode](../05-Backend/01-Bytecode.md)).
+| The value | The snapshot |
+| --- | --- |
+| a scalar | itself |
+| a constructor | the fully qualified name its declaration gave it, and its fields |
+| a record | its fields, each under the key it stands at |
+| a variant | the key it carries, with the kind that key stands at, and its payload |
+| a closure, a partial application, a continuation, an `IO`, or a value only a foreign observes | what it is, and nothing more |
+
+**This is what a report answers with and not what every boundary carries.** A
+compile-time session passes live values: the argument a synthesizer is applied to, the
+value it produces, and the answer to an `Elab` request cross as handles on what the
+interpreter holds, never as snapshots of one. A snapshot of a handle would say only
+that it is a value a foreign observes, and nothing could turn it back into the handle
+([Elaborator API](../02-Surface-Language/03-Elaborator-API.md)).
+
+**A snapshot carries names, never the interpreter's own bookkeeping.** No runtime
+identity, register, or address appears in one. That is what interning keeps both
+directions for: a value carries an identity and an identity is compared rather than
+read, so a snapshot needs the way back — a `CtorId` to the qualified constructor name,
+a `KeyId` to the key, and an `OpId` to the operation's name where a report names one.
+Loading is where those are kept, which is what stops an answer from depending on the
+`DEBUG` section, a section a file need not carry
+([Bytecode](../05-Backend/01-Bytecode.md)).
+
+Three things a snapshot fixes, each because the alternative loses something a
+consumer cannot recover:
+
+| | Why |
+| --- | --- |
+| **A key keeps the kind it stands at** | a field and a variant's tag of one spelling are two keys (D16), and a snapshot that wrote both as the spelling would make them one |
+| **A record's fields stand in the canonical order of their keys**, fixed below | the order the interpreter happened to hold them in is an artefact of when each identity was assigned, and two runs of one program must answer alike |
+| **Nothing under a closure, a continuation, or an action is reached** | what is under one is the interpreter's: a capture list, a captured stack, a host action. Carrying them would carry mutable state and cycles, and would make an answer depend on what a debugger wants rather than on the value |
+
+An identity the registry holds no name for is **not** guessed at: what stands in its
+place says that the snapshot stopped there.
+
+**The canonical order of keys.** A kind decides first, in the order below, and within
+one kind the payload decides:
+
+| Kind | Within it |
+| --- | --- |
+| a field or an instance name, `SymbolKey` | the spelling, **by scalar value** |
+| a variant's tag, `TagKey` | the spelling, by scalar value |
+| a tuple's component, `PositionKey` | the number, ascending |
+| an effect, `EffectKey` | the module's name by scalar value, then the effect's |
+
+**By scalar value and not by the host's order.** A host compares text by the code
+units it holds, which puts an astral character below `U+E000` where a scalar value puts
+it above ([Interface](../05-Backend/03-Interface.md)); an answer ordered that way would
+depend on what the host holds text in. `RegionKey` has no row: erasure keeps no region
+element, so no value carries one (D36).
+
+**A snapshot always stops.** A value may be deeper or wider than anything wants to
+read, so a snapshot is taken **within limits the request carries**, a default standing
+where it names none.
+
+| The limit | What it bounds |
+| --- | --- |
+| the depth | how many levels of nesting the snapshot carries. The value at the root is one, and each level under it takes one more |
+| the nodes | how many values the snapshot carries in all |
+| the items | how many fields or arguments of **one** value |
+| the text | how many scalar values of one string |
+
+**Each is a count and none of them is negative.** A request carries them, and one
+naming a negative names none of that kind.
+
+**Exceeding one is not an error.** What is not taken is replaced by a marker, and a
+string longer than its limit carries the prefix that fits. Four rules make the
+result of one value under one set of limits the same every time:
+
+- **The depth is a place and the nodes are a budget.** At the depth limit every value
+  under it is a marker, each element of a sequence among them, and the sequence is
+  still all of what the value held. The node budget is what a sequence can run out of
+- **The budget is spent in the order the snapshot holds**: a constructor's fields in
+  the order it was applied, a record's in the canonical order of its keys. So what it
+  runs out on is a tail, which the sequence says it is missing, and never an arbitrary
+  part
+- **A marker costs nothing.** It stands in place of what was not taken rather than
+  being something carried, so it spends no node of the budget
+- **A sequence cut short says so of itself** rather than through an element of its
+  own: a record's fields have no key to hang a marker on, and inventing one would put
+  a key in an answer that no value carried
+
+**The limits bound the descent and not only the answer.** Nothing under a value is
+descended into once the budget is gone, and no field or argument past the items limit
+is descended into either, so how far into a value a snapshot reads is what the limits
+decide rather than what the value happens to hold.
+
+**A value the snapshot reaches is read whole, however.** Its identities are turned into
+names whether or not the budget has room for it, since one the registry cannot name
+stands as a marker whatever is left; every key of a record it carries is looked at, the
+canonical order being what decides which fields the items limit keeps; and every scalar
+value of a string it carries is read, the length being what says whether the prefix
+carried is all of it. **So the cost of a snapshot is the limits together with the width
+of the values it does reach, and not the size of what hangs below them.**
+
+**One value gives one snapshot under one set of limits.** Two snapshots of a value are
+comparable where the limits they were taken under are the same, and nothing here makes
+them comparable across different ones.
+
+**A snapshot is a value and not a handle.** It is immutable, it can be compared and
+encoded, and it refers to nothing the interpreter owns — which is what lets the same
+answer reach a terminal, a test, and a later encoding alike. The opaque handles a
+compile-time session carries are the opposite and stay so: those name a live value
+and are not snapshots of one
+([Elaborator API](../02-Surface-Language/03-Elaborator-API.md)).
+
+### Printing one
+
+**Text is a layer above the snapshot, and the only one that decides what anything
+looks like.** A printer reads a snapshot and no value of the interpreter, which is
+what keeps the answer's meaning apart from its spelling: the same snapshot prints one
+way in a terminal and another in an editor, and encodes without being printed at all.
+
+**A line shows every character it carries.** A character and a string are written as
+literals of one: the delimiter of that literal is escaped and the other delimiter is
+not, and a character a line cannot carry stands as the name it has or else as its code
+point. Four Unicode categories are what a line cannot carry — a control (`Cc`), a
+format character (`Cf`), and a line or paragraph separator (`Zl`, `Zp`) — since a
+format character shows nothing and still acts: an override reorders what follows it, a
+zero-width space parts a word where nothing is seen, and a tag character carries text a
+display never shows. What a terminal would swallow, or act on, is therefore visible
+instead.
 
 **Type-directed printing is the front end's.** Steam holds no types (D34), so
-rendering by a `Show` instance is the CLI's to do beside the type it checked.
+printing by a `Show` instance is the CLI's to do beside the type it checked. What the
+machine's own printer gives is what a session can say without a type.
 
 ## Foreign implementations
 

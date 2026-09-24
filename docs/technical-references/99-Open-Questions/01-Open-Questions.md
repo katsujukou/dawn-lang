@@ -137,7 +137,13 @@ What the surface writes for such an instance, and how ordinary code names one, i
 
 These lie outside Core, but the longer they are deferred the more the standard library settles into a shape that depends on FFI. The first version, `stella-base-0.1`, should be fixed while writing the Phase A JavaScript backend.
 
-**What the CLI and a session of the interpreter say to each other.** The shell is the CLI's and the evaluator is a session of Steam beside it ([Abstract Machine](../07-Runtime/01-Abstract-Machine.md)), so something carries a module one way and a value the other. What that is — a pipe with a framing of its own, a socket, the two in one process — is open, and so is what a value looks like on the way back: Steam can render one structurally, and printing it by the type the CLI checked is the CLI's. What the choice must support is fixed: a module at a time, a request naming the global to report, and a session that outlives a failed entry.
+**What carries a module one way and an answer the other.** The shell is the CLI's and the evaluator is a session of Steam beside it ([Abstract Machine](../07-Runtime/01-Abstract-Machine.md)), and **what a report's answer means is settled**: a request naming a global is answered with a structural snapshot of the value it holds, and printing one is a layer above it. That is the report boundary alone — a compile-time session passes live values and handles, never snapshots of them. What is open is what carries the two — a pipe with a framing of its own, a socket, the two in one process — and, with it, how a snapshot is encoded where it leaves the process. What the choice must support is fixed: a module at a time, a request naming the global to report, and a session that outlives a failed entry.
+
+**The compile-time session protocol.** A guest synthesizer asks more of the interpreter than either mode fixes: applying a guest value to arguments, carrying a `Goal`, a `Type`, and an `Expr` across as opaque handles, serving an `Elab` request and continuing the same attempt with the answer, and discarding guest execution state where an attempt is abandoned ([Elaborator API](../02-Surface-Language/03-Elaborator-API.md), [Abstract Machine](../07-Runtime/01-Abstract-Machine.md)). Whether that is a third mode beside session and run, or a capability a session may be opened with, is open, and so is whether it shares a framing with the CLI boundary above.
+
+What D40 settles is the part that would otherwise be hardest: the protocol holds a suspended guest computation for the length of one request and never **between attempts**, since what an attempt abandons is discarded rather than kept.
+
+What it does not settle is how a guest computation that loops **inside** one attempt is stopped. Fuel bounds the scheduler's retries and counts nothing of an attempt that never returns an outcome, so an instruction budget or a cancellation belongs to the same protocol; which of the two, and what a synthesizer sees of it, is open.
 
 **A fast path for pure cases.** `mapArray` runs the Stella loop even when the effect row is empty, rather than falling through to `Array.prototype.map`. An elaboration macro that inspects the effect row can resolve this ([Modules](../06-Modules/01-Modules.md)); it waits on the Phase B foundation and on the operational model that admits a higher-order ABI entry at all (above), and on neither Phase E nor anything in it.
 
@@ -186,7 +192,9 @@ Should a design without the header entry be adopted later, it must be stated in 
 
 ## Implementation
 
-**Compiling macro definitions during bootstrap.** How to build a processor that runs Core⁺ and `Elab`: whether to write it in the Phase A compiler as a language that does not yet have macros, or in a host language.
+**Compiling metaprograms during bootstrap — settled in outline.** Policy is guest Stella code and mechanism is the compiler's, and the circle is cut by layers rather than by an exception: a kernel elaborator using no class, no macro, and no synthesis compiles `Stella.Elab` and a small guest synthesizer, which then runs on Steam against the host's mechanism (D39, [Elaborator API](../02-Surface-Language/03-Elaborator-API.md)).
+
+What remains is the **content of `Stella.Elab`** — which kernel operations the library exposes, and the shape of the view a metaprogram reads a type through — and the caching below.
 
 **Caching and loading compiled metaprograms.**
 
