@@ -323,11 +323,18 @@ loadModule(dmo):
   every import is already in the registry, and every condition below holds
   intern the keys, the operations, and the constructors it declares
   open a slot for each global it declares, holding nothing
-  build the tables of what it declares, under the names it declares them at
+  build the tables of what it declares, under the names it declares them at,
+    and the intrinsic `Prim.Unit` beside them
   resolve every reference against those tables and the registry
   initialize the globals in declaration order, against the working registry
   commit the module to the registry
 ```
+
+**`Prim.Unit` stands among the declarations.** It is the one value the implicit
+environment holds, every module may name it, and no file declares it — so loading
+puts it in the tables a reference is resolved against, under the identity every
+module shares, and **`Prim` is the one module a reference may name without importing
+it** ([Prim and Base](../06-Modules/02-Prim-and-Base.md)).
 
 **The slots come before the references because a resolved reference is a slot.** A
 `GLOBALREFS` entry of this module's own name resolves to the slot this load has just
@@ -357,11 +364,13 @@ What loading refuses:
 | | |
 | --- | --- |
 | A module whose name is already in the registry | one name is one module |
+| A module under the name `Prim` | that name is Core's own vocabulary, which no file declares |
 | A declaration whose qualified name belongs to another module | `CTORS`, `EFFECTS`, `FOREIGNS`, and `GLOBALS` are what **this** module declares ([Bytecode](../05-Backend/01-Bytecode.md)) |
 | A constructor whose owner type belongs to another module | a `CTORS` entry comes from a `data` declaration of this module, so the constructor's name and the type it belongs to are both of it |
 | Two declarations of one name in one namespace: two constructors, two effects, or two values — a global and a foreign among them | the tables are arrays and a name table is what loading makes of them, so which of two a name meant would otherwise depend on the order they were written in |
 | An exported name that is not a value this module declares | `EXPORTS` names its own globals and foreigns, and nothing else |
 | Two join points of one function under one name | a transfer names one of them ([Bytecode](../05-Backend/01-Bytecode.md)) |
+| A handler declaring one cell twice, or holding two clauses for one operation | a cell is found by its key and a clause by its operation, so either standing twice would leave which one a `CGET` or a `PERF` means to the order of a table. What is compared is the identity and not the index, two indices being able to intern to one |
 | An import that is not loaded | nothing is resolved against a module that is not there |
 | A reference to a module this one does not import | **a header says which modules a term may name**, and the order modules happen to be loaded in adds nothing to it. This is not the row above: the module may be loaded and still be one this one never imported |
 | A global or foreign an imported module does not export | `EXPORTS` holds the value names a module publishes, its initialized globals and its foreign declarations alike |
