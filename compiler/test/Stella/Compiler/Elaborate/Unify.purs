@@ -10,10 +10,11 @@ import Prelude
 
 import Prim as P
 
+import Stella.Compiler.Elaborate.Kind (KindMetaVar(..), XKind(..))
 import Stella.Compiler.Elaborate.Row (xnf)
-import Stella.Compiler.Elaborate.Type (MetaVar, XConstraint(..), XRowEntry(..), XType(..))
-import Stella.Compiler.Elaborate.Unify (MetaBinding(..), MetaContext, MetaInfo, UnifyError(..), UnifyResult(..), emptyContext, freshMeta, lookupMeta, substitute, unifyRow)
-import Stella.Compiler.TypedCore (Constraint(..), EffName(..), Kind(..), KindVar(..), ModuleName(..), Qualified(..), RowElemKind(..), RowKey(..), Symbol(..), TyName(..), TyVar(..), Type(..))
+import Stella.Compiler.Elaborate.Type (MetaVar(..), Scope, XConstraint(..), XRowEntry(..), XType(..), emptyScope)
+import Stella.Compiler.Elaborate.Unify (KindMetaBinding(..), KindMetaInfo, MetaBinding(..), MetaContext, MetaInfo, UnifyError(..), UnifyResult(..), emptyContext, freshKindMeta, freshMeta, lookupKindMeta, lookupMeta, substitute, substituteKind, unifyKind, unifyRow)
+import Stella.Compiler.TypedCore (Constraint(..), EffName(..), KindVar(..), ModuleName(..), Qualified(..), RowElemKind(..), RowKey(..), Symbol(..), TyName(..), TyVar(..), Type(..))
 import Stella.Compiler.TypedCore.Entailment (AtomicFacts, decompose, noFacts)
 import Data.Array as Array
 import Data.Either (Either(..))
@@ -67,14 +68,14 @@ labelledEffect s eff args rest = XRowExtend (XRowLabelledEffectEntry s eff args)
 -- | check compares a solution against.
 rowTypeInfo :: MetaInfo
 rowTypeInfo =
-  { kind: KRow RowType
+  { kind: XKRow RowType
   , scope: { types: Set.singleton rigidR, kinds: Set.empty }
   , lacks: Set.empty
   , disjointFrom: Set.empty
   }
 
 effectRowInfo :: MetaInfo
-effectRowInfo = rowTypeInfo { kind = KRow RowEffect }
+effectRowInfo = rowTypeInfo { kind = XKRow RowEffect }
 
 lacking :: P.Array RowKey -> MetaInfo
 lacking keys = rowTypeInfo { lacks = Set.fromFoldable keys }
@@ -119,8 +120,256 @@ tailOf ctx m = case solutionOf ctx m of
     Left _ -> Nothing
     Right n -> Just (Set.toUnfoldable n.flexible)
 
+-- | A kind metavariable created where no kind variable is in scope.
+closedKindInfo :: KindMetaInfo
+closedKindInfo = { scope: Set.empty }
+
+-- | Two fresh kind metavariables over an empty context.
+twoKindMetas :: KindMetaInfo -> KindMetaInfo -> { j :: KindMetaVar, k :: KindMetaVar, ctx :: MetaContext }
+twoKindMetas infoJ infoK =
+  let
+    first = freshKindMeta infoJ emptyContext
+    second = freshKindMeta infoK (snd first)
+  in
+    { j: fst first, k: fst second, ctx: snd second }
+
+kindSolutionOf :: MetaContext -> KindMetaVar -> Maybe XKind
+kindSolutionOf ctx m = case lookupKindMeta ctx m of
+  Just (KindAssigned kind) -> Just (substituteKind ctx kind)
+  _ -> Nothing
+
+scopeOfMeta :: MetaContext -> MetaVar -> Maybe Scope
+scopeOfMeta ctx m = case lookupMeta ctx m of
+  Just (Unsolved info) -> Just info.scope
+  _ -> Nothing
+
 spec :: Spec Unit
 spec = describe "Stella.Compiler.Elaborate.Unify" do
+  describe "kind unification" do
+    it "accepts two identical kinds" do
+      case unifyKind emptyContext XKType XKType of
+        Right _ -> pure unit
+        Left err -> show err `shouldEqual` "Right"
+
+    it "rejects two kinds no substitution equates" do
+      case unifyKind emptyContext XKType (XKRow RowType) of
+        Left (KindNotEqual left right) -> do
+          left `shouldEqual` XKType
+          right `shouldEqual` XKRow RowType
+        other -> show other `shouldEqual` "Left (KindNotEqual …)"
+
+    it "rejects Effect against Type" do
+      -- `Effect` is a kind and not a quantifiable one (D24), and it equals
+      -- nothing but itself here either
+      case unifyKind emptyContext XKEffect XKType of
+        Left (KindNotEqual _ _) -> pure unit
+        other -> show other `shouldEqual` "Left (KindNotEqual …)"
+
+    it "assigns a metavariable, whichever side it stands on" do
+      let m = twoKindMetas closedKindInfo closedKindInfo
+      case unifyKind m.ctx (XKMeta m.j) XKType of
+        Right ctx -> kindSolutionOf ctx m.j `shouldEqual` Just XKType
+        Left err -> show err `shouldEqual` "Right"
+      case unifyKind m.ctx (XKRow RowEffect) (XKMeta m.k) of
+        Right ctx -> kindSolutionOf ctx m.k `shouldEqual` Just (XKRow RowEffect)
+        Left err -> show err `shouldEqual` "Right"
+
+    it "identifies two metavariables" do
+      let m = twoKindMetas closedKindInfo closedKindInfo
+      case unifyKind m.ctx (XKMeta m.j) (XKMeta m.k) of
+        Right ctx -> case unifyKind ctx (XKMeta m.k) XKType of
+          Right ctx' -> kindSolutionOf ctx' m.j `shouldEqual` Just XKType
+          Left err -> show err `shouldEqual` "Right"
+        Left err -> show err `shouldEqual` "Right"
+
+    it "solves both sides of an arrow" do
+      -- ?j -> Type  ≡  Row Type -> ?k
+      let
+        m = twoKindMetas closedKindInfo closedKindInfo
+        left = XKFun (XKMeta m.j) XKType
+        right = XKFun (XKRow RowType) (XKMeta m.k)
+      case unifyKind m.ctx left right of
+        Right ctx -> do
+          kindSolutionOf ctx m.j `shouldEqual` Just (XKRow RowType)
+          kindSolutionOf ctx m.k `shouldEqual` Just XKType
+        Left err -> show err `shouldEqual` "Right"
+
+    it "looks through what is already solved" do
+      let m = twoKindMetas closedKindInfo closedKindInfo
+      case unifyKind m.ctx (XKMeta m.j) XKType of
+        Right ctx -> case unifyKind ctx (XKMeta m.j) (XKRow RowType) of
+          Left (KindNotEqual _ _) -> pure unit
+          other -> show other `shouldEqual` "Left (KindNotEqual …)"
+        Left err -> show err `shouldEqual` "Right"
+
+    it "refuses a solution that would make a metavariable refer to itself" do
+      let m = twoKindMetas closedKindInfo closedKindInfo
+      case unifyKind m.ctx (XKMeta m.j) (XKFun (XKMeta m.j) XKType) of
+        Left (KindOccursCheck escaping _) -> escaping `shouldEqual` m.j
+        other -> show other `shouldEqual` "Left (KindOccursCheck …)"
+
+    it "refuses a kind variable the metavariable was not created under" do
+      let
+        k = KindVar "k"
+        m = twoKindMetas closedKindInfo closedKindInfo
+      case unifyKind m.ctx (XKMeta m.j) (XKVar k) of
+        Left (KindEscapingVariable _ escaping) -> escaping `shouldEqual` k
+        other -> show other `shouldEqual` "Left (KindEscapingVariable …)"
+
+    it "accepts that kind variable when the metavariable was created under it" do
+      let
+        k = KindVar "k"
+        m = twoKindMetas { scope: Set.singleton k } closedKindInfo
+      case unifyKind m.ctx (XKMeta m.j) (XKVar k) of
+        Right ctx -> kindSolutionOf ctx m.j `shouldEqual` Just (XKVar k)
+        Left err -> show err `shouldEqual` "Right"
+
+    it "reports a kind metavariable the context does not hold" do
+      case unifyKind emptyContext (XKMeta (KindMetaVar 0)) XKType of
+        Left (KindMetaUnbound _) -> pure unit
+        other -> show other `shouldEqual` "Left (KindMetaUnbound …)"
+
+    it "reports it against itself too, where reflexivity would otherwise pass" do
+      case unifyKind emptyContext (XKMeta (KindMetaVar 0)) (XKMeta (KindMetaVar 0)) of
+        Left (KindMetaUnbound _) -> pure unit
+        other -> show other `shouldEqual` "Left (KindMetaUnbound …)"
+
+  describe "the row kind of a metavariable" do
+    it "solves an unknown row kind against the one the other side carries" do
+      -- neither bare metavariable gives its row element kind away, so the two
+      -- kinds meet at the refinement rather than at an element
+      let
+        kindMeta = freshKindMeta closedKindInfo emptyContext
+        unknownKind = rowTypeInfo { kind = XKMeta (fst kindMeta) }
+        first = freshMeta unknownKind (snd kindMeta)
+        second = freshMeta rowTypeInfo (snd first)
+        ctx = snd second
+        result = unifyRow noAssumptions ctx (XMeta (fst first)) (XMeta (fst second))
+      case fst result of
+        Solved ctx' -> kindSolutionOf ctx' (fst kindMeta) `shouldEqual` Just (XKRow RowType)
+        other -> show other `shouldEqual` "Solved …"
+
+  describe "a flexible tail the context does not hold unsolved" do
+    it "reports one standing against itself" do
+      -- the two occurrences cancel each other, so nothing later in the case
+      -- analysis would look at either
+      case fst (unifyRow noAssumptions emptyContext (XMeta (MetaVar 0)) (XMeta (MetaVar 0))) of
+        Mismatch (MetaUnbound _) -> pure unit
+        other -> show other `shouldEqual` "Mismatch (MetaUnbound …)"
+
+    it "reports one standing against a metavariable the context holds" do
+      let m = twoMetas rowTypeInfo rowTypeInfo
+      case fst (unifyRow noAssumptions m.ctx (XMeta m.r) (XMeta (MetaVar 99))) of
+        Mismatch (MetaUnbound unbound) -> unbound `shouldEqual` MetaVar 99
+        other -> show other `shouldEqual` "Mismatch (MetaUnbound …)"
+
+  describe "the scope of a metavariable inside a solution" do
+    it "narrows a type metavariable the solution mentions" do
+      -- `?r` was created under nothing, so what `?p` may later be solved to is
+      -- what `?r` may mention and no more
+      let
+        outer = rowTypeInfo { scope = emptyScope }
+        payload = rowTypeInfo { scope = { types: Set.singleton rigidR, kinds: Set.singleton (KindVar "k") } }
+        first = freshMeta outer emptyContext
+        second = freshMeta payload (snd first)
+        ctx = snd second
+        result = unifyRow noAssumptions ctx (XMeta (fst first)) (field a (XMeta (fst second)) XRowEmpty)
+      case fst result of
+        Solved ctx' -> scopeOfMeta ctx' (fst second) `shouldEqual` Just emptyScope
+        other -> show other `shouldEqual` "Solved …"
+
+    it "narrows a kind metavariable a type solution mentions" do
+      -- the escape check reads the rigid variables a solution mentions now, and
+      -- an unsolved kind inside it mentions none until it is solved
+      let
+        k = KindVar "k"
+        kindMeta = freshKindMeta { scope: Set.singleton k } emptyContext
+        outer = rowTypeInfo { scope = emptyScope }
+        first = freshMeta outer (snd kindMeta)
+        proxied = XCon (Qualified prim (TyName "Proxy")) [ XKMeta (fst kindMeta) ]
+        result = unifyRow noAssumptions (snd first) (XMeta (fst first)) (field a proxied XRowEmpty)
+      case fst result of
+        Solved ctx -> case unifyKind ctx (XKMeta (fst kindMeta)) (XKVar k) of
+          Left (KindEscapingVariable _ escaping) -> escaping `shouldEqual` k
+          other -> show other `shouldEqual` "Left (KindEscapingVariable …)"
+        other -> show other `shouldEqual` "Solved …"
+
+    it "refuses where the narrowed metavariable's own kind would escape" do
+      -- `?p` stands at a rigid kind variable, and narrowing `?p` to what `?r`
+      -- may mention puts that variable outside the scope `?p` keeps it in
+      let
+        k = KindVar "k"
+        outer = rowTypeInfo { scope = emptyScope }
+        payload = rowTypeInfo
+          { kind = XKVar k
+          , scope = { types: Set.empty, kinds: Set.singleton k }
+          }
+        first = freshMeta outer emptyContext
+        second = freshMeta payload (snd first)
+        result = unifyRow noAssumptions (snd second) (XMeta (fst first)) (field a (XMeta (fst second)) XRowEmpty)
+      case fst result of
+        Mismatch (EscapingKindVariable _ escaping) -> escaping `shouldEqual` k
+        other -> show other `shouldEqual` "Mismatch (EscapingKindVariable …)"
+
+    it "refuses where the narrowed metavariable's disjointness would escape" do
+      let
+        outer = rowTypeInfo { scope = emptyScope }
+        payload = rowTypeInfo { disjointFrom = Set.singleton rigidR }
+        first = freshMeta outer emptyContext
+        second = freshMeta payload (snd first)
+        result = unifyRow noAssumptions (snd second) (XMeta (fst first)) (field a (XMeta (fst second)) XRowEmpty)
+      case fst result of
+        Mismatch (EscapingVariable _ escaping) -> escaping `shouldEqual` rigidR
+        other -> show other `shouldEqual` "Mismatch (EscapingVariable …)"
+
+    it "narrows a kind metavariable standing in the narrowed metavariable's kind" do
+      let
+        k = KindVar "k"
+        kindMeta = freshKindMeta { scope: Set.singleton k } emptyContext
+        outer = rowTypeInfo { scope = emptyScope }
+        payload = rowTypeInfo { kind = XKMeta (fst kindMeta), scope = emptyScope }
+        first = freshMeta outer (snd kindMeta)
+        second = freshMeta payload (snd first)
+        result = unifyRow noAssumptions (snd second) (XMeta (fst first)) (field a (XMeta (fst second)) XRowEmpty)
+      case fst result of
+        Solved ctx -> case unifyKind ctx (XKMeta (fst kindMeta)) (XKVar k) of
+          Left (KindEscapingVariable _ escaping) -> escaping `shouldEqual` k
+          other -> show other `shouldEqual` "Left (KindEscapingVariable …)"
+        other -> show other `shouldEqual` "Solved …"
+
+    it "refuses where a solved kind the metavariable stands at would escape" do
+      -- `?p` stands at `?k`, and `?k` is already solved to a rigid kind
+      -- variable, so what `?p` holds is that variable however it reads
+      let
+        k = KindVar "k"
+        kindMeta = freshKindMeta { scope: Set.singleton k } emptyContext
+        outer = rowTypeInfo { scope = emptyScope }
+        payload = rowTypeInfo
+          { kind = XKMeta (fst kindMeta)
+          , scope = { types: Set.empty, kinds: Set.singleton k }
+          }
+      case unifyKind (snd kindMeta) (XKMeta (fst kindMeta)) (XKVar k) of
+        Right solvedKind ->
+          let
+            first = freshMeta outer solvedKind
+            second = freshMeta payload (snd first)
+            result = unifyRow noAssumptions (snd second) (XMeta (fst first)) (field a (XMeta (fst second)) XRowEmpty)
+          in
+            case fst result of
+              Mismatch (EscapingKindVariable _ escaping) -> escaping `shouldEqual` k
+              other -> show other `shouldEqual` "Mismatch (EscapingKindVariable …)"
+        Left err -> show err `shouldEqual` "Right"
+
+    it "narrows a kind metavariable a kind solution mentions" do
+      let
+        k = KindVar "k"
+        m = twoKindMetas closedKindInfo { scope: Set.singleton k }
+      case unifyKind m.ctx (XKMeta m.j) (XKFun (XKMeta m.k) XKType) of
+        Right ctx -> case unifyKind ctx (XKMeta m.k) (XKVar k) of
+          Left (KindEscapingVariable _ escaping) -> escaping `shouldEqual` k
+          other -> show other `shouldEqual` "Left (KindEscapingVariable …)"
+        Left err -> show err `shouldEqual` "Right"
+
   describe "two flexible tails" do
     it "refines both sides through one fresh tail" do
       -- { a : A | ?r } ≡ { b : B | ?s }
@@ -224,13 +473,13 @@ spec = describe "Stella.Compiler.Elaborate.Unify" do
 
     it "refuses a solution of the wrong row kind" do
       let
-        effectInfo = rowTypeInfo { kind = KRow RowEffect }
+        effectInfo = rowTypeInfo { kind = XKRow RowEffect }
         m = twoMetas rowTypeInfo effectInfo
         result = unifyRow noAssumptions m.ctx (XMeta m.s) (field a tA XRowEmpty)
       case fst result of
         Mismatch (KindMismatch _ expected actual) -> do
-          expected `shouldEqual` KRow RowEffect
-          actual `shouldEqual` KRow RowType
+          expected `shouldEqual` XKRow RowEffect
+          actual `shouldEqual` XKRow RowType
         other -> show other `shouldEqual` "Mismatch (KindMismatch …)"
 
     it "refuses a solution mentioning a variable bound inside the metavariable" do
@@ -313,7 +562,7 @@ spec = describe "Stella.Compiler.Elaborate.Unify" do
       let
         k = KindVar "k"
         m = twoMetas rowTypeInfo rowTypeInfo
-        proxied = XCon (Qualified prim (TyName "Proxy")) [ KVar k ]
+        proxied = XCon (Qualified prim (TyName "Proxy")) [ XKVar k ]
         result = unifyRow noAssumptions m.ctx (XMeta m.s) (field a proxied XRowEmpty)
       case fst result of
         Mismatch (EscapingKindVariable _ escaping) -> escaping `shouldEqual` k
@@ -324,7 +573,7 @@ spec = describe "Stella.Compiler.Elaborate.Unify" do
         k = KindVar "k"
         info = rowTypeInfo { scope = { types: Set.singleton rigidR, kinds: Set.singleton k } }
         m = twoMetas rowTypeInfo info
-        proxied = XCon (Qualified prim (TyName "Proxy")) [ KVar k ]
+        proxied = XCon (Qualified prim (TyName "Proxy")) [ XKVar k ]
         result = unifyRow noAssumptions m.ctx (XMeta m.s) (field a proxied XRowEmpty)
       case fst result of
         Solved _ -> pure unit
@@ -345,7 +594,7 @@ spec = describe "Stella.Compiler.Elaborate.Unify" do
     it "does not solve two bare metavariables of different row kinds" do
       -- neither side has an element to give its row element kind away
       let
-        m = twoMetas rowTypeInfo (rowTypeInfo { kind = KRow RowEffect })
+        m = twoMetas rowTypeInfo (rowTypeInfo { kind = XKRow RowEffect })
         result = unifyRow noAssumptions m.ctx (XMeta m.r) (XMeta m.s)
       case fst result of
         Mismatch (KindMismatch _ _ _) -> pure unit

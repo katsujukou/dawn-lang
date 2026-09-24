@@ -1,4 +1,4 @@
--- | Row unification over Core⁺.
+-- | Unification over Core⁺, at kinds and at rows.
 -- |
 -- | Solving `ρ1 ≡ ρ2` operates on the normal form, and the procedure is
 -- | identical at `Row Type` and `Row Effect`: every key is rigid, so the domain
@@ -7,16 +7,32 @@
 -- | Three outcomes are distinguished. `Solved` records a substitution,
 -- | `Mismatch` is a failure to report, and `Stuck` is neither: it names the
 -- | metavariables whose solution would let the constraint be retried.
+-- |
+-- | **`Stuck` arises at one place**, the case where a side carries more than one
+-- | flexible tail and no solution is unique yet. Every metavariable it names is
+-- | one the context holds unsolved, so each can be woken by an assignment; a
+-- | metavariable that is absent or already solved is a caller error and is
+-- | reported as one.
+-- |
+-- | Kind unification has no third outcome and says so in its type: kind equality
+-- | is syntactic (D2), so a kind metavariable is assigned or the two kinds
+-- | differ, and there is nothing to wait for.
 module Stella.Compiler.Elaborate.Unify
   ( MetaInfo
   , MetaBinding(..)
+  , KindMetaInfo
+  , KindMetaBinding(..)
   , MetaContext
   , UnifyError(..)
   , UnifyResult(..)
   , emptyContext
   , freshMeta
+  , freshKindMeta
   , lookupMeta
+  , lookupKindMeta
   , substitute
+  , substituteKind
+  , unifyKind
   , unifyRow
   ) where
 
@@ -24,13 +40,14 @@ import Prelude
 
 import Prim as P
 
+import Stella.Compiler.Elaborate.Kind (KindMetaVar(..), XKind(..), kindMetasOf, kindVarsOf, occursInKind)
 import Stella.Compiler.Elaborate.Row (XRowError, XRowNormalForm, payloadEquations, rebuild, xnf)
-import Stella.Compiler.Elaborate.Type (MetaVar(..), Scope, XConstraint(..), XRowEntry(..), XType(..), occursIn, outOfScope)
-import Stella.Compiler.TypedCore (Constraint(..), Kind(..), KindVar, RowElemKind(..), RowKey, TyVar, Type(..))
+import Stella.Compiler.Elaborate.Type (MetaVar(..), Scope, XConstraint(..), XRowEntry(..), XType(..), kindMetasOfType, metasOf, occursIn, outOfScope)
+import Stella.Compiler.TypedCore (Constraint(..), KindVar, RowElemKind(..), RowKey, TyVar, Type(..))
 import Stella.Compiler.TypedCore.Entailment (AtomicFacts, entails)
 import Data.Array as Array
 import Data.Either (Either(..))
-import Data.Foldable (foldr)
+import Data.Foldable (foldM, foldr)
 import Data.Generic.Rep (class Generic)
 import Data.Map (Map)
 import Data.Map as Map
@@ -51,7 +68,7 @@ import Data.Tuple (Tuple(..), snd)
 -- | substitution must preserve: a solution that dropped them would produce Core
 -- | that is not well-kinded.
 type MetaInfo =
-  { kind :: Kind
+  { kind :: XKind
   , scope :: Scope
   , lacks :: Set RowKey
   , disjointFrom :: Set TyVar
@@ -61,9 +78,24 @@ data MetaBinding
   = Unsolved MetaInfo
   | Assigned XType
 
+-- | What `Ψ` records of an unsolved kind metavariable, that is, `?k [Γ]`.
+-- |
+-- | A kind variable enters `Γ` only while a declaration whose scheme binds it is
+-- | being checked (D3), so a solution mentioning one the metavariable was not
+-- | created under keeps that variable alive past its declaration.
+type KindMetaInfo =
+  { scope :: Set KindVar
+  }
+
+data KindMetaBinding
+  = KindUnsolved KindMetaInfo
+  | KindAssigned XKind
+
 type MetaContext =
   { bindings :: Map MetaVar MetaBinding
+  , kindBindings :: Map KindMetaVar KindMetaBinding
   , next :: P.Int
+  , nextKind :: P.Int
   }
 
 data UnifyError
@@ -83,16 +115,34 @@ data UnifyError
   -- | A solution puts a rigid tail where the context does not prove a
   -- | disjointness the metavariable carries.
   | DisjointUnproven TyVar TyVar
-  -- | A solution mentions a rigid variable that was not in scope where the
-  -- | metavariable was created.
+  -- | A rigid variable that would outlive its binder through a metavariable:
+  -- | mentioned by a solution the metavariable was not created under, or left in
+  -- | what that metavariable holds once a narrowing has put it out of scope.
   | EscapingVariable MetaVar TyVar
   -- | The same, for a kind variable.
   | EscapingKindVariable MetaVar KindVar
   -- | A fresh tail would have to mention a rigid variable that is not in scope
   -- | on both sides, so the refinement has no representable solution.
   | FreshTailOutOfScope TyVar
-  -- | The kind of a solution does not match the kind of the metavariable.
-  | KindMismatch MetaVar Kind Kind
+  -- | The kind of a solution does not match the kind of the metavariable. The
+  -- | whole of each kind is reported, the metavariable being what names the
+  -- | failure, rather than the sub-kinds at which the two first differed.
+  | KindMismatch MetaVar XKind XKind
+  -- | Two kinds no substitution equates.
+  | KindNotEqual XKind XKind
+  -- | Assigning would make a kind metavariable refer to itself.
+  | KindOccursCheck KindMetaVar XKind
+  -- | A kind solution mentions a kind variable that was not in scope where the
+  -- | metavariable was created.
+  | KindEscapingVariable KindMetaVar KindVar
+  -- | A kind metavariable the context does not hold, which is a caller error.
+  | KindMetaUnbound KindMetaVar
+  -- | A metavariable the context does not hold, and one it holds solved. Both
+  -- | are caller errors rather than unification failures, and neither may be
+  -- | reported as `Stuck`: a dependency that is absent, or already solved, is
+  -- | one no assignment can wake.
+  | MetaUnbound MetaVar
+  | MetaAlreadyAssigned MetaVar
   | NotARow XRowError
 
 data UnifyResult
@@ -101,7 +151,12 @@ data UnifyResult
   | Mismatch UnifyError
 
 emptyContext :: MetaContext
-emptyContext = { bindings: Map.empty, next: 0 }
+emptyContext =
+  { bindings: Map.empty
+  , kindBindings: Map.empty
+  , next: 0
+  , nextKind: 0
+  }
 
 freshMeta :: MetaInfo -> MetaContext -> Tuple MetaVar MetaContext
 freshMeta info ctx =
@@ -112,8 +167,20 @@ freshMeta info ctx =
   where
   m = MetaVar ctx.next
 
+freshKindMeta :: KindMetaInfo -> MetaContext -> Tuple KindMetaVar MetaContext
+freshKindMeta info ctx =
+  Tuple k ctx
+    { kindBindings = Map.insert k (KindUnsolved info) ctx.kindBindings
+    , nextKind = ctx.nextKind + 1
+    }
+  where
+  k = KindMetaVar ctx.nextKind
+
 lookupMeta :: MetaContext -> MetaVar -> Maybe MetaBinding
 lookupMeta ctx m = Map.lookup m ctx.bindings
+
+lookupKindMeta :: MetaContext -> KindMetaVar -> Maybe KindMetaBinding
+lookupKindMeta ctx k = Map.lookup k ctx.kindBindings
 
 -- | Apply what is already solved. Normalizing without this would leave an
 -- | assigned metavariable in the flexible tail, where the case analysis would
@@ -125,8 +192,9 @@ substitute ctx = go
     XMeta m -> case Map.lookup m ctx.bindings of
       Just (Assigned ty) -> go ty
       _ -> XMeta m
+    XCon n kinds -> XCon n (map (substituteKind ctx) kinds)
     XApp f a -> XApp (go f) (go a)
-    XForall a k body -> XForall a k (go body)
+    XForall a k body -> XForall a (substituteKind ctx k) (go body)
     XConstrained c body -> XConstrained (goConstraint c) (go body)
     XRowExtend entry rest -> XRowExtend (goEntry entry) (go rest)
     XRowUnion l r -> XRowUnion (go l) (go r)
@@ -144,6 +212,59 @@ substitute ctx = go
     XLacks key row -> XLacks key (go row)
     XDisjoint l r -> XDisjoint (go l) (go r)
 
+-- | Apply what is already solved at the kind level.
+substituteKind :: MetaContext -> XKind -> XKind
+substituteKind ctx = go
+  where
+  go = case _ of
+    XKMeta m -> case Map.lookup m ctx.kindBindings of
+      Just (KindAssigned kind) -> go kind
+      _ -> XKMeta m
+    XKFun a b -> XKFun (go a) (go b)
+    kind -> kind
+
+-- | `κ1 ≡ κ2`.
+-- |
+-- | There is no computation at the kind level and no subsumption, so this is
+-- | first-order unification with an occurs check. Every outcome is decided here:
+-- | a kind metavariable is assigned, or the two kinds differ.
+unifyKind :: MetaContext -> XKind -> XKind -> Either UnifyError MetaContext
+unifyKind ctx kind1 kind2 = go ctx kind1 kind2
+  where
+  go c a b = case substituteKind c a, substituteKind c b of
+    -- One metavariable against itself holds whatever it is, but only where the
+    -- context has it: an unknown one is a caller error on either side.
+    XKMeta m, XKMeta n | m == n ->
+      if Map.member m c.kindBindings then Right c else Left (KindMetaUnbound m)
+    XKMeta m, solution -> assignKind c m solution
+    solution, XKMeta n -> assignKind c n solution
+    XKVar x, XKVar y | x == y -> Right c
+    XKType, XKType -> Right c
+    XKEffect, XKEffect -> Right c
+    XKRow e, XKRow f | e == f -> Right c
+    XKFun a1 a2, XKFun b1 b2 -> do
+      c1 <- go c a1 b1
+      go c1 a2 b2
+    left, right -> Left (KindNotEqual left right)
+
+-- | Every kind substitution performs an occurs check and a scope check, as a
+-- | type substitution does.
+assignKind :: MetaContext -> KindMetaVar -> XKind -> Either UnifyError MetaContext
+assignKind ctx m solution = case Map.lookup m ctx.kindBindings of
+  Just (KindUnsolved info) ->
+    if occursInKind m solution then
+      Left (KindOccursCheck m solution)
+    else case Set.findMin (Set.difference (kindVarsOf solution) info.scope) of
+      Just escaping ->
+        Left (KindEscapingVariable m escaping)
+      Nothing -> do
+        narrowed <- foldM (narrowKindTo info.scope) ctx
+          (Set.toUnfoldable (kindMetasOf solution) :: P.Array KindMetaVar)
+        pure narrowed { kindBindings = Map.insert m (KindAssigned solution) narrowed.kindBindings }
+
+  _ ->
+    Left (KindMetaUnbound m)
+
 -- | `solve(ρ1 ≡ ρ2)`.
 -- |
 -- | Payload equations are returned rather than solved: equating `F1(k)` with
@@ -155,7 +276,24 @@ unifyRow facts ctx row1 row2 =
   case xnf (substitute ctx row1), xnf (substitute ctx row2) of
     Left err, _ -> Tuple (Mismatch (NotARow err)) []
     _, Left err -> Tuple (Mismatch (NotARow err)) []
-    Right n1, Right n2 -> solve facts ctx n1 n2
+    Right n1, Right n2 -> case unsolvedTails ctx (Set.union n1.flexible n2.flexible) of
+      Just err -> Tuple (Mismatch err) []
+      Nothing -> solve facts ctx n1 n2
+
+-- | Every flexible tail is a metavariable the context holds unsolved.
+-- |
+-- | Deciding this before the case analysis is what keeps a `Stuck` honest. Two
+-- | occurrences of one tail cancel each other, and a tail nothing holds would
+-- | otherwise pass through that cancellation into a `Solved`, or stand in the
+-- | dependency set of a `Stuck` that no assignment can ever wake.
+unsolvedTails :: MetaContext -> Set MetaVar -> Maybe UnifyError
+unsolvedTails ctx metas =
+  Array.head (Array.mapMaybe unsolved (Set.toUnfoldable metas :: P.Array MetaVar))
+  where
+  unsolved m = case Map.lookup m ctx.bindings of
+    Just (Unsolved _) -> Nothing
+    Just (Assigned _) -> Just (MetaAlreadyAssigned m)
+    Nothing -> Just (MetaUnbound m)
 
 solve :: AtomicFacts -> MetaContext -> XRowNormalForm -> XRowNormalForm -> Tuple UnifyResult (P.Array (Tuple XType XType))
 solve facts ctx n1 n2 =
@@ -256,13 +394,14 @@ refine
   -> UnifyResult
 refine facts ctx r s d1 d2 r1 r2 =
   case lookupMeta ctx r, lookupMeta ctx s of
-    Just (Unsolved infoR), Just (Unsolved infoS)
+    Just (Unsolved infoR), Just (Unsolved infoS) ->
       -- Two bare metavariables have no element to give their row element kind
-      -- away, so the kinds are compared here rather than at the assignment.
-      | infoR.kind /= infoS.kind ->
+      -- away, so the kinds are unified here rather than at the assignment.
+      case unifyKind ctx infoR.kind infoS.kind of
+        Left _ ->
           Mismatch (KindMismatch s infoS.kind infoR.kind)
 
-      | otherwise ->
+        Right ctxK ->
           let
             -- The fresh tail stands where both stood, so it may mention only
             -- what both had in scope.
@@ -276,7 +415,7 @@ refine facts ctx r s d1 d2 r1 r2 =
             requiredRigids = Set.unions [ infoR.disjointFrom, infoS.disjointFrom, r1, r2 ]
 
             freshInfo =
-              { kind: infoR.kind
+              { kind: substituteKind ctxK infoR.kind
               , scope: sharedScope
               , lacks: Set.unions
                   [ Set.fromFoldable (Map.keys d1)
@@ -296,7 +435,7 @@ refine facts ctx r s d1 d2 r1 r2 =
                 Mismatch (FreshTailOutOfScope escaping)
               Nothing ->
                 let
-                  Tuple t ctx' = freshMeta freshInfo ctx
+                  Tuple t ctx' = freshMeta freshInfo ctxK
                 in
                   case assignMeta facts ctx' r (rebuild { known: d2, rigid: r2, flexible: Set.singleton t }) of
                     Solved ctx'' ->
@@ -304,8 +443,10 @@ refine facts ctx r s d1 d2 r1 r2 =
                     other ->
                       other
 
-    _, _ ->
-      Stuck (Set.fromFoldable [ r, s ])
+    Just (Assigned _), _ -> Mismatch (MetaAlreadyAssigned r)
+    Nothing, _ -> Mismatch (MetaUnbound r)
+    _, Just (Assigned _) -> Mismatch (MetaAlreadyAssigned s)
+    _, Nothing -> Mismatch (MetaUnbound s)
 
 -- | Every substitution performs an occurs check, verifies the kind, and checks
 -- | that the constraints assumed of the metavariable survive.
@@ -318,24 +459,125 @@ assignMeta facts ctx m solution =
       else case escapes info.scope solution of
         Just escaping ->
           Mismatch (escaping m)
-        Nothing -> case rowKindOf solution of
-          Just k | k /= info.kind ->
-            Mismatch (KindMismatch m info.kind k)
-          _ ->
+        Nothing -> case kindAgrees ctx m info solution of
+          Left err ->
+            Mismatch err
+          Right ctxK ->
             case obligationUnmet facts info solution of
               Just err ->
                 Mismatch err
               Nothing ->
-                case propagateLacks ctx info solution of
-                  Mismatch err -> Mismatch err
-                  Stuck ms -> Stuck ms
-                  Solved ctx' ->
+                case propagateLacks ctxK info solution >>= \ctx' -> narrowScopes ctx' info.scope solution of
+                  Left err ->
+                    Mismatch err
+                  Right ctx' ->
                     Solved ctx' { bindings = Map.insert m (Assigned solution) ctx'.bindings }
 
-    -- Assigning to something already solved, or to an unknown metavariable, is
-    -- a caller error rather than a unification failure.
-    _ ->
-      Stuck (Set.singleton m)
+    Just (Assigned _) ->
+      Mismatch (MetaAlreadyAssigned m)
+
+    Nothing ->
+      Mismatch (MetaUnbound m)
+
+-- | The kind a solution commits to, unified against the kind of the
+-- | metavariable. A solution whose elements give no row element kind away
+-- | commits to nothing, and there is nothing to unify.
+kindAgrees :: MetaContext -> MetaVar -> MetaInfo -> XType -> Either UnifyError MetaContext
+kindAgrees ctx m info solution = case rowKindOf solution of
+  Nothing ->
+    Right ctx
+  Just k -> case unifyKind ctx info.kind k of
+    Left _ -> Left (KindMismatch m info.kind k)
+    Right ctxK -> Right ctxK
+
+-- | Narrow every metavariable the solution mentions to the scope of the
+-- | metavariable being solved, in both classes.
+-- |
+-- | `escapes` decides the rigid variables a solution mentions **now**, and a
+-- | metavariable standing in one mentions none until it is solved. Without this
+-- | narrowing, `?α` created outside a binder and solved to a type mentioning
+-- | `?β` would admit whatever `?β` was later solved to, binder and all.
+-- |
+-- | **A narrowed metavariable carries metadata of its own, and that travels
+-- | wherever the metavariable does.** Its kind names rigid kind variables and
+-- | may hold kind metavariables, and its disjointness names rigid type
+-- | variables; each is refused or narrowed in turn, so narrowing the scope alone
+-- | would leave the metavariable holding what its new scope excludes. Refusing
+-- | is why this reports rather than returning a context.
+narrowScopes :: MetaContext -> Scope -> XType -> Either UnifyError MetaContext
+narrowScopes ctx scope solution = do
+  narrowed <- foldM narrowType ctx types
+  foldM (narrowKindTo scope.kinds) narrowed kinds
+  where
+  -- Substituting first leaves only unsolved metavariables to narrow, so the
+  -- fold reaches what a solution stands on rather than what it was written with.
+  substituted = substitute ctx solution
+  types = Set.toUnfoldable (metasOf substituted) :: P.Array MetaVar
+  kinds = Set.toUnfoldable (kindMetasOfType substituted) :: P.Array KindMetaVar
+
+  narrowType acc t = case Map.lookup t acc.bindings of
+    Just (Unsolved tInfo) ->
+      let
+        within =
+          { types: Set.intersection tInfo.scope.types scope.types
+          , kinds: Set.intersection tInfo.scope.kinds scope.kinds
+          }
+
+        -- A kind the metavariable stands at may itself be solved, and a rigid
+        -- variable reaches the metadata through that solution as readily as it
+        -- is written there. Substituting is what brings either into view.
+        kind = substituteKind acc tInfo.kind
+      in
+        case Set.findMin (Set.difference (kindVarsOf kind) within.kinds) of
+          Just escaping ->
+            Left (EscapingKindVariable t escaping)
+          Nothing -> case Set.findMin (Set.difference tInfo.disjointFrom within.types) of
+            Just escaping ->
+              Left (EscapingVariable t escaping)
+            Nothing -> do
+              acc' <- foldM (narrowKindTo within.kinds) acc
+                (Set.toUnfoldable (kindMetasOf kind) :: P.Array KindMetaVar)
+              pure acc'
+                { bindings = Map.insert t
+                    (Unsolved (tInfo { kind = kind, scope = within }))
+                    acc'.bindings
+                }
+
+    Just (Assigned _) ->
+      Left (MetaAlreadyAssigned t)
+
+    Nothing ->
+      Left (MetaUnbound t)
+
+-- | Narrow one kind metavariable against a scope, in the three states the
+-- | context can hold it in.
+-- |
+-- | A solved one is closed rather than skipped: its solution is where a rigid
+-- | variable outside the new scope would otherwise sit.
+narrowKindTo :: Set KindVar -> MetaContext -> KindMetaVar -> Either UnifyError MetaContext
+narrowKindTo scope ctx k = case Map.lookup k ctx.kindBindings of
+  Just (KindUnsolved kInfo) ->
+    Right ctx
+      { kindBindings = Map.insert k
+          (KindUnsolved (kInfo { scope = Set.intersection kInfo.scope scope }))
+          ctx.kindBindings
+      }
+
+  Just (KindAssigned _) ->
+    let
+      -- Substituting resolves the chain entire, so what remains to narrow is
+      -- unsolved and the recursion goes no deeper than that.
+      solution = substituteKind ctx (XKMeta k)
+    in
+      case Set.findMin (Set.difference (kindVarsOf solution) scope) of
+        Just escaping ->
+          Left (KindEscapingVariable k escaping)
+        Nothing ->
+          foldM (narrowKindTo scope) ctx
+            (Set.toUnfoldable (kindMetasOf solution) :: P.Array KindMetaVar)
+
+  Nothing ->
+    Left (KindMetaUnbound k)
 
 -- | Whether a solution mentions anything its metavariable was not created
 -- | under, in either class of variable.
@@ -402,25 +644,25 @@ obligationUnmet facts info solution = case xnf solution of
 -- | away: an element carrying a type belongs to `Row Type`, one carrying an
 -- | effect to `Row Effect`. A row of variables alone commits to neither, and
 -- | there is nothing to check.
-rowKindOf :: XType -> Maybe Kind
+rowKindOf :: XType -> Maybe XKind
 rowKindOf ty = case xnf ty of
   Left _ -> Nothing
   Right n -> map entryKind (Array.head (Map.toUnfoldable n.known # map snd :: P.Array XRowEntry))
 
-entryKind :: XRowEntry -> Kind
+entryKind :: XRowEntry -> XKind
 entryKind = case _ of
-  XRowTypeEntry _ _ -> KRow RowType
-  XRowEffectEntry _ _ -> KRow RowEffect
-  XRowLabelledEffectEntry _ _ _ -> KRow RowEffect
-  XRowRegionEntry _ _ -> KRow RowEffect
+  XRowTypeEntry _ _ -> XKRow RowType
+  XRowEffectEntry _ _ -> XKRow RowEffect
+  XRowLabelledEffectEntry _ _ _ -> XKRow RowEffect
+  XRowRegionEntry _ _ -> XKRow RowEffect
 
 -- | What `?r` lacks, the flexible tail of its solution must lack too.
-propagateLacks :: MetaContext -> MetaInfo -> XType -> UnifyResult
+propagateLacks :: MetaContext -> MetaInfo -> XType -> Either UnifyError MetaContext
 propagateLacks ctx info solution = case xnf solution of
   Left err ->
-    Mismatch (NotARow err)
+    Left (NotARow err)
   Right n ->
-    Solved (foldr addLacks ctx (Set.toUnfoldable n.flexible :: P.Array MetaVar))
+    Right (foldr addLacks ctx (Set.toUnfoldable n.flexible :: P.Array MetaVar))
   where
   addLacks t acc = case Map.lookup t acc.bindings of
     Just (Unsolved tInfo) ->
@@ -438,6 +680,12 @@ derive instance Eq MetaBinding
 derive instance Generic MetaBinding _
 
 instance Show MetaBinding where
+  show x = genericShow x
+
+derive instance Eq KindMetaBinding
+derive instance Generic KindMetaBinding _
+
+instance Show KindMetaBinding where
   show x = genericShow x
 
 derive instance Eq UnifyError

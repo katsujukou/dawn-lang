@@ -21,6 +21,7 @@ module Stella.Compiler.Elaborate.Type
   , toCore
   , toCoreConstraint
   , metasOf
+  , kindMetasOfType
   , freeRigids
   , freeKindVars
   , Scope
@@ -34,7 +35,8 @@ import Prelude
 
 import Prim as P
 
-import Stella.Compiler.TypedCore (Constraint(..), EffName, Kind, KindVar, Qualified, RowEntry(..), RowKey(..), Symbol, TyName, TyVar, Type(..), kindVarsOf)
+import Stella.Compiler.Elaborate.Kind (KindMetaVar, XKind, fromCoreKind, kindMetasOf, kindVarsOf, toCoreKind)
+import Stella.Compiler.TypedCore (Constraint(..), EffName, KindVar, Qualified, RowEntry(..), RowKey(..), Symbol, TyName, TyVar, Type(..))
 import Data.Foldable (foldMap)
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..))
@@ -52,9 +54,9 @@ data XType
   = XVar TyVar
   -- | A flexible metavariable: unification may assign to it.
   | XMeta MetaVar
-  | XCon (Qualified TyName) (P.Array Kind)
+  | XCon (Qualified TyName) (P.Array XKind)
   | XApp XType XType
-  | XForall TyVar Kind XType
+  | XForall TyVar XKind XType
   | XConstrained XConstraint XType
   | XRowEmpty
   | XRowExtend XRowEntry XType
@@ -102,9 +104,9 @@ xRowEntryPayload = case _ of
 fromCore :: Type -> XType
 fromCore = case _ of
   TVar a -> XVar a
-  TCon n kinds -> XCon n kinds
+  TCon n kinds -> XCon n (map fromCoreKind kinds)
   TApp f a -> XApp (fromCore f) (fromCore a)
-  TForall a k body -> XForall a k (fromCore body)
+  TForall a k body -> XForall a (fromCoreKind k) (fromCore body)
   TConstrained c body -> XConstrained (fromCoreConstraint c) (fromCore body)
   TRowEmpty -> XRowEmpty
   TRowExtend entry rest -> XRowExtend (fromCoreEntry entry) (fromCore rest)
@@ -129,9 +131,9 @@ toCore :: XType -> Maybe Type
 toCore = case _ of
   XVar a -> Just (TVar a)
   XMeta _ -> Nothing
-  XCon n kinds -> Just (TCon n kinds)
+  XCon n kinds -> TCon n <$> traverse toCoreKind kinds
   XApp f a -> TApp <$> toCore f <*> toCore a
-  XForall a k body -> TForall a k <$> toCore body
+  XForall a k body -> TForall a <$> toCoreKind k <*> toCore body
   XConstrained c body -> TConstrained <$> toCoreConstraint c <*> toCore body
   XRowEmpty -> Just TRowEmpty
   XRowExtend entry rest -> TRowExtend <$> toCoreEntry entry <*> toCore rest
@@ -178,6 +180,35 @@ constraintMetas = case _ of
 -- | Whether assigning to `m` would make it refer to itself.
 occursIn :: MetaVar -> XType -> P.Boolean
 occursIn m ty = Set.member m (metasOf ty)
+
+-- | Every kind metavariable occurring anywhere in a type.
+-- |
+-- | A kind reaches a type through the kind arguments of a constructor and
+-- | through the kind a binder introduces, so a type carries unsolved kinds as
+-- | readily as it carries unsolved types.
+kindMetasOfType :: XType -> Set KindMetaVar
+kindMetasOfType = case _ of
+  XVar _ -> Set.empty
+  XMeta _ -> Set.empty
+  XCon _ kinds -> foldMap kindMetasOf kinds
+  XApp f a -> kindMetasOfType f <> kindMetasOfType a
+  XForall _ k body -> kindMetasOf k <> kindMetasOfType body
+  XConstrained c body -> constraintKindMetas c <> kindMetasOfType body
+  XRowEmpty -> Set.empty
+  XRowExtend entry rest -> entryKindMetas entry <> kindMetasOfType rest
+  XRowUnion l r -> kindMetasOfType l <> kindMetasOfType r
+
+entryKindMetas :: XRowEntry -> Set KindMetaVar
+entryKindMetas = case _ of
+  XRowTypeEntry _ ty -> kindMetasOfType ty
+  XRowEffectEntry _ args -> foldMap kindMetasOfType args
+  XRowLabelledEffectEntry _ _ args -> foldMap kindMetasOfType args
+  XRowRegionEntry var cells -> kindMetasOfType var <> kindMetasOfType cells
+
+constraintKindMetas :: XConstraint -> Set KindMetaVar
+constraintKindMetas = case _ of
+  XLacks _ row -> kindMetasOfType row
+  XDisjoint l r -> kindMetasOfType l <> kindMetasOfType r
 
 -- | The rigid type variables a type mentions free, payloads and constraints
 -- | included.
