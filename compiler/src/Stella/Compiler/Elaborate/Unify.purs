@@ -36,6 +36,7 @@ module Stella.Compiler.Elaborate.Unify
   , requireQuantifiable
   , requireProducesType
   , unifyKind
+  , unifyType
   , unifyRow
   ) where
 
@@ -45,12 +46,13 @@ import Prim as P
 
 import Stella.Compiler.Elaborate.Kind (KindMetaVar(..), XKind(..), kindMetasOf, kindVarsOf, occursInKind)
 import Stella.Compiler.Elaborate.Row (XRowError, XRowNormalForm, payloadEquations, rebuild, xnf)
-import Stella.Compiler.Elaborate.Type (MetaVar(..), Scope, XConstraint(..), XRowEntry(..), XType(..), kindMetasOfType, metasOf, occursIn, outOfScope)
-import Stella.Compiler.TypedCore (Constraint(..), KindVar, RowElemKind(..), RowKey, TyVar, Type(..))
+import Stella.Compiler.Elaborate.Type (MetaVar(..), Scope, XConstraint(..), XRowEntry(..), XType(..), freeRigids, kindMetasOfType, metasOf, occursIn, outOfScope)
+import Stella.Compiler.TypedCore (Constraint(..), KindVar, RowElemKind(..), RowKey(..), TyVar, Type(..))
 import Stella.Compiler.TypedCore.Entailment (AtomicFacts, entails)
 import Data.Array as Array
+
 import Data.Either (Either(..))
-import Data.Foldable (foldM, foldr)
+import Data.Foldable (any, foldM, foldr)
 import Data.Generic.Rep (class Generic)
 import Data.Map (Map)
 import Data.Map as Map
@@ -159,6 +161,20 @@ data UnifyError
   | KindDoesNotProduceType XKind
   -- | A kind metavariable the context does not hold, which is a caller error.
   | KindMetaUnbound KindMetaVar
+  -- | Two types no substitution equates.
+  | TypeNotEqual XType XType
+  -- | Two constraints no substitution equates.
+  | ConstraintNotEqual XConstraint XConstraint
+  -- | A metavariable whose solution would mention a variable bound by a `forall`
+  -- | the two sides are being compared under. Solving it needs the two binders
+  -- | identified rather than corresponded, which is higher-rank unification;
+  -- | this unifier refuses rather than guess, and a checker that reads an
+  -- | annotation is where such a type belongs.
+  | CannotSolveAcrossForall MetaVar TyVar
+  -- | A metavariable carrying a row constraint solved to a type that is not a
+  -- | row. Only a row metavariable carries one, so this is an invariant of the
+  -- | solver rather than a property of the program.
+  | RowConstraintOnNonRow MetaVar XType
   -- | A metavariable the context does not hold, and one it holds solved. Both
   -- | are caller errors rather than unification failures, and neither may be
   -- | reported as `Stuck`: a dependency that is absent, or already solved, is
@@ -356,14 +372,267 @@ attachRequirement requirement m ctx = case Map.lookup m ctx.kindBindings of
 -- | `F2(k)` is type unification, which is a separate judgement. The caller
 -- | discharges them. A payload the two sides cannot share at all is decided
 -- | here, since no substitution repairs it.
+-- | Two corresponding `forall` binders, innermost first.
+-- |
+-- | Unification identifies the binders of two `forall`s by position rather than
+-- | by renaming either side, so a variable is read through this rather than
+-- | compared by name.
+type Correspondence = P.Array { left :: TyVar, right :: TyVar }
+
+-- | `τ1 ≡ τ2` at a kind both sides stand at.
+-- |
+-- | **The kind is a parameter because unification never has to synthesize one.**
+-- | Both sides of an equation stand at one kind by the premise of whoever wrote
+-- | it, so it is carried down rather than derived, and the only thing a
+-- | metavariable's own kind is checked against is that. `kindVars` are the kind
+-- | variables `Γ` holds, which a kind metavariable created here may mention.
+-- |
+-- | Rows go to `unifyRow`, and the payload equations it emits are discharged
+-- | here: solving them is type unification, which is this judgement.
+unifyType :: AtomicFacts -> Set KindVar -> MetaContext -> XKind -> XType -> XType -> UnifyResult
+unifyType facts kindVars ctx kind left right =
+  case go ctx [] kind left right of
+    Solved c -> Solved (discardLocalKinds ctx.nextKind c)
+    other -> other
+  where
+  go c bound k t1 t2 = case substitute c t1, substitute c t2 of
+    a, b | isRowSyntax a || isRowSyntax b ->
+      rows c bound k a b
+
+    XMeta m, XMeta n | m == n -> case metaStandsAt c k m of
+      Left err -> Mismatch err
+      Right c' -> Solved c'
+
+    XMeta m, solution -> solve' c bound k m solution
+    solution, XMeta n -> solve' c bound k n solution
+
+    XVar x, XVar y ->
+      if corresponds bound x y then Solved c
+      else Mismatch (TypeNotEqual (XVar x) (XVar y))
+
+    XCon n1 ks1, XCon n2 ks2
+      | n1 == n2 && Array.length ks1 == Array.length ks2 ->
+          case foldM (\acc (Tuple k1 k2) -> unifyKind acc k1 k2) c (Array.zip ks1 ks2) of
+            Left err -> Mismatch err
+            Right c' -> Solved c'
+
+    -- The kind of the argument is what neither side says, so a metavariable
+    -- stands for it and the head is read at an arrow into the carried kind.
+    XApp f1 a1, XApp f2 a2 ->
+      let
+        Tuple ka c1 = freshKindMeta { scope: kindVars, requirements: Set.empty } c
+      in
+        case go c1 bound (XKFun (XKMeta ka) k) f1 f2 of
+          Solved c2 -> go c2 bound (XKMeta ka) a1 a2
+          other -> other
+
+    XForall a k1 b1, XForall b k2 b2 ->
+      case unifyKind c k XKType >>= \c1 -> unifyKind c1 k1 k2 of
+        Left err -> Mismatch err
+        Right c' -> go c' (Array.cons { left: a, right: b } bound) XKType b1 b2
+
+    XConstrained c1 b1, XConstrained c2 b2 ->
+      case unifyKind c k XKType of
+        Left err -> Mismatch err
+        Right c' -> case constraints c' bound c1 c2 of
+          Solved c'' -> go c'' bound XKType b1 b2
+          other -> other
+
+    a, b ->
+      Mismatch (TypeNotEqual a b)
+
+  -- Assigning a metavariable, once what stands across a `forall` is refused.
+  --
+  -- **Both sides are held to the carried kind, not only the one being
+  -- assigned.** A metavariable at the root of the solution stands at that kind
+  -- too, and its own is the only kind of a solution this judgement ever has: one
+  -- deeper inside stands at a kind of its own, and a solution that is not a
+  -- metavariable has none recorded anywhere.
+  solve' c bound k m solution = case acrossForall bound solution of
+    Just binder ->
+      Mismatch (CannotSolveAcrossForall m binder)
+    Nothing -> case metaStandsAt c k m >>= \c1 -> rootStandsAt c1 k solution of
+      Left err -> Mismatch err
+      Right c' -> assignMeta facts c' m solution
+
+  rootStandsAt c k = case _ of
+    XMeta n -> metaStandsAt c k n
+    _ -> Right c
+
+  metaStandsAt c k m = case Map.lookup m c.bindings of
+    Just (Unsolved info) -> case unifyKind c info.kind k of
+      Left _ -> Left (KindMismatch m info.kind k)
+      Right c' -> Right c'
+    Just (Assigned _) -> Left (MetaAlreadyAssigned m)
+    Nothing -> Left (MetaUnbound m)
+
+  -- **Every flexible tail of a row stands at the row's own kind**, so each is
+  -- held to the carried one here. A row with no known element gives `rowKindOf`
+  -- nothing, and a side that is a bare metavariable never reaches `solve'`, so
+  -- this is where either is caught.
+  rows c bound k a b = case tailsStandAt c k a >>= \c1 -> tailsStandAt c1 k b of
+    Left err ->
+      Mismatch err
+    Right c1 ->
+      let
+        Tuple result equations = unifyRowUnder facts bound c1 a b
+      in
+        case result of
+          Solved c2 -> case knownRowKind c2 a b of
+            Nothing -> discharge c2 bound k equations
+            Just rowKind -> case unifyKind c2 k rowKind of
+              Left err -> Mismatch err
+              Right c3 -> discharge c3 bound k equations
+          other -> other
+
+  tailsStandAt c k side = case xnf (substitute c side) of
+    Left _ ->
+      Right c
+    Right n ->
+      foldM (\acc m -> metaStandsAt acc k m) c (Set.toUnfoldable n.flexible :: P.Array MetaVar)
+
+  knownRowKind c x y = case rowKindOf (substitute c x) of
+    Just fromLeft -> Just fromLeft
+    Nothing -> rowKindOf (substitute c y)
+
+  -- A `Row Type` element carries a type, so its payload equations stand at
+  -- `Type`. What an effect argument stands at is `Σ`'s to say, and a
+  -- metavariable stands for it here — **one per equation**, two arguments of one
+  -- effect having no reason to share a kind.
+  discharge c bound k equations = case Array.uncons equations of
+    Nothing ->
+      Solved c
+    Just { head: Tuple t1 t2, tail } ->
+      let
+        Tuple equationKind c1 = case substituteKind c k of
+          XKRow RowType ->
+            Tuple XKType c
+          _ ->
+            let
+              Tuple ka c' = freshKindMeta { scope: kindVars, requirements: Set.empty } c
+            in
+              Tuple (XKMeta ka) c'
+      in
+        case go c1 bound equationKind t1 t2 of
+          Solved c2 -> discharge c2 bound k tail
+          other -> other
+
+  constraints c bound k1 k2 = case k1, k2 of
+    XLacks key1 r1, XLacks key2 r2
+      | key1 == key2 ->
+          let
+            Tuple rowKind c1 = kindOfRowKeyed key1 c
+          in
+            go c1 bound rowKind r1 r2
+
+    -- Both sides of `#` share one row element kind, so one kind serves the two.
+    XDisjoint l1 r1, XDisjoint l2 r2 ->
+      let
+        Tuple ka c1 = freshKindMeta { scope: kindVars, requirements: Set.empty } c
+      in
+        case go c1 bound (XKMeta ka) l1 l2 of
+          Solved c2 -> go c2 bound (XKMeta ka) r1 r2
+          other -> other
+
+    _, _ ->
+      Mismatch (ConstraintNotEqual k1 k2)
+
+  -- Which row a key belongs to, where the key settles it. A `SymbolKey` keys a
+  -- field and a labelled effect instance alike, so it settles nothing.
+  kindOfRowKeyed key c = case key of
+    TagKey _ -> Tuple (XKRow RowType) c
+    PositionKey _ -> Tuple (XKRow RowType) c
+    EffectKey _ -> Tuple (XKRow RowEffect) c
+    RegionKey -> Tuple (XKRow RowEffect) c
+    SymbolKey _ ->
+      let
+        Tuple ka c' = freshKindMeta { scope: kindVars, requirements: Set.empty } c
+      in
+        Tuple (XKMeta ka) c'
+
+-- | Drop the kind metavariables one unification created that nothing refers to.
+-- |
+-- | Each stands for a kind the judgement cannot name — an effect argument's,
+-- | which is `Σ`'s, or the argument of an application, which neither side says —
+-- | so it is a local existential rather than part of the solver's state. One
+-- | left unsolved and unreferenced would grow `Ψ` by every application a
+-- | unification descends and by every payload equation it discharges.
+-- |
+-- | What refers to one is the kind of a metavariable, or a kind another
+-- | metavariable is solved to, or a kind standing in a solution; what a
+-- | metavariable created before this unification holds is left alone whichever.
+discardLocalKinds :: P.Int -> MetaContext -> MetaContext
+discardLocalKinds watermark ctx =
+  ctx { kindBindings = Map.filterWithKey keep ctx.kindBindings }
+  where
+  referenced =
+    foldr (\binding acc -> inKind binding <> acc) Set.empty (Map.values ctx.kindBindings)
+      <> foldr (\binding acc -> inType binding <> acc) Set.empty (Map.values ctx.bindings)
+
+  inKind = case _ of
+    KindAssigned kind -> kindMetasOf kind
+    KindUnsolved _ -> Set.empty
+
+  inType = case _ of
+    Unsolved info -> kindMetasOf info.kind
+    Assigned ty -> kindMetasOfType ty
+
+  keep k = case _ of
+    KindAssigned _ -> true
+    KindUnsolved _ -> before k || Set.member k referenced
+
+  before (KindMetaVar n) = n < watermark
+
+-- | Whether a type is written as a row. A row variable and a row metavariable are
+-- | rows too, and each is taken by the case that reads a variable.
+isRowSyntax :: XType -> P.Boolean
+isRowSyntax = case _ of
+  XRowEmpty -> true
+  XRowExtend _ _ -> true
+  XRowUnion _ _ -> true
+  _ -> false
+
+-- | Whether two variables are the same one, read through the correspondence.
+-- |
+-- | The innermost entry mentioning either variable is what decides: a variable
+-- | bound there is that binder and no other, so one bound against one free is a
+-- | mismatch however the two are spelled. Neither being bound leaves name
+-- | equality, which is what a free variable is compared by.
+corresponds :: Correspondence -> TyVar -> TyVar -> P.Boolean
+corresponds bound x y =
+  case Array.find (\e -> e.left == x || e.right == y) bound of
+    Just e -> e.left == x && e.right == y
+    Nothing -> x == y
+
+-- | A variable of the correspondence that a metavariable's solution mentions.
+-- |
+-- | Solving such a metavariable needs the two binders identified rather than
+-- | corresponded, which is higher-rank unification. Refusing covers a binder of
+-- | either side, so a name the two happen to share cannot be mistaken for the
+-- | other's.
+acrossForall :: Correspondence -> XType -> Maybe TyVar
+acrossForall bound solution =
+  Set.findMin (Set.intersection (freeRigids solution) names)
+  where
+  names = Set.fromFoldable (Array.concatMap (\e -> [ e.left, e.right ]) bound)
+
 unifyRow :: AtomicFacts -> MetaContext -> XType -> XType -> Tuple UnifyResult (P.Array (Tuple XType XType))
-unifyRow facts ctx row1 row2 =
+unifyRow facts = unifyRowUnder facts []
+
+-- | The same, under the `forall` binders the two sides are being compared under.
+-- |
+-- | **Rigid tails cancel through the correspondence rather than by name**, so
+-- | `forall r. ( a : A | r )` and `forall s. ( a : A | s )` are the one type they
+-- | are. Comparing the two tails as a set of names would leave each standing and
+-- | reject an ordinary row-polymorphic scheme.
+unifyRowUnder :: AtomicFacts -> Correspondence -> MetaContext -> XType -> XType -> Tuple UnifyResult (P.Array (Tuple XType XType))
+unifyRowUnder facts bound ctx row1 row2 =
   case xnf (substitute ctx row1), xnf (substitute ctx row2) of
     Left err, _ -> Tuple (Mismatch (NotARow err)) []
     _, Left err -> Tuple (Mismatch (NotARow err)) []
     Right n1, Right n2 -> case unsolvedTails ctx (Set.union n1.flexible n2.flexible) of
       Just err -> Tuple (Mismatch err) []
-      Nothing -> solve facts ctx n1 n2
+      Nothing -> solve facts bound ctx n1 n2
 
 -- | Every flexible tail is a metavariable the context holds unsolved.
 -- |
@@ -380,13 +649,13 @@ unsolvedTails ctx metas =
     Just (Assigned _) -> Just (MetaAlreadyAssigned m)
     Nothing -> Just (MetaUnbound m)
 
-solve :: AtomicFacts -> MetaContext -> XRowNormalForm -> XRowNormalForm -> Tuple UnifyResult (P.Array (Tuple XType XType))
-solve facts ctx n1 n2 =
+solve :: AtomicFacts -> Correspondence -> MetaContext -> XRowNormalForm -> XRowNormalForm -> Tuple UnifyResult (P.Array (Tuple XType XType))
+solve facts bound ctx n1 n2 =
   case traverse payloadsAt (Set.toUnfoldable shared :: P.Array RowKey) of
     Left err ->
       Tuple (Mismatch err) []
     Right equations ->
-      Tuple (step4 facts ctx d1 d2 r1 r2 m1 m2 n1 n2) (Array.concat equations)
+      Tuple (step4 facts bound ctx d1 d2 r1 r2 m1 m2 n1 n2) (Array.concat equations)
   where
   -- 1. match the payloads of shared keys
   shared = Set.intersection (domain n1) (domain n2)
@@ -401,14 +670,20 @@ solve facts ctx n1 n2 =
   d2 = Map.filterKeys (\k -> not (Set.member k shared)) n2.known
 
   -- 2. cancel shared tails, on both the rigid and the flexible side
-  r1 = Set.difference n1.rigid n2.rigid
-  r2 = Set.difference n2.rigid n1.rigid
+  --
+  -- A rigid tail cancels the one it corresponds to, which is the same as
+  -- cancelling by name wherever the correspondence is empty. A metavariable
+  -- belongs to `Ψ` rather than to either side, so the flexible tails cancel by
+  -- identity whatever binders stand around them.
+  r1 = Set.filter (\x -> not (any (corresponds bound x) n2.rigid)) n1.rigid
+  r2 = Set.filter (\y -> not (any (\x -> corresponds bound x y) n1.rigid)) n2.rigid
   m1 = Set.difference n1.flexible n2.flexible
   m2 = Set.difference n2.flexible n1.flexible
 
 -- | 4. case analysis on the number of flexible tails.
 step4
   :: AtomicFacts
+  -> Correspondence
   -> MetaContext
   -> Map RowKey XRowEntry
   -> Map RowKey XRowEntry
@@ -419,7 +694,7 @@ step4
   -> XRowNormalForm
   -> XRowNormalForm
   -> UnifyResult
-step4 facts ctx d1 d2 r1 r2 m1 m2 n1 n2 =
+step4 facts bound ctx d1 d2 r1 r2 m1 m2 n1 n2 =
   case Set.toUnfoldable m1 :: P.Array MetaVar, Set.toUnfoldable m2 :: P.Array MetaVar of
     -- (a) both sides are determined
     [], [] ->
@@ -432,14 +707,14 @@ step4 facts ctx d1 d2 r1 r2 m1 m2 n1 n2 =
 
     -- (b) one side is determined, so the other's remainder must be empty
     [], [ s ] ->
-      assign facts ctx s { known: d1, rigid: r1, flexible: Set.empty } d2 r2
+      assign facts bound ctx s { known: d1, rigid: r1, flexible: Set.empty } d2 r2
 
     [ r ], [] ->
-      assign facts ctx r { known: d2, rigid: r2, flexible: Set.empty } d1 r1
+      assign facts bound ctx r { known: d2, rigid: r2, flexible: Set.empty } d1 r1
 
     -- (c) both tails are flexible: refine them together through a fresh one
     [ r ], [ s ] ->
-      refine facts ctx r s d1 d2 r1 r2
+      refine facts bound ctx r s d1 d2 r1 r2
 
     -- (d) more than one flexible tail on a side: no unique solution yet
     _, _ ->
@@ -450,25 +725,37 @@ step4 facts ctx d1 d2 r1 r2 m1 m2 n1 n2 =
 -- | **can** be absorbed by the flexible side, which is the point of the split.
 assign
   :: AtomicFacts
+  -> Correspondence
   -> MetaContext
   -> MetaVar
   -> XRowNormalForm
   -> Map RowKey XRowEntry
   -> Set TyVar
   -> UnifyResult
-assign facts ctx m solution leftoverKnown leftoverRigid =
+assign facts bound ctx m solution leftoverKnown leftoverRigid =
   if not (Map.isEmpty leftoverKnown) then
     Mismatch (RowMismatch solution { known: leftoverKnown, rigid: leftoverRigid, flexible: Set.empty })
   else if not (Set.isEmpty leftoverRigid) then
     Mismatch (RigidTailRemains leftoverRigid)
   else
-    assignMeta facts ctx m (rebuild solution)
+    assignRow facts bound ctx m (rebuild solution)
+
+-- | A row assignment, refused where the row is one side's binder.
+-- |
+-- | A corresponding tail has cancelled by the time this is reached, so what is
+-- | left of the correspondence in a solution is a binder the other side has no
+-- | counterpart for, which is the higher-rank case (D3, [Open Questions]).
+assignRow :: AtomicFacts -> Correspondence -> MetaContext -> MetaVar -> XType -> UnifyResult
+assignRow facts bound ctx m solution = case acrossForall bound solution of
+  Just binder -> Mismatch (CannotSolveAcrossForall m binder)
+  Nothing -> assignMeta facts ctx m solution
 
 -- | Case (c). A substitution on one side alone either fails an occurs check or
 -- | produces an unequal pair, so a fresh tail is introduced and **both** sides
 -- | are refined through it.
 refine
   :: AtomicFacts
+  -> Correspondence
   -> MetaContext
   -> MetaVar
   -> MetaVar
@@ -477,7 +764,7 @@ refine
   -> Set TyVar
   -> Set TyVar
   -> UnifyResult
-refine facts ctx r s d1 d2 r1 r2 =
+refine facts bound ctx r s d1 d2 r1 r2 =
   case lookupMeta ctx r, lookupMeta ctx s of
     Just (Unsolved infoR), Just (Unsolved infoS) ->
       -- Two bare metavariables have no element to give their row element kind
@@ -522,9 +809,9 @@ refine facts ctx r s d1 d2 r1 r2 =
                 let
                   Tuple t ctx' = freshMeta freshInfo ctxK
                 in
-                  case assignMeta facts ctx' r (rebuild { known: d2, rigid: r2, flexible: Set.singleton t }) of
+                  case assignRow facts bound ctx' r (rebuild { known: d2, rigid: r2, flexible: Set.singleton t }) of
                     Solved ctx'' ->
-                      assignMeta facts ctx'' s (rebuild { known: d1, rigid: r1, flexible: Set.singleton t })
+                      assignRow facts bound ctx'' s (rebuild { known: d1, rigid: r1, flexible: Set.singleton t })
                     other ->
                       other
 
@@ -552,7 +839,7 @@ assignMeta facts ctx m solution =
               Just err ->
                 Mismatch err
               Nothing ->
-                case propagateLacks ctxK info solution >>= \ctx' -> narrowScopes ctx' info.scope solution of
+                case propagateLacks m ctxK info solution >>= \ctx' -> narrowScopes ctx' info.scope solution of
                   Left err ->
                     Mismatch err
                   Right ctx' ->
@@ -742,10 +1029,16 @@ entryKind = case _ of
   XRowRegionEntry _ _ -> XKRow RowEffect
 
 -- | What `?r` lacks, the flexible tail of its solution must lack too.
-propagateLacks :: MetaContext -> MetaInfo -> XType -> Either UnifyError MetaContext
-propagateLacks ctx info solution = case xnf solution of
-  Left err ->
-    Left (NotARow err)
+propagateLacks :: MetaVar -> MetaContext -> MetaInfo -> XType -> Either UnifyError MetaContext
+propagateLacks m ctx info solution = case xnf solution of
+  -- A solution that is not a row carries no tail to propagate to. What it may
+  -- not be is the solution of a metavariable that carries a row constraint,
+  -- since only a row metavariable does.
+  Left _ ->
+    if Set.isEmpty info.lacks && Set.isEmpty info.disjointFrom then
+      Right ctx
+    else
+      Left (RowConstraintOnNonRow m solution)
   Right n ->
     Right (foldr addLacks ctx (Set.toUnfoldable n.flexible :: P.Array MetaVar))
   where

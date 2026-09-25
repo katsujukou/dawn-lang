@@ -13,7 +13,7 @@ import Prim as P
 import Stella.Compiler.Elaborate.Kind (KindMetaVar(..), XKind(..))
 import Stella.Compiler.Elaborate.Row (xnf)
 import Stella.Compiler.Elaborate.Type (MetaVar(..), Scope, XConstraint(..), XRowEntry(..), XType(..), emptyScope)
-import Stella.Compiler.Elaborate.Unify (KindMetaBinding(..), KindMetaInfo, KindRequirement(..), MetaBinding(..), MetaContext, MetaInfo, UnifyError(..), UnifyResult(..), emptyContext, freshKindMeta, freshMeta, lookupKindMeta, lookupMeta, requireProducesType, requireQuantifiable, substitute, substituteKind, unifyKind, unifyRow)
+import Stella.Compiler.Elaborate.Unify (KindMetaBinding(..), KindMetaInfo, KindRequirement(..), MetaBinding(..), MetaContext, MetaInfo, UnifyError(..), UnifyResult(..), emptyContext, freshKindMeta, freshMeta, lookupKindMeta, lookupMeta, requireProducesType, requireQuantifiable, substitute, substituteKind, unifyKind, unifyRow, unifyType)
 import Stella.Compiler.TypedCore (Constraint(..), EffName(..), KindVar(..), ModuleName(..), Qualified(..), RowElemKind(..), RowKey(..), Symbol(..), TyName(..), TyVar(..), Type(..))
 import Stella.Compiler.TypedCore.Entailment (AtomicFacts, decompose, noFacts)
 import Data.Array as Array
@@ -153,6 +153,40 @@ requirementsOf ctx m = case lookupKindMeta ctx m of
   Just (KindUnsolved info) -> Just info.requirements
   _ -> Nothing
 
+-- | A metavariable standing at `Type` rather than at a row kind.
+typeInfo :: MetaInfo
+typeInfo = rowTypeInfo { kind = XKType }
+
+tvA :: TyVar
+tvA = TyVar "a0"
+
+tvB :: TyVar
+tvB = TyVar "b0"
+
+tvB' :: TyVar
+tvB' = TyVar "b1"
+
+tvR :: TyVar
+tvR = TyVar "r0"
+
+tvS :: TyVar
+tvS = TyVar "s0"
+
+-- | `Pair τ1 τ2`, which is what the structural cases descend.
+pairOf :: XType -> XType -> XType
+pairOf x y = XApp (XApp (XCon (Qualified prim (TyName "Pair")) []) x) y
+
+-- | `Record ρ`, which is what puts a row under a `forall`.
+recordOf :: XType -> XType
+recordOf row = XApp (XCon (Qualified prim (TyName "Record")) []) row
+
+-- | Whether two closed types unify, which is what the cases carrying no
+-- | metavariable assert.
+unifiesAt :: XKind -> XType -> XType -> P.Boolean
+unifiesAt kind t1 t2 = case unifyType noAssumptions Set.empty emptyContext kind t1 t2 of
+  Solved _ -> true
+  _ -> false
+
 spec :: Spec Unit
 spec = describe "Stella.Compiler.Elaborate.Unify" do
   describe "kind unification" do
@@ -258,6 +292,201 @@ spec = describe "Stella.Compiler.Elaborate.Unify" do
       case fst result of
         Solved ctx' -> kindSolutionOf ctx' (fst kindMeta) `shouldEqual` Just (XKRow RowType)
         other -> show other `shouldEqual` "Solved …"
+
+  describe "type unification" do
+    it "accepts two alpha-equivalent closed foralls" do
+      -- forall a. Pair a a  ≡  forall b. Pair b b
+      let
+        left = XForall tvA XKType (pairOf (XVar tvA) (XVar tvA))
+        right = XForall tvB XKType (pairOf (XVar tvB) (XVar tvB))
+      unifiesAt XKType left right `shouldEqual` true
+
+    it "reads a nested correspondence innermost first" do
+      -- the inner binder of each side shadows the outer, and one name written
+      -- twice on the left is what the innermost entry has to settle
+      let
+        left = XForall tvA XKType (XForall tvA XKType (pairOf (XVar tvA) (XVar tvA)))
+        inner = XForall tvB XKType (XForall tvB' XKType (pairOf (XVar tvB') (XVar tvB')))
+        outer = XForall tvB XKType (XForall tvB' XKType (pairOf (XVar tvB) (XVar tvB)))
+      unifiesAt XKType left inner `shouldEqual` true
+      unifiesAt XKType left outer `shouldEqual` false
+
+    it "refuses a bound variable against a free one of the same name" do
+      -- the right's `a` is free, so it is not the left's binder however it reads
+      let
+        left = XForall tvA XKType (XVar tvA)
+        right = XForall tvB XKType (XVar tvA)
+      unifiesAt XKType left right `shouldEqual` false
+
+    it "solves a metavariable under a forall where the solution needs no binder" do
+      let
+        m = freshMeta typeInfo emptyContext
+        left = XForall tvA XKType (XMeta (fst m))
+        right = XForall tvB XKType tA
+      case unifyType noAssumptions Set.empty (snd m) XKType left right of
+        Solved ctx -> solutionOf ctx (fst m) `shouldEqual` Just tA
+        other -> show other `shouldEqual` "Solved …"
+
+    it "refuses a metavariable whose solution is the other side's binder" do
+      -- solving this needs the two binders identified rather than corresponded
+      let
+        m = freshMeta typeInfo emptyContext
+        left = XForall tvA XKType (XMeta (fst m))
+        right = XForall tvB XKType (XVar tvB)
+      case unifyType noAssumptions Set.empty (snd m) XKType left right of
+        Mismatch (CannotSolveAcrossForall _ binder) -> binder `shouldEqual` tvB
+        other -> show other `shouldEqual` "Mismatch (CannotSolveAcrossForall …)"
+
+    it "refuses it for a binder of its own side too" do
+      -- a free `a` on the right shares its spelling with the left's binder, and
+      -- the two are told apart by the correspondence rather than by the name
+      let
+        m = freshMeta (typeInfo { scope = { types: Set.singleton tvA, kinds: Set.empty } }) emptyContext
+        left = XForall tvA XKType (XMeta (fst m))
+        right = XForall tvB XKType (XVar tvA)
+      case unifyType noAssumptions Set.empty (snd m) XKType left right of
+        Mismatch (CannotSolveAcrossForall _ binder) -> binder `shouldEqual` tvA
+        other -> show other `shouldEqual` "Mismatch (CannotSolveAcrossForall …)"
+
+    it "discharges the payload equations a row emits" do
+      -- `{ a : A | ?r } ≡ { a : B | ?s }` solves the tails and leaves `A ≡ B`,
+      -- which is what fails
+      let m = twoMetas rowTypeInfo rowTypeInfo
+      case unifyType noAssumptions Set.empty m.ctx (XKRow RowType) (field a tA (XMeta m.r)) (field a tB (XMeta m.s)) of
+        Mismatch (TypeNotEqual _ _) -> pure unit
+        other -> show other `shouldEqual` "Mismatch (TypeNotEqual …)"
+
+    it "solves a metavariable of a kind that is not a row" do
+      let m = freshMeta typeInfo emptyContext
+      case unifyType noAssumptions Set.empty (snd m) XKType (XMeta (fst m)) tA of
+        Solved ctx -> solutionOf ctx (fst m) `shouldEqual` Just tA
+        other -> show other `shouldEqual` "Solved …"
+
+    it "reports a row metavariable met at a kind that is not a row" do
+      let m = freshMeta rowTypeInfo emptyContext
+      case unifyType noAssumptions Set.empty (snd m) XKType (XMeta (fst m)) tA of
+        Mismatch (KindMismatch _ _ _) -> pure unit
+        other -> show other `shouldEqual` "Mismatch (KindMismatch …)"
+
+    it "reports a row constraint carried by a metavariable solved to a non-row" do
+      let m = freshMeta (typeInfo { lacks = Set.singleton (SymbolKey a) }) emptyContext
+      case unifyType noAssumptions Set.empty (snd m) XKType (XMeta (fst m)) tA of
+        Mismatch (RowConstraintOnNonRow _ _) -> pure unit
+        other -> show other `shouldEqual` "Mismatch (RowConstraintOnNonRow …)"
+
+    it "descends an application and its head" do
+      let m = freshMeta typeInfo emptyContext
+      case unifyType noAssumptions Set.empty (snd m) XKType (pairOf tA (XMeta (fst m))) (pairOf tA tB) of
+        Solved ctx -> solutionOf ctx (fst m) `shouldEqual` Just tB
+        other -> show other `shouldEqual` "Solved …"
+
+    it "refuses two constructors that differ" do
+      unifiesAt XKType tA tB `shouldEqual` false
+
+    it "solves the rows of two Lacks constraints" do
+      let
+        m = twoMetas rowTypeInfo rowTypeInfo
+        left = XConstrained (XLacks (SymbolKey a) (XMeta m.r)) tA
+        right = XConstrained (XLacks (SymbolKey a) (XMeta m.s)) tA
+      case unifyType noAssumptions Set.empty m.ctx XKType left right of
+        Solved _ -> pure unit
+        other -> show other `shouldEqual` "Solved …"
+
+    it "gives each payload equation of an effect row its own kind" do
+      -- the two arguments stand at different kinds, so one kind metavariable
+      -- shared between the equations would identify them
+      let
+        first = freshMeta typeInfo emptyContext
+        second = freshMeta (typeInfo { kind = XKFun XKType XKType }) (snd first)
+        left = XRowExtend (XRowEffectEntry stateEff [ tA, tB ]) XRowEmpty
+        right = XRowExtend (XRowEffectEntry stateEff [ XMeta (fst first), XMeta (fst second) ]) XRowEmpty
+      case unifyType noAssumptions Set.empty (snd second) (XKRow RowEffect) left right of
+        Solved ctx -> do
+          solutionOf ctx (fst first) `shouldEqual` Just tA
+          solutionOf ctx (fst second) `shouldEqual` Just tB
+        other -> show other `shouldEqual` "Solved …"
+
+    it "reads the row element kind a Lacks key settles" do
+      -- an `EffectKey` keys a `Row Effect` and nothing else, so a row
+      -- metavariable of the other kind is caught here
+      let
+        m = twoMetas effectRowInfo effectRowInfo
+        wrong = twoMetas effectRowInfo rowTypeInfo
+        lacksOn r = XConstrained (XLacks (EffectKey stateEff) (XMeta r)) tA
+      case unifyType noAssumptions Set.empty m.ctx XKType (lacksOn m.r) (lacksOn m.s) of
+        Solved _ -> pure unit
+        other -> show other `shouldEqual` "Solved …"
+      case unifyType noAssumptions Set.empty wrong.ctx XKType (lacksOn wrong.r) (lacksOn wrong.s) of
+        Mismatch (KindMismatch _ _ _) -> pure unit
+        other -> show other `shouldEqual` "Mismatch (KindMismatch …)"
+
+    it "checks the kind of a metavariable met against itself" do
+      let m = freshMeta rowTypeInfo emptyContext
+      case unifyType noAssumptions Set.empty (snd m) XKType (XMeta (fst m)) (XMeta (fst m)) of
+        Mismatch (KindMismatch _ _ _) -> pure unit
+        other -> show other `shouldEqual` "Mismatch (KindMismatch …)"
+
+    it "cancels corresponding rigid row tails" do
+      -- forall r. Record ( a : A | r )  ≡  forall s. Record ( a : A | s )
+      let
+        left = XForall tvR (XKRow RowType) (recordOf (field a tA (XVar tvR)))
+        right = XForall tvS (XKRow RowType) (recordOf (field a tA (XVar tvS)))
+        differing = XForall tvS (XKRow RowType) (recordOf (field b tA (XVar tvS)))
+      unifiesAt XKType left right `shouldEqual` true
+      unifiesAt XKType left differing `shouldEqual` false
+
+    it "cancels them beside a flexible tail" do
+      -- the corresponding rigid tails cancel, and what is left for the flexible
+      -- one on the right is the empty row
+      let
+        m = freshMeta rowTypeInfo emptyContext
+        left = XForall tvR (XKRow RowType) (recordOf (field a tA (XVar tvR)))
+        right = XForall tvS (XKRow RowType) (recordOf (field a tA (XRowUnion (XVar tvS) (XMeta (fst m)))))
+      case unifyType noAssumptions Set.empty (snd m) XKType left right of
+        Solved _ -> pure unit
+        other -> show other `shouldEqual` "Solved …"
+
+    it "refuses a row metavariable that would absorb one side's binder" do
+      let
+        m = freshMeta rowTypeInfo emptyContext
+        left = XForall tvR (XKRow RowType) (recordOf (field a tA (XVar tvR)))
+        right = XForall tvS (XKRow RowType) (recordOf (XMeta (fst m)))
+      case unifyType noAssumptions Set.empty (snd m) XKType left right of
+        Mismatch (CannotSolveAcrossForall _ binder) -> binder `shouldEqual` tvR
+        other -> show other `shouldEqual` "Mismatch (CannotSolveAcrossForall …)"
+
+    it "holds a row metavariable to the carried kind where the row has no element" do
+      -- `()` gives its row element kind away nowhere, so a flexible root is the
+      -- only thing left to read the kind off
+      let m = freshMeta effectRowInfo emptyContext
+      case unifyType noAssumptions Set.empty (snd m) (XKRow RowType) (XMeta (fst m)) XRowEmpty of
+        Mismatch (KindMismatch _ _ _) -> pure unit
+        other -> show other `shouldEqual` "Mismatch (KindMismatch …)"
+      case unifyType noAssumptions Set.empty (snd m) (XKRow RowEffect) (XMeta (fst m)) XRowEmpty of
+        Solved ctx -> solutionOf ctx (fst m) `shouldEqual` Just XRowEmpty
+        other -> show other `shouldEqual` "Solved …"
+
+    it "leaves behind no kind metavariable of its own" do
+      -- each application stands for its argument's kind with a metavariable, and
+      -- a comparison constraining none of them keeps none
+      case unifyType noAssumptions Set.empty emptyContext XKType (pairOf tA tB) (pairOf tA tB) of
+        Solved ctx -> Map.isEmpty ctx.kindBindings `shouldEqual` true
+        other -> show other `shouldEqual` "Solved …"
+
+    it "keeps a kind metavariable that stood there before it ran" do
+      let m = freshKindMeta closedKindInfo emptyContext
+      case unifyType noAssumptions Set.empty (snd m) XKType (pairOf tA tB) (pairOf tA tB) of
+        Solved ctx -> Map.member (fst m) ctx.kindBindings `shouldEqual` true
+        other -> show other `shouldEqual` "Solved …"
+
+    it "refuses two constraints that differ" do
+      let
+        m = twoMetas rowTypeInfo rowTypeInfo
+        left = XConstrained (XLacks (SymbolKey a) (XMeta m.r)) tA
+        right = XConstrained (XLacks (SymbolKey b) (XMeta m.s)) tA
+      case unifyType noAssumptions Set.empty m.ctx XKType left right of
+        Mismatch (ConstraintNotEqual _ _) -> pure unit
+        other -> show other `shouldEqual` "Mismatch (ConstraintNotEqual …)"
 
   describe "kind requirements" do
     it "rejects Effect where a quantifiable kind is required" do
