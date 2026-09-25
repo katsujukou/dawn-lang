@@ -358,6 +358,51 @@ The heading of each group names the step of the plan that the group belongs to.
 | A partial application of an operation, read back from a file | The operation alone. The entry it realizes comes from the ABI version, so no reader can find the two disagreeing |
 | `isNewtype` on a constructor | Carried from Core through Mid IR into `CTORS`. A `newtype` and a data type of one constructor with one field have the same shape, so a backend erasing the representation cannot tell them apart without the flag |
 
+### The host's foreign table (step 5, interpreter 6)
+
+The interpreter is handed a table already assembled, so these need no host that imports anything: a table written by hand is what a test supplies ([Abstract Machine](../07-Runtime/01-Abstract-Machine.md)).
+
+| Input | Required outcome |
+| --- | --- |
+| A module declaring a foreign the table does not hold | Refused at load, and the module is not committed. Whether anything calls it makes no difference |
+| The same, where nothing calls that foreign | Refused all the same. A program whose foreigns are incomplete does not start, and reachability is not what decides it |
+| A module declaring a foreign the table holds at another arity | Refused, and reported as the disagreement rather than as an absence. A call site is checked against the declaration, and the declaration is what the table was to match |
+| The store after any refusal | Unchanged. A failed load leaves the next one nothing to trip over |
+| A foreign the interpreter claims as a `Base` operation, with the table holding that name too | The operation is carried out and the table's body is never called. An operation's meaning is the ABI's, not something a host substitutes for |
+| `Base.Int.add` declared at an arity the ABI does not give it | Refused. The source is selected by the name, so the arity is checked against the ABI's and against nothing else |
+| The same, with the host's table holding that name at exactly the declared arity | Refused all the same, and the body is not called. Selecting the source on the name **together with** an arity is what would let a host implementation stand where the ABI fixes an operation's meaning |
+| A saturated `FFI` | The body is called once, with every argument at once, and its value reaches the destination register |
+| A body returning an `IO` value | That value reaches the register as it stands. No instruction examines one, so nothing wraps it, unwraps it, or executes it |
+| That value passed on to another foreign | It arrives as it was. Carrying an `IO` needs no drive loop, which is what lets the two be built in either order |
+| A body that refuses | A fault, which discards the continuation entire — handler markers and region frames included — and ends the run |
+| A body that throws | Caught, and a fault kept apart from a refusal: the same propagation, a different report. An exception escaping would end the run outside the fault path, leaving the stack undiscarded and a session unable to answer the next entry |
+| A body that throws, inside a session | The session answers the next input. This is what catching buys, and it is the reason the boundary is not left candid |
+| A reference below the arity, then applied to the rest | One `pap`, and the body called once when the last argument arrives |
+| `TAILFFI` | The same value and the same fault as `FFI`, and no `Resume` pushed |
+
+### Kind and type unification (step 7, division 2)
+
+These need no surface language: an equation is written by hand, as a Core module is in step 4 ([Elaboration](../02-Surface-Language/01-Elaboration.md)).
+
+| Input | Required outcome |
+| --- | --- |
+| `?k ≡ Effect`, where `?k` is required quantifiable | Rejected. Kind equality solves it, so what refuses it is the requirement the metavariable carries |
+| `?k := ?k1 -> ?k2` for a quantifiable `?k`, then `?k2 := Row Type` | Rejected at the second assignment. The requirement propagates into the arrow, and only `Row Type` arriving decides it |
+| `?j ≡ ?k`, each carrying a requirement | Both survive. A requirement reaching an unsolved kind attaches itself there, so the two sets merge |
+| `forall a. Pair a a ≡ forall b. Pair b b` | Accepted. The correspondence decides it and neither side is renamed |
+| `forall a. forall a. Pair a a` against a right-hand side using its **outer** binder | Rejected. A variable is read through the innermost entry of the correspondence mentioning it |
+| `forall a. ?m ≡ forall b. b` | Refused with a mismatch of its own rather than the structural one. The equation fails either way; a diagnostic saying the two types disagree misdescribes an equation this judgement declines to solve |
+| `forall a. ?m ≡ forall b. a`, where the right-hand `a` is free | Refused likewise. A name the two sides share is not a correspondence, and a difference of name sets cannot tell the two apart |
+| `forall r. Record ( a : A \| r ) ≡ forall s. Record ( a : A \| s )` | **Accepted.** A rigid tail cancels the tail it corresponds to rather than the one it shares a name with; comparing the tails as names rejects an ordinary row-polymorphic scheme |
+| `{ a : A \| ?r } ≡ { a : B \| ?s }` | Rejected. The tails solve and the payload equation `A ≡ B` is what fails; leaving the equations undischarged accepts it |
+| A `Row Effect` element whose two arguments stand at different kinds | Each payload equation stands at a kind of its own. One metavariable shared between them identifies the two |
+| `?α : Row Type` met at kind `Type` | Rejected as a kind mismatch. Kind equality decides before any row obligation is read |
+| `?α : Type ≡ Int` | **Accepted.** A solution that is not a row has no tail to propagate a Lacks to |
+| A metavariable carrying a Lacks, solved to a type that is not a row | Rejected as an invariant of the solver. Only a row metavariable carries one |
+| `?r ≡ ()` where `?r : Row Effect` and the carried kind is `Row Type` | Rejected. An empty row gives its element kind away nowhere, so a flexible root is what the kind is read against |
+| A closed comparison that constrains none of the kind metavariables it created | Leaves none of them in `Ψ`. Each belongs to the equation rather than to the solver's state |
+| A kind metavariable that stood in `Ψ` before the equation ran | Left alone, whether or not the equation constrained it |
+
 ### Handler declarations and implicit insertion (step 7)
 
 These belong with elaboration and are written once a surface language exists ([Effect Handlers](../02-Surface-Language/02-Effect-Handlers.md)).

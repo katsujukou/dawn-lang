@@ -204,6 +204,8 @@ The three jobs arrive here for the same reason. Row unification's case (d) waits
 
 **What is shared is the envelope, and what differs is the job.** Scheduling, the site, the dependency set, the transaction, and fuel are the same machinery whichever job is inside; the payloads are not, and pressing them into one record buys nothing. Which fields each holds is above.
 
+**Not every deferred condition is queued.** A kind metavariable carries the requirements its site imposed — that its solution be quantifiable, or produce `Type` — and each is re-applied at every assignment rather than registered here ([Elaboration](01-Elaboration.md)). The difference is what the thing is: a `Pending` is work that cannot proceed until something is known, while a requirement is a condition on the assignments a metavariable admits. One is woken; the other is consulted.
+
 ### The blocked table registers an id
 
 ```text
