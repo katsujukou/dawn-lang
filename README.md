@@ -1,4 +1,4 @@
-# ⭐️ The Stella Programming Language
+# <img src="./stella-logo.svg" width="40px" height="40px" alt="stella-logo" align="middle"/> The Stella Programming Language
 
 An effect-oriented functional programming language with first-class macro
 
