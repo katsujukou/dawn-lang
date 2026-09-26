@@ -25,6 +25,7 @@ import Effect.Class (liftEffect)
 import Effect.Ref as Ref
 import Run (runBaseEffect)
 import Run.Except as Except
+import Steam.Foreign (emptyTable)
 import Steam.Load (LoadError(..), Store, emptyStore, globalNamed, load, noIdentities)
 import Steam.Value (Value(..))
 import Stella.Compiler.Bytecode (Dmo, decode, encode, lower)
@@ -345,7 +346,7 @@ compiled = case declareAnnotated primSignature intModule of
           Right dmo -> Right dmo
 
 fresh :: Effect Store
-fresh = map emptyStore (Ref.new noIdentities)
+fresh = map (emptyStore emptyTable) (Ref.new noIdentities)
 
 loading :: P.Array Dmo -> Aff (Either LoadError Store)
 loading modules = liftEffect do

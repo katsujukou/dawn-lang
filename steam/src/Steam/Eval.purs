@@ -44,15 +44,17 @@ import Data.Maybe (Maybe(..))
 import Data.Show.Generic (genericShow)
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..))
+import Effect.Exception (message, try)
+import Effect.Uncurried (runEffectFn1)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Run (EFFECT, Run, liftEffect)
 import Run.Except (EXCEPT)
 import Run.Except as Except
+import Steam.Fault (Fault(..))
 import Steam.Module (CalleeTarget(..), CtorRef, ForeignRef, GlobalSlot, HandlerRef, Loaded, Prepared, Registry)
-import Steam.Op (Fault)
 import Steam.Op as Op
-import Steam.Value (Activation, Callee(..), Cell, Clause, Closure, Continuation(..), CtorId, Foreign(..), KeyId, Marker, MarkerKind(..), ModuleId, StackEntry(..), Value(..), matchesConstant, reinstate, valueOfConstant)
+import Steam.Value (Activation, Callee(..), Cell, Clause, Closure, Continuation(..), CtorId, Foreign(..), ForeignOutcome(..), KeyId, Marker, MarkerKind(..), ModuleId, StackEntry(..), Value(..), matchesConstant, reinstate, valueOfConstant)
 import Stella.Compiler.Bytecode.Instr (CalleeIx(..), ConstIx(..), CtorIx(..), ForeignIx(..), FuncIx(..), GlobalIx(..), HandlerIx(..), Instr(..), Join, JoinName, KeyIx(..), OpIx(..), PrimIx(..), Reg(..), Tail(..))
 import Stella.Compiler.Bytecode.Module (Constant)
 import Stella.Compiler.MiddleEnd.IR (ClauseForm(..))
@@ -893,7 +895,20 @@ expectCaptures loaded func given = do
     (bug (WrongCaptureCount func function.ncaptures given))
 
 -- | Carry out a foreign, which for a `Base` entry the interpreter claims is
--- | carrying out the operation it stands for.
+-- | carrying out the operation it stands for, and for anything else is calling the
+-- | body the host supplied.
+-- |
+-- | **Every route to a saturated foreign converges here** — an `FFI`, a `TAILFFI`,
+-- | and a partial application whose last argument arrived — so a body is called in
+-- | one place and with every argument at once.
+-- |
+-- | **A host exception is caught and becomes a fault of its own**, kept apart from
+-- | a refusal. The two propagate alike, the continuation being discarded entire;
+-- | letting one escape instead would end the run outside the fault path, with the
+-- | stack undiscarded and a session's promise to outlive a failed entry unkept
+-- | ([Abstract Machine](../../../docs/technical-references/07-Runtime/01-Abstract-Machine.md)).
+-- | Only a synchronous throw is this boundary's: a body is synchronous, and what
+-- | may be awaited is a native action the drive loop performs.
 carryOutForeign :: forall r. Foreign -> P.Array Value -> Run (EVAL r) State
 carryOutForeign carriedOutBy args = case carriedOutBy of
   ForeignOperation op -> case Op.carryOut op args of
@@ -901,6 +916,13 @@ carryOutForeign carriedOutBy args = case carriedOutBy of
     Left (Op.Faulted reason) -> fault reason
     Left Op.WrongOperands -> bug (WrongOperands op)
     Left (Op.NotImplemented _) -> unimplemented "an operation"
+
+  ForeignHosted name body -> do
+    outcome <- liftEffect (try (runEffectFn1 body args))
+    case outcome of
+      Right (Produced value) -> pure (Returning value)
+      Right (Refused reason) -> fault (ForeignRefused name reason)
+      Left thrown -> fault (ForeignThrew name (message thrown))
 
 -- | The callee a `CALLEES` entry stands for.
 calleeOf :: forall r. CalleeTarget -> Run (EVAL r) Callee

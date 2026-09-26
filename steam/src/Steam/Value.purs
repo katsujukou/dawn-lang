@@ -21,6 +21,8 @@ module Steam.Value
   , KeyId(..)
   , OpId(..)
   , Foreign(..)
+  , ForeignBody
+  , ForeignOutcome(..)
   , FuncRef
   , Value(..)
   , Opaque
@@ -53,6 +55,7 @@ import Data.Maybe (Maybe(..))
 import Data.Show.Generic (genericShow)
 import Data.Tuple (Tuple(..))
 import Effect (Effect)
+import Effect.Uncurried (EffectFn1)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Data.Traversable (traverse)
@@ -61,6 +64,7 @@ import Stella.Compiler.Bytecode.Module (Constant(..))
 import Stella.Compiler.MiddleEnd.IR (ClauseForm)
 import Stella.Compiler.Primitive (PrimOp)
 import Stella.Compiler.TypedCore.Domain (ScalarString, ScalarValue, sameNumber, textOf)
+import Stella.Compiler.TypedCore.Name (Ident, Qualified)
 
 -- Identities --------------------------------------------------------------------
 
@@ -82,8 +86,44 @@ newtype OpId = OpId P.Int
 -- |
 -- | A `Base` ABI entry the interpreter claims is carried out by the interpreter
 -- | itself: its meaning is one for every backend and what it computes over is this
--- | representation ([Op](Op.purs)).
-data Foreign = ForeignOperation PrimOp
+-- | representation ([Op](Op.purs)). Everything else is the host's, and what stands
+-- | here is the body itself: **resolution happens at load**, so nothing is looked
+-- | up while a program runs ([Foreign](Foreign.purs)).
+-- |
+-- | A hosted entry carries the name it was resolved for because a fault names the
+-- | entry that produced it, and a body is a host function that says nothing about
+-- | where it came from.
+data Foreign
+  = ForeignOperation PrimOp
+  | ForeignHosted (Qualified Ident) ForeignBody
+
+-- | A host implementation, as the interpreter calls it.
+-- |
+-- | **Uncurried and synchronous.** A saturated call hands it every argument at
+-- | once, which is what the `FFI` instruction does; currying belongs to the
+-- | declared type, and a partial application is the interpreter's to hold. What may
+-- | be awaited is a native action, and performing one belongs to the drive loop
+-- | ([Abstract Machine](../../../docs/technical-references/07-Runtime/01-Abstract-Machine.md)).
+-- |
+-- | It is an `EffectFn1` and not `Array Value -> Effect ForeignOutcome`, and the
+-- | difference is the exception boundary rather than a matter of style. **A host
+-- | function is what this holds, and applying one is already running it**: an
+-- | implementation may throw where it is applied, not only where an effect it
+-- | returned is performed. The curried form applies the function first and hands
+-- | what comes back to whatever runs it, so a throw at application escapes ahead of
+-- | anything that could catch it. This form makes the two one moment, which the
+-- | call site then has inside its own `try` ([Eval](Eval.purs)).
+-- |
+-- | The effect is the host's own: a body may read and write hidden state, which is
+-- | a conforming implementation and not a breach (D41).
+type ForeignBody = EffectFn1 (P.Array Value) ForeignOutcome
+
+-- | What a body answers with. A refusal is a fault, and the reason is what a report
+-- | carries; **an exception is not one of these**, and what the interpreter does
+-- | with one that escapes is in [Eval](Eval.purs).
+data ForeignOutcome
+  = Produced Value
+  | Refused P.String
 
 -- | A function table entry of a loaded module.
 type FuncRef =
@@ -366,7 +406,13 @@ derive instance Eq OpId
 derive instance Ord OpId
 derive newtype instance Show OpId
 
-derive instance Eq Foreign
+-- | **Two foreigns are equal when they are carried out by the same thing**, and a
+-- | hosted entry is compared by the name it was resolved for: a body is a host
+-- | function, which nothing compares.
+instance Eq Foreign where
+  eq (ForeignOperation a) (ForeignOperation b) = a == b
+  eq (ForeignHosted a _) (ForeignHosted b _) = a == b
+  eq _ _ = false
 
 derive instance Eq MarkerKind
 derive instance Generic MarkerKind _

@@ -54,6 +54,8 @@ import Run (EFFECT, Run, liftEffect)
 import Run.Except (EXCEPT)
 import Run.Except as Except
 import Steam.Eval (Failure, enter)
+import Steam.Foreign (ForeignTable)
+import Steam.Foreign as Foreign
 import Steam.Module (CalleeTarget(..), CtorRef, ForeignRef, GlobalSlot, HandlerRef, Loaded, Prepared, Registry, prepare)
 import Steam.Op as Op
 import Steam.Structural (RuntimeNames)
@@ -83,6 +85,10 @@ type Store =
   -- | The definitional arity of a global installed as a function, and nothing for
   -- | one evaluated at initialization.
   , arities :: Map (Qualified Ident) (Maybe P.Int)
+  -- | What the host supplies, which a declaration the interpreter does not claim is
+  -- | resolved against. It is read and never written: assembling it belongs to
+  -- | whoever calls `load` ([Foreign](Foreign.purs)).
+  , hostForeigns :: ForeignTable
   , foreigns :: Map (Qualified Ident) ForeignRef
   , ctors :: Map (Qualified Ident) CtorRef
   , exports :: Map ModuleName (Set Ident)
@@ -114,16 +120,18 @@ noIdentities =
   , next: 0
   }
 
--- | A store holding no module, against the identity tables given: a session keeps
--- | one set of those across every module it loads.
-emptyStore :: Ref Identities -> Store
-emptyStore identities =
+-- | A store holding no module, against the host's table and the identity tables
+-- | given: a session keeps one set of those across every module it loads, and the
+-- | table is complete for a module before that module is handed over.
+emptyStore :: ForeignTable -> Ref Identities -> Store
+emptyStore hostForeigns identities =
   { identities
   , modules: Map.empty
   , byName: Map.empty
   , nextModule: 0
   , globals: Map.empty
   , arities: Map.empty
+  , hostForeigns
   , foreigns: Map.empty
   , ctors: Map.empty
   , exports: Map.empty
@@ -217,9 +225,21 @@ data LoadError
   | ClauseTwice OpId
   -- | Two join points of one function under one name.
   | JoinNameTwice JoinName
-  -- | A foreign this interpreter has no implementation for. Resolution happens at
-  -- | load, so a program whose foreigns are incomplete does not start.
+  -- | A foreign nothing carries out: neither an entry this interpreter claims nor
+  -- | one the host's table holds. Resolution happens at load, so a program whose
+  -- | foreigns are incomplete does not start, however little of it reaches the
+  -- | declaration.
   | ForeignWithoutImplementation (Qualified Ident)
+  -- | A foreign the interpreter claims, declared at an arity other than the one the
+  -- | ABI gives that operation, as the ABI's and the declaration's. **The source is
+  -- | selected by the name**, so nothing else may answer for it and the declaration
+  -- | is not of the entry it names.
+  | OperationDeclaredAtWrongArity (Qualified Ident) P.Int P.Int
+  -- | A foreign the host's table holds at an arity other than the one declared, as
+  -- | the declaration's and the table's. **Reported as the disagreement it is
+  -- | rather than as an absence**: an implementation is there, and a call site is
+  -- | checked against the declaration, which is what the table was to match.
+  | ForeignArityDisagrees (Qualified Ident) P.Int P.Int
   -- | An operation this interpreter does not carry out.
   | OperationNotImplemented PrimOp
   -- | A global whose initialization did not produce a value. The module is not
@@ -244,7 +264,7 @@ load store dmo = do
   for_ dmo.prims \op ->
     when (not (Array.elem op Op.implemented)) (refuse (OperationNotImplemented op))
   functions <- traverse prepareOrRefuse dmo.functions
-  declaredForeigns <- map Map.fromFoldable (traverse implementationOf dmo.foreigns)
+  declaredForeigns <- map Map.fromFoldable (traverse (implementationOf store) dmo.foreigns)
 
   -- identities, which outlive a refusal
   keys <- traverse (internKey store) dmo.keys
@@ -471,19 +491,41 @@ resolveForeign store scope name = do
 
 -- | What carries out a foreign this module declares.
 -- |
--- | **A `Base` entry the interpreter claims is carried out by the interpreter
--- | itself**, which is where a declaration of one finds its implementation; a
--- | foreign of any other name waits on the host, and a module declaring one does not
--- | load.
+-- | **Which of the two sources answers is decided by the name alone.** A `Base`
+-- | entry the interpreter claims is carried out by the interpreter itself and the
+-- | host's table is not consulted for that name at all; anything else the table
+-- | holds is carried out by that entry's body; anything else is carried out by
+-- | nothing, and the module does not load.
+-- |
+-- | Selecting on the name **together with** an arity would leave a way around the
+-- | first rule: a declaration of `Base.Int.add` at the wrong arity would fail to be
+-- | the interpreter's, fall through to a host entry holding that same wrong arity,
+-- | and run an implementation where the ABI fixes an operation's meaning for every
+-- | backend. So the arity is checked afterwards, against whichever source the name
+-- | selected.
 implementationOf
   :: forall r
-   . { name :: Qualified Ident, arity :: P.Int }
+   . Store
+  -> { name :: Qualified Ident, arity :: P.Int }
   -> Run (LOAD r) (Tuple (Qualified Ident) ForeignRef)
-implementationOf entry =
+implementationOf store entry =
   case Array.find (\op -> entryOfOp op == entry.name) Op.implemented of
-    Just op | arityOfOp op == entry.arity ->
-      pure (Tuple entry.name { carriedOutBy: ForeignOperation op, arity: entry.arity })
-    _ -> refuse (ForeignWithoutImplementation entry.name)
+    Just op
+      | arityOfOp op == entry.arity ->
+          pure (Tuple entry.name { carriedOutBy: ForeignOperation op, arity: entry.arity })
+      | otherwise ->
+          refuse (OperationDeclaredAtWrongArity entry.name (arityOfOp op) entry.arity)
+    Nothing -> case Foreign.lookup entry.name store.hostForeigns of
+      Just held
+        | held.arity == entry.arity ->
+            pure
+              ( Tuple entry.name
+                  { carriedOutBy: ForeignHosted entry.name held.body
+                  , arity: entry.arity
+                  }
+              )
+        | otherwise -> refuse (ForeignArityDisagrees entry.name entry.arity held.arity)
+      Nothing -> refuse (ForeignWithoutImplementation entry.name)
 
 resolveGlobal :: forall r. Store -> Scope -> Qualified Ident -> Run (LOAD r) GlobalSlot
 resolveGlobal store scope name = do

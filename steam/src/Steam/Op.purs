@@ -6,8 +6,7 @@
 -- | fault, is the ABI's and is one meaning for every backend; this module is where
 -- | this interpreter implements what is written there.
 module Steam.Op
-  ( Fault(..)
-  , Refusal(..)
+  ( Refusal(..)
   , carryOut
   , implemented
   ) where
@@ -20,17 +19,10 @@ import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..))
 import Data.Show.Generic (genericShow)
+import Steam.Fault (Fault(..))
 import Steam.Value (Value(..))
 import Stella.Compiler.Primitive (PrimOp(..))
 import Stella.Compiler.TypedCore.Domain (scalarAt, scalarLength)
-
--- | A failure the ABI admits: not an effect, intercepted by no handler, and absent
--- | from every row. A fault discards the stack and ends the run
--- | ([Semantics](../../../docs/technical-references/03-Typed-Core/06-Semantics.md)).
-data Fault
-  -- | An index outside the string, as the index and the number of scalar values
-  -- | the string holds.
-  = IndexOutsideString P.Int P.Int
 
 -- | Why an operation produced no value.
 data Refusal
@@ -69,12 +61,6 @@ carryOut op args = case op, args of
   ArrayUnsafeIndex, _ -> Left (NotImplemented ArrayUnsafeIndex)
 
   _, _ -> Left WrongOperands
-
-derive instance Eq Fault
-derive instance Generic Fault _
-
-instance Show Fault where
-  show = genericShow
 
 derive instance Eq Refusal
 derive instance Generic Refusal _

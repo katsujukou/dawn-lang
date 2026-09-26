@@ -8,6 +8,7 @@ import Test.Spec.Runner.Node (runSpecAndExitProcess)
 import Test.Steam.Calls as Calls
 import Test.Steam.Eval as Eval
 import Test.Steam.Effectful as Effectful
+import Test.Steam.Foreign as Foreign
 import Test.Steam.Handlers as Handlers
 import Test.Steam.Load as Load
 import Test.Steam.Structural as Structural
@@ -21,6 +22,7 @@ main = runSpecAndExitProcess [ consoleReporter ] do
   Calls.spec
   Ops.spec
   Load.spec
+  Foreign.spec
   Handlers.spec
   Effectful.spec
   Structural.spec
