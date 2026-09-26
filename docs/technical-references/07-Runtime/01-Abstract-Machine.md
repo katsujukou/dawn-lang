@@ -447,8 +447,33 @@ a global and reads its slot; there is no second step in which a declaration is r
 | what is reported | the value a named global holds | the named entry point's `IO`, executed |
 
 **A session outlives its failures.** That is the whole of why a module is committed
-only once it has initialized: an entry that faulted must leave nothing behind for the
-next entry to trip over.
+only once it has initialized: an entry that faulted must leave nothing of **the
+interpreter's** behind for the next entry to trip over.
+
+**What is unwound is the interpreter's own state and nothing else**, and the
+boundary matters because a foreign body may write where the reduction relation
+records nothing (D41). Initialization runs a module's globals, a global may reach a
+foreign, and a body may write to the host and then refuse — so a refusal that leaves
+the registry as it was still leaves that write standing.
+
+| | |
+| --- | --- |
+| the registry, and the candidate module | unwound. The module is not committed, and nothing of it is reachable |
+| the slots the candidate's globals stood in | unwound with it, however many were filled before the failure |
+| an interned identity | **not** unwound, and this is deliberate: an identity belongs to a name rather than to a module, so what is left is one nothing refers to and a later module declaring that name is given the same one |
+| host state a foreign body wrote before it refused | **not** unwound, and nothing here can unwind it. The write is outside what the interpreter holds |
+
+**The last row is a limit on the promise and not a defect to be fixed.** Undoing it
+would need the host to offer a transaction over whatever a body touched, which is
+exactly what the boundary does not have: an adapter is opaque, and the relation
+records neither what it read nor what it wrote. What the session promises is that
+**it** answers the next input, not that the world is as it was.
+
+**The contract an entry owes is where this is addressed**, and it belongs to whoever
+writes an adapter: a body that may refuse should refuse before it writes. Nothing
+checks that, for the same reason nothing checks `#observ(none)` — the assertion is a
+contract on the implementer, kept by conformance tests
+([Semantics](../03-Typed-Core/06-Semantics.md)).
 
 ### What a report answers with
 
@@ -598,9 +623,16 @@ the interpreter's values.
 ForeignTable : QualifiedName ⇀ Entry
 
 Entry   = { arity, body }
-body    : Value… -> Outcome                      -- synchronous
+body    : HostFn (Value…) Outcome                -- synchronous
 Outcome = Produced Value  |  Refused reason      -- a refusal is a fault
 ```
+
+**`HostFn` is a host function and not a function returning a host action**, and the
+difference is the exception boundary rather than a matter of notation. A body may
+read and write hidden state (D41), so what it does happens **where it is applied**;
+a form that applied the function and handed back something to be run later would put
+a throw at application outside whatever catches one. Applying and running are one
+moment here, and the moment is the interpreter's to enclose.
 
 **The table is the host's to build and the interpreter's to read.** Resolving a
 module name to a module specifier, and an unqualified name to an export of it, is
@@ -618,6 +650,11 @@ exception escape instead would end a run outside the fault path, with the stack
 undiscarded and a session's promise to outlive a failed entry unkept; that promise is
 worth more than the candour of not catching. A body that cannot produce a value
 should nonetheless refuse rather than throw, which is what the contract asks of it.
+
+**What is caught is the call and not only what the call produced.** A body throwing
+where it is applied is the ordinary careless adapter, and it is the case a boundary
+drawn one step too late lets through; the `HostFn` above is what puts the
+application itself inside the catch.
 
 **An asynchronous rejection is not this boundary's.** A body is synchronous, and
 what may be awaited is a native action; performing one belongs to the drive loop

@@ -372,7 +372,8 @@ The interpreter is handed a table already assembled, so these need no host that 
 | A module declaring a foreign the table does not hold | Refused at load, and the module is not committed. Whether anything calls it makes no difference |
 | The same, where nothing calls that foreign | Refused all the same. A program whose foreigns are incomplete does not start, and reachability is not what decides it |
 | A module declaring a foreign the table holds at another arity | Refused, and reported as the disagreement rather than as an absence. A call site is checked against the declaration, and the declaration is what the table was to match |
-| The store after any refusal | Unchanged. A failed load leaves the next one nothing to trip over |
+| The store after any refusal | Unchanged. A failed load leaves the next one nothing of the interpreter's to trip over |
+| A body that writes to the host and then refuses during initialization | The module is not committed and the write stands. What is unwound is the interpreter's own state, and host state is outside it ([Abstract Machine](../07-Runtime/01-Abstract-Machine.md)) |
 | A foreign the interpreter claims as a `Base` operation, with the table holding that name too | The operation is carried out and the table's body is never called. An operation's meaning is the ABI's, not something a host substitutes for |
 | `Base.Int.add` declared at an arity the ABI does not give it | Refused. The source is selected by the name, so the arity is checked against the ABI's and against nothing else |
 | The same, with the host's table holding that name at exactly the declared arity | Refused all the same, and the body is not called. Selecting the source on the name **together with** an arity is what would let a host implementation stand where the ABI fixes an operation's meaning |
@@ -380,6 +381,7 @@ The interpreter is handed a table already assembled, so these need no host that 
 | A body returning an `IO` value | That value reaches the register as it stands. No instruction examines one, so nothing wraps it, unwraps it, or executes it |
 | That value passed on to another foreign | It arrives as it was. Carrying an `IO` needs no drive loop, which is what lets the two be built in either order |
 | A body that refuses | A fault, which discards the continuation entire — handler markers and region frames included — and ends the run |
+| A body that throws where it is applied, rather than where an effect it returned is performed | Caught all the same. The application itself is inside the catch, which is what the host function type is for |
 | A body that throws | Caught, and a fault kept apart from a refusal: the same propagation, a different report. An exception escaping would end the run outside the fault path, leaving the stack undiscarded and a session unable to answer the next entry |
 | A body that throws, inside a session | The session answers the next input. This is what catching buys, and it is the reason the boundary is not left candid |
 | A reference below the arity, then applied to the rest | One `pap`, and the body called once when the last argument arrives |
