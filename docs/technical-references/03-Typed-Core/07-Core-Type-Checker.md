@@ -27,7 +27,7 @@ The Core type checker is independent of the surface language, macros, elaborator
 - **Termination.** A `letrec` may diverge
 - **The meaning of attributes**
 - **Hygiene**, which is complete by the time a term reaches Core
-- **The implementation of a `foreign`**, whose declared type is trusted
+- **The implementation of a `foreign`**, whose declared type is trusted. `#observ(none)` is recorded and not checked: it claims a property of code the checker never sees, so it stands with the rest of what `Σ ⊨ G` obliges a backend to, and not with `newtype`'s shape, which is a claim about the declaration itself ([Modules](../06-Modules/01-Modules.md))
 - **The correctness of optimizations**, which belong to Mid IR and beyond
 
 ## The trusted computing base

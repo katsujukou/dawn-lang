@@ -377,6 +377,8 @@ What loading refuses:
 | A global or foreign an imported module does not export | `EXPORTS` holds the value names a module publishes, its initialized globals and its foreign declarations alike |
 | A reference that reaches the wrong kind of declaration | a `CTORREFS` entry must reach a constructor, a `FOREIGNREFS` entry a foreign, a `GLOBALREFS` entry a top-level value ([Bytecode](../05-Backend/01-Bytecode.md)) |
 | A foreign with no implementation | resolution happens at load, so a program whose foreigns are incomplete does not start |
+| A foreign the interpreter claims, declared at an arity other than the one the ABI gives that operation | the source is selected by name, so nothing else may answer for it, and the declaration is not of the entry it names |
+| A foreign the host's table holds at an arity other than the one declared | an adapter is uncurried, so its arity is how many arguments reach it at once, and nothing downstream compares the two |
 | An operation code the interpreter does not implement | at the profile it claims ([Prim and Base](../06-Modules/02-Prim-and-Base.md)) |
 
 **What a count must be is the declaring module's to say, and this is where the
@@ -589,13 +591,37 @@ they compute over is the interpreter's own representation — and **everything e
 comes from the host**: a target entry constructing a native action, and a program's
 own foreigns.
 
-The host side is one map, and what it holds is an **adapter**: a host function of
+The host side is one table, and what it holds is an **adapter**: a host function of
 the interpreter's values.
 
 ```text
-ForeignRegistry : QualifiedName -> Adapter
-Adapter         : Value… -> Value                -- synchronous; may fault
+ForeignTable : QualifiedName ⇀ Entry
+
+Entry   = { arity, body }
+body    : Value… -> Outcome                      -- synchronous
+Outcome = Produced Value  |  Refused reason      -- a refusal is a fault
 ```
+
+**The table is the host's to build and the interpreter's to read.** Resolving a
+module name to a module specifier, and an unqualified name to an export of it, is
+the host's, as is whatever it takes to reach that export; the interpreter is handed
+a table already assembled and looks for nothing. It holds an arity beside each body
+because an arity is what a saturated call is, and because it is the one thing a
+loader can check the host's side against.
+
+**An adapter returns an `Outcome`, and a host exception is not one of them.** The
+interpreter catches what a body throws synchronously and produces a fault of its
+own, kept apart from a refusal: the two propagate alike — the continuation is
+discarded entire and the run ends — and they are reported apart, one being a failure
+the ABI admits and the other a body that broke the contract below. Letting a host
+exception escape instead would end a run outside the fault path, with the stack
+undiscarded and a session's promise to outlive a failed entry unkept; that promise is
+worth more than the candour of not catching. A body that cannot produce a value
+should nonetheless refuse rather than throw, which is what the contract asks of it.
+
+**An asynchronous rejection is not this boundary's.** A body is synchronous, and
+what may be awaited is a native action; performing one belongs to the drive loop
+and is answered there.
 
 **An adapter is uncurried.** A saturated call hands it every argument at once, which
 is what the `FFI` instruction does and what a `foreign`'s implementation is written
@@ -624,7 +650,85 @@ that an implementation and a declaration agree about what crosses between them.
 Which types a `foreign` declaration may carry is therefore the front end's to
 restrict, where types still exist
 ([Open Questions](../99-Open-Questions/01-Open-Questions.md)); what a loader
-establishes is that every name has an adapter and that the adapter is callable.
+establishes is that every name is carried out by something, at the arity its
+declaration states.
+
+### Resolution happens at load, and a call searches for nothing
+
+**Every foreign a module declares is resolved where that module is loaded**, so what
+a `FOREIGNREFS` entry reaches is the body itself rather than a name to look up
+later. The table is consulted once per declaration and never while a program runs.
+
+Two sources carry a foreign out, and **which of them a declaration reaches is
+decided by the name alone**.
+
+| The declared name | What carries it out |
+| --- | --- |
+| one the interpreter claims as a `Base` ABI entry | the interpreter itself, and the host's table is not consulted for that name at all |
+| anything else the table holds | that entry's body |
+| anything else | nothing, and the module does not load |
+
+**A name the interpreter claims is never reached by the host's table**, whatever
+arity either side gives it. Selecting on the name together with an arity would leave
+a way around that rule: a declaration of `Base.Int.add` at the wrong arity would
+fail to be the interpreter's, fall through to a host entry that happened to hold the
+same wrong arity, and run an implementation where the ABI fixes an operation's
+meaning for every backend. The source is chosen on the name, and the arity is
+checked afterwards, against whichever source the name selected.
+
+| The name selected | The arity is checked against | A mismatch |
+| --- | --- | --- |
+| the interpreter | the arity the ABI gives that operation | refused. The declaration is not of the entry it names, and no other source may answer for it |
+| the host's table | the arity the declaration states | refused, and reported as the disagreement it is rather than as an absence |
+
+**A mismatch is reported as a disagreement because an implementation is there.** An
+adapter is uncurried, so an arity is how many arguments reach it at once, and
+nothing downstream would find the discrepancy: a call site is checked against the
+declaration, and the declaration is what the other side was supposed to match.
+Reporting an absence instead would send a reader looking for something that exists.
+
+**What does not load is the module, however little of it the foreign is reached
+by.** A declaration nothing calls stops the load exactly as one on every path does,
+which is what keeps an incomplete program from starting
+([Bytecode](../05-Backend/01-Bytecode.md)).
+
+**The obligation that falls out of it belongs to whoever calls `load`.** A front end
+that type checks knows which foreigns a module declares and nothing of which
+implementations a host holds, so completeness is not its to establish; what can
+establish it is whatever assembled the table — the CLI for a run or a session, and
+the bootstrap of a compile-time session for elaboration. The table is complete for a
+module before that module is handed over.
+
+### The table holds no effect summary, and the interface file does
+
+**An adapter returns a value, and whether that value is an `IO` is the adapter's
+affair.** An entry whose declared type returns `IO` returns one, a native action
+wrapped as an `IO` value; the interpreter does not know which entries those are, and
+nothing it does depends on knowing. No instruction examines an `IO` value
+([Bytecode](../05-Backend/01-Bytecode.md)) — a `FFI` writes one into a register, a
+saturated `pap` does the same, and a snapshot reads the value's own form and
+descends no further. What takes one apart is the drive loop, which reads the value
+rather than the table.
+
+Recording it would also catch nothing. A `.dmo` carries no type for a foreign, so
+there is no declaration a flag could be compared against; and the hazard at this
+boundary is an adapter that *performs* its action where it should construct one,
+which a flag does not see. That is a conformance obligation, below.
+
+**The observational summary is not this table's either, and that is settled rather
+than open.** Whether an entry has an observational effect — a hidden read or write,
+a fault, an identity anything can observe — is what `#observ(none)` asserts at the
+declaration, and it travels to the one reader that needs it, an optimizer, through
+the interface file ([Interface](../05-Backend/03-Interface.md),
+[Modules](../06-Modules/01-Modules.md)). An optimizer runs long before a `.dmo`
+reaches an interpreter, and this interpreter optimizes nothing, so carrying the
+summary here would give it no reader.
+
+**Nor could the machine check one.** Presented with a refusal it cannot tell a fault
+the declaration admits from an `#observ(none)` entry in breach, and hidden mutation
+was never observable from outside to begin with. The assertion is a contract on
+whoever implements the entry, kept by conformance tests rather than by anything at
+run time.
 
 **An adapter applies no Stella closure.** It may receive one and carry it into what
 it returns — `Base.IO.bind` takes `a -> IO b` and stores it in the `IO` value it
@@ -634,8 +738,24 @@ for a saturated `foreign` being one atomic step
 interpreter but its values, and the interpreter is never re-entered from inside one.
 
 What an adapter owes is that condition: it takes all of its arguments at once,
-returns a value of the instantiated result type or faults, performs nothing
-observable to Core, applies no Stella function value, and terminates.
+returns a value of the instantiated result type or refuses, throws nothing, performs
+no proper effect and runs no reified computation it constructs, applies no Stella
+function value, and terminates. **It has no observational effect only where its
+declaration asserts `#observ(none)`**, and then it does not refuse either, faulting
+being one of the things that class is defined by. An adapter writing to a mutable
+array behind a pure interface asserts nothing and is a conforming implementation
+rather than a breach ([Semantics](../03-Typed-Core/06-Semantics.md)).
+
+**A machine cannot tell a permitted refusal from a breach of that assertion**, the
+summary reaching neither a `.dmo` nor this table, and hidden mutation was never
+observable from outside in any case. Which is right: the annotation is a contract on
+whoever implements the entry, and **which route the implementation takes decides
+only whose defect a violation is** — a host adapter's where the host supplies it, and
+the machine's own where the machine carries the entry out as an operation
+([Modules](../06-Modules/01-Modules.md)). An entry whose
+declared type returns `IO` **constructs** the action and returns it wrapped as an
+`IO` value; performing it there would be the effect escaping at the one boundary the
+condition exists to hold, and nothing the interpreter reads would show it.
 
 **The one place a closure is applied from the host side is the drive loop**, which
 executes an `IO` value and is outside the reduction relation (D25) — below.

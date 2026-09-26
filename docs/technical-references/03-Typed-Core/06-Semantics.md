@@ -55,7 +55,7 @@ After `e2` and `e1` are evaluated to values, the value form of `e1` determines w
 | --- | --- |
 | `λ (x : τ) . e` | β-reduction: evaluate `e[x := v2]` |
 | `M.Ctor [τ̄] v̄` with `\|v̄\| < arity` | append the argument, giving `M.Ctor [τ̄] (v̄, v2)`. **The result is again a value; no computation occurs** |
-| an application of `foreign f` | call the implementation, a primitive step, which yields a value or a fault. That the call produces no external effect is a conformance obligation on the implementation, not a consequence of D23 alone; effects occur when the runtime executes the returned `IO` |
+| an application of `foreign f` | call the implementation, a primitive step, which yields a value or a fault. That it reaches the **world** nowhere is a conformance obligation on the implementation and not a consequence of D23 alone; a world effect happens when the runtime executes the returned `IO`. An **observational** effect is a separate matter and the call may have one, unless the declaration asserts `#observ(none)` (D41) |
 
 A saturated constructor application does not have a function type and so never appears in the position of `e1`.
 
@@ -222,6 +222,41 @@ Reduction therefore relates a term to a configuration, `G ⊢ e → c`, where `c
 
 A `foreign` declaration's type is trusted ([Modules](../06-Modules/01-Modules.md)), and D23 constrains only the **arrows appearing in that type**. It says nothing about whether the implementation returns what it claims, performs effects behind Core's back, or terminates. Those are obligations on the implementation, and the properties below depend on them, so they are stated rather than assumed.
 
+#### The three classes of effect
+
+An effect in Stella belongs to one of three classes, and the conditions below are written against the classification rather than against one word.
+
+```text
+proper
+  row-tracked. Declared with `effect`, reached by `perform`, and dealt with
+  by a handler. This is the class the word ordinarily names
+
+reified
+  a computation a classical monad has made into a value: `IO`, and a State
+  or an ExceptT a library defines. A saturated application constructs one
+  and does not run it; what runs an IO is the drive loop (D25)
+
+observational
+  whatever a foreign's saturated application may do besides returning its
+  value. It appears in no type, and no handler deals with one
+```
+
+**The three are not exclusive.** One foreign may carry a reified effect and an observational one at once: an entry returning `IO` that also writes to memory when it is applied has both, and the two are settled separately.
+
+The third class is what a mutable array behind a pure interface is: `Base.Array.unsafeSet` writes, its declared type says `Unit`, and no row carries anything. Declaring such an entry effectful in its type is not available — it would return `IO`, and the pure `mapArray` written over it could not then exist ([Modules](../06-Modules/01-Modules.md)).
+
+**What makes an effect observational is that something other than the returned value may be noticed.**
+
+> A saturated foreign invocation **has an observational effect** when anything besides the value it returns may make erasing, duplicating, sharing, or reordering that invocation observable.
+
+**Producing a fault is one such observation and is not a class of its own.** Dropping a call that would have faulted removes the fault, and reordering two of them changes which one is taken, so faulting is exactly the thing the definition names. Nothing is gained by grading observational behaviour more finely than this: the reason Stella reaches for FFI sparingly (D19) is that what lies past the boundary cannot be characterized, and a summary that pretended otherwise would be a summary of what an implementation happens to do today.
+
+**`#observ(none)` asserts the absence of the class, and the assertion is strong.** A saturated application of an entry carrying it reads and writes no hidden state, produces no fault, creates no identity anything can observe, performs no external effect at the point of application, and returns observationally equivalent results for observationally equivalent arguments. It terminates, applies no Stella function value, and throws nothing, which the conditions below ask of every entry in any case.
+
+**There are two rules and no third.** A declaration carries the annotation, and the entry has no observational effect; or it does not, and the entry may have any. Nothing is inferred from the type, from the name, or from who supplies the implementation.
+
+**What the annotation says nothing about is the reified class.** `#observ(none)` and returning `IO` are independent and compose: `#observ(none) foreign log : String -> IO Unit` performs nothing when it is applied and merely constructs an action, and the output happens where the drive loop runs that action. Whether an entry returns `IO` is read off the result type and is stated nowhere ([Interface](../05-Backend/03-Interface.md)).
+
 ```text
 Σ ⊨ G   holds when
 
@@ -237,10 +272,43 @@ A `foreign` declaration's type is trusted ([Modules](../06-Modules/01-Modules.md
       writing v̄ = values(ς):
         δ_f(v̄) is defined
         δ_f(v̄) is either a value of type θ(σ) or a fault
-        δ_f(v̄) performs no effect observable to Core
+        δ_f(v̄) performs no proper effect, and runs no reified computation
+               it constructs
         δ_f(v̄) applies no Stella function value
         δ_f(v̄) terminates
+        δ_f(v̄) has no observational effect, and so returns a value
+               rather than a fault,
+               where Σ records #observ(none) for M.f
 ```
+
+**`Σ ⊨ G` is what every implementation owes, and it is not what this relation needs.** A second condition sits beside it, and the two are kept apart because they bind different parties: conformance is owed by whoever supplies a `δ_f`, while the one below says which environments the rules below describe at all.
+
+```text
+G is Core-modelled   when for each (M.f : σκ = δ_f) ∈ G, and for every spine ς
+                     that is saturated for M.f, writing v̄ = values(ς):
+                       returning an outcome — a value or a fault — is the whole
+                              of what δ_f(v̄) does
+                       v̄ determines that outcome, and nothing else
+                              contributes to it
+                       δ_f(v̄) reads no state that v̄ does not carry
+                       δ_f(v̄) writes no state
+                       δ_f(v̄) creates no identity that v̄ does not determine,
+                              a freshly allocated one among them, observed or not
+```
+
+**Determining the outcome is not enough, and the clauses after the first are not decoration.** An entry writing through an array it is handed returns `Unit` whatever it wrote, so the arguments determine its outcome perfectly and it is still not what the rule below reads `δ_f` as. What disqualifies it is the write, which the rule names nowhere. The condition is therefore about the whole of a call and not about its result: an outcome the arguments fix, and nothing else happening.
+
+**Neither of the two conditions implies the other, and an earlier draft of this section claimed that one did.** They disagree in both directions, and the disagreement is not a technicality.
+
+**They forbid different identities.** `#observ(none)` forbids creating an identity **anything can observe**, and this condition forbids creating one **the arguments do not determine**, observed or not — the rule below equates a saturated call with `δ_f(v̄)`, so two calls on equal arguments must give the same term, and a fresh `ω` on each is two terms. An entry handing back an allocation no Stella program can tell from another therefore satisfies the directive and fails this condition.
+
+**And this condition permits a fault, which the directive does not.** `Base.String.codePointAt` is the standing case above.
+
+**What each is for is what keeps them apart.** The directive says a call may be moved, dropped, or shared, which is a statement about optimization. Being Core-modelled says the syntactic relation below represents the implementation uniquely, which is a statement about this document. Most ordinary entries satisfy both; **neither follows from the other**, and both are stated where they are needed ([Design Decisions](../01-Introduction/03-Design-Decisions.md), D41).
+
+**An entry may conform without being Core-modelled**, and `Base.Array.unsafeSet` is the case: it satisfies `Σ ⊨ G` — it returns what it claims, runs no reified computation, applies no Stella function, terminates, and asserts no `#observ(none)` it would be breaching — while it writes to a store the reduction relation records nowhere. Such an entry is admissible, and a machine runs it; what it is not is described by the reduction relation (D41).
+
+**Faulting does not cost an entry its place here.** A `δ_f` that faults on exactly the arguments it always faults on is a function like any other, so `Base.String.codePointAt` is Core-modelled and the fault branch of progress is reached by it. What the condition excludes is a hidden read, a write, and an identity the arguments do not determine, observable or not — and nothing else.
 
 Condition (2) applies to the entries a `rec` group installs as well. Each `v_i` is checked under its own `k̄_i` and refers to its neighbours through `Σ`, which the declaration rules populated before any value declaration was checked.
 
@@ -253,6 +321,34 @@ An entry that applies a function it is given — a pure `map` over an array, say
 Condition (3) is what makes a `foreign` returning `IO` inert until the runtime executes it. **That property does not follow from D23.** D23 makes the declared type honest about where effects may appear; conformance of `δ_f` is what makes the implementation match the declaration. A backend is responsible for both.
 
 Admitting a fault in (3) is what keeps the condition consistent with progress: a saturated `foreign` always either produces a value or produces a fault, and never leaves a term stuck.
+
+#### An observational effect is outside what this relation models
+
+An entry with observational effects reads and writes memory, and **the relation above names none of it**. The gap is not a matter of emphasis, and it is worth stating exactly where it falls.
+
+**The state is not in the term.** A mutable array is an `opaque ω [τ]`, and a `writeCell`-like write performed inside `δ_f` leaves that `ω` as it was: the term after the write is the term before it. So `Base.Array.unsafeSet` writes state the configuration does not record, and `Base.Array.unsafeIndex` **reads** it — the `ω` it is handed names an array whose current contents are nowhere in `v̄`, so the same arguments give different values according to which writes preceded them. Neither is the function of `v̄` that the rule below reads `δ_f` as. **Any argument that the state "is really in the payload" is wrong**, and an earlier draft of this section made it.
+
+**What follows is that the step is not defined, and not merely that it is not deterministic.** The rule is `M.f ς → δ_f(values(ς))`, which reads `δ_f` as a function of `values(ς)`. For an entry that reads hidden state it is not one, so **that rule gives such an entry no step at all**: there is nothing here to be non-deterministic, because there is nothing here.
+
+**Being Core-modelled is the line, and it is not the line `#observ(none)` draws.** It is a condition of its own beside `Σ ⊨ G` and not a clause within it, because the two bind different parties: conformance is what an implementer owes and admits `unsafeSet`, while being Core-modelled is what these rules need and does not. The relation is defined against a `G` that is both, and every property below carries both as premises.
+
+**Three notions come apart here and keeping them apart is what makes the boundary usable.**
+
+| | What it is | Who reads it |
+| --- | --- | --- |
+| `#observ(none)` | a declared guarantee: no hidden read or write, no fault, no observable identity | an optimizer, and a conformance test |
+| `MayObserve` | how an entry carrying no directive is **treated** | an optimizer |
+| **Core-modelled** | returning an outcome the arguments fix, a value or a fault, is the whole of what a call does | this relation, as a premise beside `Σ ⊨ G` |
+
+**An entry may be Core-modelled without carrying the annotation.** `Base.String.codePointAt` faults outside its range, so it is `MayObserve` — dropping a call of it drops the fault — and its outcome is nonetheless determined by the index and the string, which is an immutable one, so it is Core-modelled and this relation handles it. **Faulting is what puts an entry in the second row and not in the third.** What falls outside is the entry whose behaviour is not exhausted by an outcome its arguments fix: `Base.Array.unsafeNew`, which creates an identity nothing in `v̄` determines; `Base.Array.unsafeSet`, which writes; and `Base.Array.unsafeIndex`, which reads what those writes left. The third is the one most easily overlooked, because its fault is the conspicuous thing about it and the read is not.
+
+**This is about what can be guaranteed and not about what an implementation does.** `MayObserve` is a treatment and asserts nothing of the implementation behind it: one that happens to read and write nothing makes its program deterministic in fact, and nothing here contradicts that. What an absent directive removes is the ground for saying so, which is the whole purpose of a conservative default.
+
+**The price is plain and is worth stating rather than absorbing.** `Prelude`'s `mapArray` is written over `unsafeNew`, `unsafeSet`, and `unsafeIndex`, so **a program that maps over an array is outside what the properties below cover.** That is not a corner of the design; it is what makes settling the model below the next thing worth settling, rather than something to leave indefinitely.
+
+**Two ways are open and one has to be taken** ([Open Questions](../99-Open-Questions/01-Open-Questions.md)). A configuration may be given an observational store, with `δ_f` a transition over it, which defines the step and recovers every program at the price of putting state into the trusted core — the thing D25 exists to avoid. Or the relation may stay as it is and an entry that is not Core-modelled be a **trusted boundary**, described by conformance. **This document takes the second as a provisional position and not as the answer**: it is what lets the rest be written, and what it costs is written above rather than left to be discovered.
+
+**This is the ordinary case and not an exotic one**, which is why a style guide does not settle it. `Prelude`'s `mapArray` is written over `unsafeNew`, `unsafeSet`, and `unsafeIndex`, so a program that maps over an array reaches an observational entry whether or not its author has heard of one.
 
 ### Values
 
@@ -467,7 +563,10 @@ An unsaturated spine absorbs the argument its cursor calls for; a saturated fore
                                                     and cursorΣ(M.g, (ς, α)) is defined
 
   M.f ς                    →  δ_f( values(ς) )     when ς is saturated for M.f
+                                                    and G is Core-modelled
 ```
+
+**The premise on the second rule is not decoration.** `δ_f( values(ς) )` names the outcome the arguments determine, so the rule says nothing where they determine nothing (above). An implementation reading hidden state is one this rule gives no step to, and that is the whole of what "outside the relation" means. The premise is written here because this is the one rule where the difference bites; every rule is read against such a `G`.
 
 `[[κ̄]]` is absent from `α` because the whole kind vector is consumed at formation and a kind scheme is prenex, so no second kind instantiation can arise.
 
@@ -772,12 +871,13 @@ The two sides of the boundary carry different kinds of obligation, and conflatin
 | | Established by |
 | --- | --- |
 | A `foreign` type is honest about where effects may appear in its arrows | D23, checked syntactically ([Modules](../06-Modules/01-Modules.md)) |
-| A `foreign` implementation constructs a value and performs nothing | `Σ ⊨ G` condition (3) above, a conformance obligation on the backend |
+| A `foreign` implementation constructs a reified computation rather than running one, and performs no proper effect | `Σ ⊨ G` condition (3) above, a conformance obligation on the backend |
+| It has no observational effect either — no hidden read or write, and no fault | the same condition, **where the declaration asserts `#observ(none)`**. An entry carrying no directive owes none of this |
 | An `IO` value is executed, and executed once per execution of the value containing it | the runtime ABI |
 
 That `Js.Console.log s` defers its effect therefore rests on the second row, not the first. D23 makes the declaration incapable of *claiming* to be effect-free while sitting on an effectful arrow; it cannot make an implementation behave.
 
-Placing execution outside Core keeps the trusted core free of world state and keeps the reduction relation a closed, deterministic system. The cost is that the ABI must be specified separately before a program can be run end to end ([Open Questions](../99-Open-Questions/01-Open-Questions.md)).
+Placing execution outside Core keeps the trusted core free of **world** state: a file, a clock, and a console are reached by running an `IO` and by nothing else. What it no longer does on its own is leave the reduction relation closed and deterministic, an entry reading hidden state having no rule here at all; that is **guaranteed** of a program whose every `δ_f` is Core-modelled — a premise beside `Σ ⊨ G`, and which an unannotated entry may well be, `Base.String.codePointAt` among them — and for one whose foreigns are not it is unshown rather than false (above). The cost is that the ABI must be specified separately before a program can be run end to end ([Open Questions](../99-Open-Questions/01-Open-Questions.md)).
 
 ## Erasure
 
@@ -820,26 +920,26 @@ A variant value loses its `weaken` wrappers, so an erased `switchKey` dispatches
 
 The following are stated as the properties the implementation is expected to have. They are not proved here. [Implementation Plan](../01-Introduction/04-Implementation-Plan.md) describes how each becomes a property test.
 
-Every property assumes `Σ ⊨ G`. Without it the global environment may supply an ill-typed definition or a `δ_f` that returns the wrong thing, and no property of the reduction relation can hold.
+Every property assumes `Σ ⊨ G` **and that `G` is Core-modelled**, and the two do different work. Without conformance the global environment may supply an ill-typed definition or a `δ_f` that returns the wrong thing. Without the second the relation gives a saturated `foreign` no step at all, so there is no reduction sequence for a property to quantify over — which is why an environment holding `Base.Array.unsafeSet` is outside every statement below, and one holding `Base.String.codePointAt` is not (above).
 
-**Preservation.** If `Σ ⊨ G` and `Γ; Δ ⊢ e : τ ! ρ` and `G ⊢ e → e2` for a **term** `e2`, then `Γ; Δ ⊢ e2 : τ ! ρ`.
+**Preservation.** If `Σ ⊨ G`, `G` is Core-modelled, `Γ; Δ ⊢ e : τ ! ρ`, and `G ⊢ e → e2` for a **term** `e2`, then `Γ; Δ ⊢ e2 : τ ! ρ`.
 
 A step to `fault φ` is outside the statement: a fault carries no type.
 
 Both the type and the ambient row are preserved exactly. Widening is never discarded by a step: applying through an `openEff` moves it to `openEffC`, and `openEffC` is discharged only against a value, whose type does not mention the ambient row. Handling an operation likewise leaves the row unchanged, since the clause body is typed at the residual row that the `handle` already had.
 
-**Progress.** If `Σ ⊨ G` and `·; · ⊢ e : τ ! ()`, then `e` is a value, or there exists `e2` with `G ⊢ e → e2`, or `G ⊢ e → fault φ` for some fault φ.
+**Progress.** If `Σ ⊨ G`, `G` is Core-modelled, and `·; · ⊢ e : τ ! ()`, then `e` is a value, or there exists `e2` with `G ⊢ e → e2`, or `G ⊢ e → fault φ` for some fault φ.
 
 The third case is what admitting faults in condition (3) of `Σ ⊨ G` buys. A saturated `foreign` whose implementation fails would otherwise be neither a value nor a redex.
 
 Condition (1) of `Σ ⊨ G` is what linking establishes. Without it a global name has nothing to unfold to, and the property fails for a reason unrelated to the type system.
 
-**Effect safety.** If `Σ ⊨ G` and `·; · ⊢ e : τ ! ()`, then no reduction sequence from `e` reaches a term of the form `Ev_k[ perform k.op [σ̄] v ]` in which no handler of key `k` encloses the hole.
+**Effect safety.** If `Σ ⊨ G`, `G` is Core-modelled, and `·; · ⊢ e : τ ! ()`, then no reduction sequence from `e` reaches a term of the form `Ev_k[ perform k.op [σ̄] v ]` in which no handler of key `k` encloses the hole.
 
 The claim is **not** that operations are never performed. A term may be well typed at ambient row `()` and still perform operations internally: `handle (perform E.op v) with h` is such a term, and its reduction does reach the clause for `op`. What the empty row guarantees is that no operation **escapes**: every `perform` that runs is enclosed by a handler for its key, so evaluation never gets stuck on an unhandled operation.
 
 This is the property the whole design rests on, and it is the one that testing is least likely to reveal. A violation does not crash: it produces a program that silently performs effects it declared it would not. D7 places effect rows on arrows, D20 keeps `IO` out of the effect world, and D23 forbids effectful `foreign` arrows, all in service of this single statement. Note that D23 alone is not sufficient: a conforming `δ_f`, condition (3) of `Σ ⊨ G`, is equally required, since `handle` intercepts only `perform` while a `foreign` application calls its implementation directly.
 
-**Erasure.** If `G ⊢ e → e2` then `⌊e⌋` reduces to `⌊e2⌋` in zero or one steps under the erased relation, the zero-step case being a step that only introduced or discharged a coercion. If `G ⊢ e → fault φ` then `⌊e⌋` reduces to the same fault `φ`; an erased evaluator and a typed one fail identically. The value restriction is what makes this hold: the body of a type or constraint abstraction is already a value, so erasing the abstraction cannot move evaluation to a different point.
+**Erasure.** If `Σ ⊨ G`, `G` is Core-modelled, and `G ⊢ e → e2`, then `⌊e⌋` reduces to `⌊e2⌋` in zero or one steps under the erased relation, the zero-step case being a step that only introduced or discharged a coercion. If `G ⊢ e → fault φ` then `⌊e⌋` reduces to the same fault `φ`; an erased evaluator and a typed one fail identically. The value restriction is what makes this hold: the body of a type or constraint abstraction is already a value, so erasing the abstraction cannot move evaluation to a different point.
 
 **Non-conformance of the v0.1 backends.** The reduction rule for a `full` clause places no bound on applications of `k_i`, so a term applying it twice is well typed and has a defined reduction sequence. The v0.1 JavaScript and Wasm backends do not reproduce that sequence; they raise a run-time error at the second application. This is the precise content of the soundness gap recorded above.

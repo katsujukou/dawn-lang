@@ -489,7 +489,7 @@ Three stages then divide the work, and none of them duplicates another.
 | --- | --- |
 | type checking | the declared type is well-kinded and every arrow is pure (D23) |
 | target validation | the backend manifest records every entry the program uses — each `Base` ABI entry, through a profile it claims or beyond them, and each target ABI entry — and every target root the program imports is the selected target's |
-| linking | `Σ ⊨ G` condition (3): each `δ_f` returns what it claims, performs nothing observable to Core, applies no Stella function value, and terminates ([Semantics](../03-Typed-Core/06-Semantics.md)) |
+| linking | `Σ ⊨ G` condition (3): each `δ_f` returns what it claims, performs no proper effect and runs no reified computation it constructs, applies no Stella function value, terminates, and has no observational effect — faulting among them — where its declaration asserts `#observ(none)` ([Semantics](../03-Typed-Core/06-Semantics.md)) |
 
 **An unsupported entry is rejected at target validation, not at run time.** A
 program naming an ABI entry the chosen backend does not implement fails to
@@ -501,15 +501,35 @@ implements is a separate question, settled at the same stage.
 ### What the ABI specification must fix per ABI entry
 
 - **Observable meaning**, in terms that name no backend
-- **Whether it may fault**, and on which inputs ([Semantics](../03-Typed-Core/06-Semantics.md))
+- **Whether it may fault**, and on which inputs ([Semantics](../03-Typed-Core/06-Semantics.md)). This is what a reader of the entry needs; for an optimizer it is not a fact of its own, faulting being one of the things the observational class is defined by, and the bullet below is what carries it there
 - **Whether it is an operation, and the code it carries where one is.** An
   operation is named by a code rather than by its entry in a `.dmo`, and that code
   is the manifest's to fix for the life of a version
   ([Encoding](../05-Backend/02-Encoding.md))
-- **Whether it returns `IO`.** An entry whose effect is observable from outside
-  returns `IO`, mutable allocation included: a `Base.Array.unsafeNew` creating a
-  mutable array returns one. An allocation whose mutation no one can observe may
-  be pure
+- **Whether it returns `IO`.** An entry reaching the **world** returns `IO` — a
+  file, a clock, a console, and anything else that outlives the values the program
+  itself holds. An entry that stays within those values need not: it may be pure in
+  its type and carry an **observational effect** instead. What it may touch is
+  **state its arguments reach, and state it creates during the call that is reached
+  only through what it returns**. The second half is `Base.Array.unsafeNew`, whose
+  array is reachable from no argument — it is fresh, and the call hands it back —
+  and without it the pure interface a portable `mapArray` is written over could not
+  exist. The division is between reaching the world and reaching the program's own
+  values, and **not** between mutating and not mutating
+  ([Semantics](../03-Typed-Core/06-Semantics.md))
+- **The division is a criterion and not a model.** Neither kind of state appears in
+  Core's reduction relation, which records no store, so what an observational entry
+  does lies outside what that relation describes and rests on conformance
+  ([Semantics](../03-Typed-Core/06-Semantics.md)). Whether to write such a store
+  into the relation is open
+  ([Open Questions](../99-Open-Questions/01-Open-Questions.md))
+- **Whether it asserts `#observ(none)`.** An entry with no observational effect says
+  so at its declaration, and one that says nothing is read as one that may observe
+  ([Modules](01-Modules.md)). The assertion is strong and covers faulting, so an
+  entry the specification fixes as faulting on some input cannot carry it, and one
+  whose result depends on its arguments alone and which never faults may. Together
+  with `returnsIO`, read off the result type, this is the whole of what an optimizer
+  is given ([Interface](../05-Backend/03-Interface.md))
 
 **A `Base` signature ranges over `Prim` types and portable manifest intrinsics.** A standard
 library type such as `Maybe` standing in one would fix that type's
@@ -525,12 +545,20 @@ than through its foreign table, and whatever executes it carries the entry out
 itself ([Encoding](../05-Backend/02-Encoding.md)). Their meaning is fixed here, in
 terms that name no backend, and so is which of them may fault.
 
-| Entry | Meaning | Faults |
-| --- | --- | --- |
-| `Base.Int.add`, `Base.Int.sub` | addition and subtraction **modulo 2³², the result read as a 32-bit signed integer** (D37) | never |
-| `Base.String.length` | the number of Unicode scalar values in the string (D27) | never |
-| `Base.String.codePointAt` | the scalar value at a **scalar index**, counting from zero | on an index outside the string |
-| `Base.Array.unsafeIndex` | the element at an index | on an index outside the array |
+| Entry | Meaning | Faults | `#observ(none)` |
+| --- | --- | --- | --- |
+| `Base.Int.add`, `Base.Int.sub` | addition and subtraction **modulo 2³², the result read as a 32-bit signed integer** (D37) | never | yes |
+| `Base.String.length` | the number of Unicode scalar values in the string (D27) | never | yes |
+| `Base.String.codePointAt` | the scalar value at a **scalar index**, counting from zero | on an index outside the string | no |
+| `Base.Array.unsafeIndex` | the element at an index | on an index outside the array | no |
+
+**The last column follows from the one before it and from nothing else here.** Each
+of these five entries depends on its arguments alone and mutates nothing, so what
+decides the annotation is whether the specification fixes the entry as faulting: the
+three that never fault carry it, and the two that do cannot
+([Modules](01-Modules.md)). An indexing entry is therefore a barrier to an
+optimizer, which is the price of its being partial, and a total wrapper written over
+it in a portable library is an ordinary Stella function with no such standing.
 
 **Wrapping is what every backend owes**, not what each host happens to do: one on a
 host that traps wraps instead, and one on a host that wraps does not check. Either

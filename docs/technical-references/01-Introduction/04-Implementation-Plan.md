@@ -96,6 +96,7 @@ This requires a Core evaluator, which step 4 needs regardless. Type checking a h
 
 ```text
 assume Σ ⊨ G
+assume G is Core-modelled
 for each generated e with ·;· ⊢ e : τ ! ρ:
     while e is not a value and fuel remains:
         c = step(G, e)
@@ -106,7 +107,7 @@ for each generated e with ·;· ⊢ e : τ ! ρ:
 
 A step to a fault ends the run rather than failing the test: a fault carries no type, so there is nothing to re-check.
 
-Both the type and the ambient row are checked for equality. A generator that produces `G` must satisfy `Σ ⊨ G`; supplying an ill-typed global definition or a non-conforming `δ_f` invalidates the property rather than testing it.
+Both the type and the ambient row are checked for equality. A generator that produces `G` must satisfy **both** premises — `Σ ⊨ G` and `G` Core-modelled — and supplying an ill-typed global definition, a non-conforming `δ_f`, or one whose call does anything beyond returning an outcome its arguments fix invalidates the property rather than testing it.
 
 The type checker is already required for step 3, so the assertion costs nothing to write. What takes work is the generator: producing well-typed terms rather than arbitrary ones. Generating type-directed — choosing a type first, then building a term of it — is the practical approach, and it doubles as a source of test cases for the checker itself.
 
@@ -124,9 +125,13 @@ Extending the generator to `foreign` declarations is worthwhile once the FFI sur
 
 **Machine-checked or paper proofs are deferred.** They become worth revisiting if the work is to be published, or if one subsystem keeps producing subtle bugs that property testing does not catch.
 
-**Conformance of the global environment** is a premise of every property above, not something they establish. A test harness supplies `G` and must therefore guarantee `Σ ⊨ G` itself: global definitions are well-typed values, and each `δ_f` returns either a value of the instantiated result type — the one the spine judgement gives — or a permitted fault, performs nothing observable to Core, applies no Stella function value, and terminates.
+**Conformance of the global environment** is a premise of every property above, not something they establish. A test harness supplies `G` and must therefore guarantee `Σ ⊨ G` itself: global definitions are well-typed values, and each `δ_f` returns either a value of the instantiated result type — the one the spine judgement gives — or a permitted fault, performs no proper effect and runs no reified computation it constructs, applies no Stella function value, terminates, and has no observational effect — faulting among them — where the declaration asserts `#observ(none)` ([Semantics](../03-Typed-Core/06-Semantics.md)).
 
-For generated `foreign` declarations this is easy, since the harness writes `δ_f` and can make it a pure total function that never faults. For real backends it is a conformance obligation, and a backend test suite should check it directly rather than relying on the property tests above to expose a violation.
+**The separate Core-modelled premise is the other thing the generator has to respect, and it is the easier of the two to miss.** It is not a clause of `Σ ⊨ G` and is not implied by it: it asks that returning an outcome the arguments fix be the **whole** of what a saturated call does, so no hidden read, no write, and no identity the arguments do not determine. A harness whose `δ_f` reads a counter or a clock, or writes to a cell the next call reads, invalidates the property rather than testing it, and it does so silently — the run completes and the assertion passes. **Faulting is not what the premise excludes**: a `δ_f` that faults on an argument it always faults on satisfies it, which is what keeps `Base.String.codePointAt` and the fault branch of progress inside the properties. A generator that produces a hidden read or a write is producing a term the relation gives no step to.
+
+For generated `foreign` declarations this is easy, since the harness writes `δ_f` and can make it a pure total function that never faults.
+
+**The two premises are owed by different parties, and a backend test suite should not conflate them.** `Σ ⊨ G` is a conformance obligation on a real backend, and a suite should check it directly rather than relying on the property tests above to expose a violation. Being Core-modelled is **not** such an obligation: it is the condition under which the reference semantics applies, and a backend is expected to supply entries that fail it — `Base.Array.unsafeSet` among them ([Semantics](../03-Typed-Core/06-Semantics.md), D41). What follows for a suite is that those entries are outside what the properties cover and need tests of their own, not that supplying them is a defect.
 
 ## A catalogue of regression tests
 

@@ -10,7 +10,7 @@ module ::= module M where
 
 decl ::= data    T forall k̄. (ā : κ̄) = Ctor_1 τ̄1 | … | Ctor_n τ̄n   [newtype]
        | effect  E (ā : κ̄) where op1 : σ1 ; …
-       | foreign f : σκ
+       | foreign [#observ(none)] f : σκ
        | nonrec  x : σκ = e
        | rec     { x1 : σκ1 = v1 ; … }
        | @[ attr ] decl
@@ -103,10 +103,26 @@ The `newtype` flag does not affect semantics; it tells the backend that the repr
 ## Foreign declarations
 
 ```text
-foreign f : σκ
+foreign [#observ(none)] f : σκ
 ```
 
 The kind scheme is normally empty. The Core type checker does not examine a `foreign`'s implementation; it trusts the declared type.
+
+### `#observ(none)` asserts the absence of an observational effect
+
+An effect belongs to one of three classes — **proper**, which a row carries and a handler deals with; **reified**, a computation a classical monad has made into a value, `IO` among them; and **observational**, whatever a saturated application may do besides returning its value, which appears in no type and which no handler deals with ([Semantics](../03-Typed-Core/06-Semantics.md)). The classes are not exclusive, and the third is what a mutable array behind a pure interface has: `Base.Array.unsafeSet` writes, and its declared type says `Unit`.
+
+**`#observ(none)` asserts that a saturated application has no observational effect, and the assertion is strong.** Such an application reads and writes no hidden state, **produces no fault**, creates no identity anything can observe, performs no external effect where it is applied, and returns observationally equivalent results for observationally equivalent arguments — beside terminating, applying no Stella function value, and throwing nothing, which every entry owes in any case. **A declaration carrying no directive is read as one that may observe.** There are two rules and no third.
+
+**Faulting is not a separate axis.** An entry may fault exactly when it does not carry the annotation, so `Base.String.codePointAt` faulting outside its range is an outcome its declaration admits, while a `#observ(none)` entry that faults is an implementation in breach. Grading observational behaviour more finely buys nothing: what lies past this boundary cannot be characterized, which is why Stella reaches for FFI sparingly to begin with (D19).
+
+**What it says nothing about is the reified class.** Returning `IO` is read off the result type, and the two compose: `#observ(none) foreign log : String -> IO Unit` performs nothing when applied and merely constructs an action.
+
+**One declaration, and two routes to an implementation.** Whether the machine supplies the implementation or a host does is settled after lowering — an operation in the first case and a foreign call in the second ([Prim and Base](02-Prim-and-Base.md)) — and the surface knows neither. The declaration is one form, and its type, its arity, and its observational contract are common to both routes. **Which route a name takes decides whose bug a violation is, and nothing else**: a `#observ(none)` entry the host implements that faults is a defect in that implementation, and one the machine implements that faults is a defect in the machine.
+
+**The Core type checker records the annotation and verifies nothing of it.** There is nothing here to verify: an implementation is not examined, its type being trusted. `newtype`'s shape is not the parallel case — that flag makes a claim about the declaration itself, which is why the shape *is* checked — while this one claims a property of code the checker never sees, so it stands with the rest of what `Σ ⊨ G` obliges an implementer to ([Semantics](../03-Typed-Core/06-Semantics.md)). Nor can a machine check it while running: hidden mutation was never observable from the outside, so a fault reaching Steam cannot be told from a permitted one. Conformance tests and the implementer are what carry it.
+
+Writing it is what lets an optimizer drop, share, or move a call, and the fact travels there through the interface file rather than through a `.dmo` ([Interface](../05-Backend/03-Interface.md)).
 
 ### Every arrow in a `foreign` type is pure
 
@@ -269,7 +285,10 @@ Declarations extend the signature, so the judgement makes `Σ` explicit.
 
   σκ = forall k̄. σ    ·, k̄ ⊢ σ : Type    every arrow of σ is pure (D23)
   ──────────────────────────────────────────────────────────────────
-  Σ ⊢ foreign f : σκ  ⊣  Σ, M.f : σκ
+  Σ ⊢ foreign [#observ(none)] f : σκ  ⊣  Σ, M.f : σκ [#observ(none)]
+
+     the directive is recorded and nothing of it is checked; absent, the
+     entry is read as one that may observe
 
   Σ ⊢ decl ⊣ Σ'
   ─────────────────────────      attributes do not affect type checking

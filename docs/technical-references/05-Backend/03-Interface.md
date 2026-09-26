@@ -111,6 +111,75 @@ serialization of Core types, which is open
 optimization will want, the bodies eligible for inlining among them. Until then a
 `.dmi` is a header and one table.
 
+**What optimization will want first is an effect summary per exported foreign.** An
+entry pure in its type may still write to memory, and may still fault, so a call of
+it whose result nothing reads is not dead — and the type says so nowhere, which is
+why the fact has to cross the boundary with the module that declares it. This file
+is where it belongs rather than a `.dmo`: an optimizer reads it before a `.dmo`
+exists, and an interpreter, which performs no optimization, would never read it
+([Abstract Machine](../07-Runtime/01-Abstract-Machine.md)).
+
+**The summary is two fields, and neither is read off the other.**
+
+```text
+ForeignSummary = { observational : None | MayObserve
+                 , returnsIO     : Boolean }
+```
+
+| Field | Where it comes from |
+| --- | --- |
+| `observational` | `#observ(none)` written on the declaration gives `None`; nothing written gives `MayObserve` ([Modules](../06-Modules/01-Modules.md)) |
+| `returnsIO` | derived from the result type, and stated nowhere |
+
+**Faulting is inside `observational` and is not a field of its own.** Dropping a
+call that would have faulted removes the fault and reordering two changes which is
+taken, so faulting is exactly what the observational class is defined by
+([Semantics](../03-Typed-Core/06-Semantics.md)). `#observ(none)` therefore asserts
+that the entry does not fault, among the rest of what it asserts, and an entry
+without the annotation may fault as it may do anything else.
+
+Grading more finely was considered and rejected. What lies past this boundary cannot
+be characterized, and a summary with a field per kind of misbehaviour would describe
+what one implementation happens to do rather than what a declaration promises. Two
+values is what an optimizer can act on, and the sparing use of FFI is what makes two
+enough (D19).
+
+**What an optimizer may do with each.**
+
+| `observational` | What is permitted |
+| --- | --- |
+| `None` | the call is an ordinary pure computation: dead code elimination, common subexpression elimination, duplication, and reordering, each subject to the ordinary dependency on its result |
+| `MayObserve` | the call is preserved, is neither duplicated nor merged with another, and **keeps its position in the original order** |
+
+**A `MayObserve` call is a full sequencing barrier, and the weaker rule of not
+crossing another observational call is not enough.** Two cases show why. A
+`unsafeSet` moved across a `perform` changes what a handler reading the same array
+sees, and a `perform` is not an observational call. A faulting call moved across a
+computation that diverges, or across any other transfer of control, changes whether
+the fault is reached at all. Neither of the things being crossed is one this summary
+describes, so a rule written in terms of this summary alone cannot license the move.
+
+**Keeping the position is the contract to start from, and relaxing it takes a
+separate argument.** A move is admissible where what stands between is shown to
+terminate, to transfer control nowhere, and to observe no state the call touches —
+and none of those three is read off a summary. Treating them as facts to be
+established, rather than as the default, is what keeps a first optimizer from being
+wrong in a way no test finds.
+
+**`returnsIO` is orthogonal to both rows.** An entry may be `None` and return `IO`,
+which is the ordinary shape of a native leaf: nothing happens where it is applied,
+and the action it returns is run later by the drive loop
+([Abstract Machine](../07-Runtime/01-Abstract-Machine.md)).
+
+**The route is directive, field, summary.** `#observ(none)` is written at the
+declaration; declaration checking records it on the entry in `Σ` and verifies
+nothing of it, there being nothing there to verify
+([Semantics](../03-Typed-Core/06-Semantics.md)); and this file is where the recorded
+fact leaves the module. **The route the implementation takes is not in the summary**:
+whether a call lowers to an operation the machine carries out or to a host foreign
+is decided afterwards, and an optimizer reads the summary without knowing which
+([Prim and Base](../06-Modules/02-Prim-and-Base.md)).
+
 ## The bytes
 
 The primitives are the ones [Encoding](02-Encoding.md) fixes: a `uvar` is minimal
